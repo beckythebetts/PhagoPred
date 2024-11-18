@@ -5,7 +5,7 @@ import numpy as np
 from PIL import Image
 from pathlib import Path
 
-import SETTINGS
+import PhagoPred.SETTINGS as SETTINGS
 import view_frame
 import utils
 

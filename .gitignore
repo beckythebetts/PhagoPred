@@ -8,5 +8,6 @@
 /dataSources.local.xml
 /PhagoPred/Datsets
 /src
-/cellpose_segmentation/models
+/PhagoPred/cellpose_segmentation/models
+/.vscode
 

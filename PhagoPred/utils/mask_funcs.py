@@ -8,8 +8,9 @@ import sys
 from PhagoPred import SETTINGS
 
 
-def get_centre(mask):
-    x_mesh_grid, y_mesh_grid = np.meshgrid(np.arange(mask.shape[0]), np.arange(mask.shape[1]))
+def get_centre(mask, x_mesh_grid=None, y_mesh_grid=None):
+    if x_mesh_grid is None or y_mesh_grid is None:
+        x_mesh_grid, y_mesh_grid = np.meshgrid(np.arange(mask.shape[0]), np.arange(mask.shape[1]))
     area = np.sum(mask)
     x_centre = np.sum(mask*x_mesh_grid)/area
     y_centre = np.sum(mask*y_mesh_grid)/area
