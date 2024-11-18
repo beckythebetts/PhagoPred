@@ -6,6 +6,7 @@
 # Datasource local storage ignored files
 /dataSources/
 /dataSources.local.xml
-/datasets
+/PhagoPred/Datsets
+/src
 /cellpose_segmentation/models
 
