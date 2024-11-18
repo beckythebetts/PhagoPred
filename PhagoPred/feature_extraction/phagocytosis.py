@@ -11,7 +11,6 @@ from PhagoPred.utils import mask_funcs
 from PhagoPred.tracking.nearest_neighbour_tracking import Track, NearestNeighbourTracking
 
 class PhagocyticEvent:
-
     def __init__(self, frames, pathogen_indices):
         self.frames = np.array(list(frames))
         self.pathogen_indices = np.array(list(pathogen_indices))
