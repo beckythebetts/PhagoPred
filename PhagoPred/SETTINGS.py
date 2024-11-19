@@ -2,14 +2,15 @@ from pathlib import Path
 import h5py
 
 # ******* GENERAL *******
-DATASET = Path(r'C:\Users\php23rjb\Downloads\temp') / 'filter01.h5'
+DATASET = Path('PhagoPred')/'Datasets'/'filter01_short (copy).h5'
 MASK_RCNN_MODEL = Path("Models") / 'filter02'
-CELLPOSE_MODEL = Path("cellpose_segmentation") / 'models' / ''
+CELLPOSE_MODEL = Path("PhagoPred") / 'cellpose_segmentation' / 'Models' / '5ims'
 CLASSES = {'phase': 'Amoeba', 'epi': 'Yeast'}
 REMOVE_EDGE_CELLS = True
 with h5py.File(DATASET, 'r') as f:
     NUM_FRAMES = f['Images'].attrs['Number of frames']
     IMAGE_SIZE = f['Images'].attrs['Image size / pixels']
+    TIME_STEP = f['Images'].attrs['Time interval / s']
 #IMAGE_SIZE = [2048, 2048]
 
 # ******* EPI THRESHOLDING *******

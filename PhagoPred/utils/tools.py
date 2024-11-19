@@ -184,7 +184,7 @@ if __name__ == '__main__':
     # test_list = [0, 1, 1, 1, 2, 5, 7, 8, 12, 54, 76, 79, 80]
     # print(split_list_into_sequences(test_list))
     # print(split_list_into_sequences(test_list, return_indices=True))
-    copy_hdf5_groups(src_filename=SETTINGS.DATASET, dest_filename=Path('PhagoPred')/'Datasets'/'04ims.h5', groups_to_copy=['Images'])
+    make_short_test_copy(orig_file=Path('PhagoPred')/'Datasets'/'filter01.h5', copy_file=Path('PhagoPred')/'Datasets'/'filter01_short.h5')
     # array = read_tiff(Path('03') / 't0000_mask.tif')
     # print(np.shape(array))
     # save_tiff(array, Path('03') / 't0000_mask_test.tif')
