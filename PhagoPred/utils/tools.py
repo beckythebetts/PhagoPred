@@ -160,6 +160,10 @@ def append_hdf5(f, array):
     f.resize((len(f)+len(array),))
     f[-len(array):-1] = array
 
+def get_features_ds(f, feature):
+    column_idx = list(f.attrs['features']).index(feature)
+    return f[:, :, column_idx]
+    
 
 # def append_hdf5(f, array):
 #     """
@@ -184,7 +188,8 @@ if __name__ == '__main__':
     # test_list = [0, 1, 1, 1, 2, 5, 7, 8, 12, 54, 76, 79, 80]
     # print(split_list_into_sequences(test_list))
     # print(split_list_into_sequences(test_list, return_indices=True))
-    make_short_test_copy(orig_file=Path('PhagoPred')/'Datasets'/'filter01.h5', copy_file=Path('PhagoPred')/'Datasets'/'filter01_short.h5')
+    #make_short_test_copy(orig_file=Path('PhagoPred')/'Datasets'/'filter01.h5', copy_file=Path('PhagoPred')/'Datasets'/'filter01_short.h5')
+    copy_hdf5_groups(Path(r'C:\Users\php23rjb\Documents\PhagoPred\PhagoPred\Datasets') / 'filter01.h5', Path(r'C:\Users\php23rjb\Documents\PhagoPred\PhagoPred\Datasets') / 'filter01_ims.h5', ['Images'])
     # array = read_tiff(Path('03') / 't0000_mask.tif')
     # print(np.shape(array))
     # save_tiff(array, Path('03') / 't0000_mask_test.tif')

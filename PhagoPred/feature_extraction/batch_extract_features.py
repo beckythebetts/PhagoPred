@@ -8,7 +8,8 @@ def get_phagocytosis(file=SETTINGS.DATASET):
     with h5py.File(file, 'r') as f:
         epi = tools.get_masks(f, 'Epi')
         phase = tools.get_masks(f, 'Phase')
-    overlap = (epi>0) &
+    overlap = (epi>0) & (phase>0)
+    
 
     phago_cells = np.unique(phase[overlap])
     print(phago_cells)

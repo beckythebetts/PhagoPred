@@ -14,14 +14,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def get_tracklets_np(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10):
     with h5py.File(file, 'r+') as f:
         print('\nTracking...')
-        cells_group = f.create_group(f'Cells/{mode}')
-        cells_group.attrs['minimum distance'] = min_dist_threshold
-        dtype = np.dtype([('frame', 'f4'), 
-                          ('x', 'f4'),
-                          ('y', 'f4')])
+        cell_ds = f.create_dataset(f'Cells/{mode}', shape=(0,0,2), maxshape=(None,None,None), dtype=np.float32)
+        cell_ds.attrs['minimum distance'] = min_dist_threshold
+        cell_ds.attrs['features'] = ['x', 'y']
         x_mesh_grid, y_mesh_grid = np.meshgrid(np.arange(SETTINGS.IMAGE_SIZE[0]), np.arange(SETTINGS.IMAGE_SIZE[1]))
         x_mesh_grid, y_mesh_grid = np.expand_dims(x_mesh_grid, 2), np.expand_dims(y_mesh_grid, 2)
-        for i, name in enumerate(list(f['Segmentations'][mode].keys())):
+        for i, name in enumerate(list(f['Segmentations'][mode].keys())[:10]):
             sys.stdout.write(f'\rFrame {i + 1}/{SETTINGS.NUM_FRAMES}')
             sys.stdout.flush()
             mask = f['Segmentations'][mode][name][:]
@@ -53,24 +51,28 @@ def get_tracklets_np(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10):
                 # update instance dataframe with pixel mapping
                 current_instances.loc[:, 'idx'] = lut[np.array(current_instances.loc[:, 'idx']).astype(int)]
             # create dataset for each cell with centres info
+            cell_idxs = current_instances.loc[:, 'idx']
 
+            num_new_cells = max(np.max(cell_idxs), cell_ds.shape[1]) - cell_ds.shape[1]
+            if num_new_cells > 0:
+                cell_ds.resize((cell_ds.shape[0]+1, cell_ds.shape[1]+num_new_cells, cell_ds.shape[2]))
+                cell_ds[:,-int(num_new_cells):] = np.full((cell_ds.shape[0], int(num_new_cells), cell_ds.shape[2]), np.nan)
+
+            new_row = np.full((1, cell_ds.shape[1], cell_ds.shape[2]), np.nan)
             for _, instance in current_instances.iterrows():
-                dataset_name = f'{int(instance["idx"]):04}'
-                if dataset_name not in cells_group:
-                    cells_group.create_dataset(dataset_name, shape=(0,), dtype=dtype, maxshape=(None,))
-                cell_ds = cells_group[dataset_name]
-                cell_ds.resize((cell_ds.shape[0]+1, ))
-                cell_ds[-1] = (i, instance['x'], instance['y'])
+                new_row[:, int(instance['idx'])-1] = [instance['x'], instance['y']]
+
+            cell_ds[-1] = new_row
+            old_instances = current_instances
+
             old_instances = current_instances
 
 def get_tracklets_torch(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10, cell_batch_size=50):
     with h5py.File(file, 'r+') as f:
         print('\nTracking...')
-        cells_group = f.create_group(f'Cells/{mode}')
-        cells_group.attrs['minimum distance'] = min_dist_threshold
-        dtype = np.dtype([('frame', 'f4'), 
-                          ('x', 'f4'),
-                          ('y', 'f4')])
+        cell_ds = f.create_dataset(f'Cells/{mode}', shape=(0,0,2), maxshape=(None,None,None), dtype=np.float32)
+        cell_ds.attrs['minimum distance'] = min_dist_threshold
+        cell_ds.attrs['features'] = ['x', 'y']
         x_mesh_grid, y_mesh_grid = torch.meshgrid(torch.arange(SETTINGS.IMAGE_SIZE[0]).to(device), torch.arange(SETTINGS.IMAGE_SIZE[1]).to(device), indexing='ij')
         x_mesh_grid, y_mesh_grid = x_mesh_grid.unsqueeze(2), y_mesh_grid.unsqueeze(2)
         for i, name in enumerate(list(f['Segmentations'][mode].keys())):
@@ -132,68 +134,99 @@ def get_tracklets_torch(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10
                 # update instance dataframe with pixel mapping
                 current_instances.loc[:, 'idx'] = lut[np.array(current_instances.loc[:, 'idx']).astype(int)]
             # create dataset for each cell with centres info
+            cell_idxs = current_instances.loc[:, 'idx']
 
+            num_new_cells = max(np.max(cell_idxs), cell_ds.shape[1]) - cell_ds.shape[1]
+            if num_new_cells > 0:
+                cell_ds.resize((cell_ds.shape[0]+1, cell_ds.shape[1]+num_new_cells, cell_ds.shape[2]))
+                cell_ds[:,-int(num_new_cells):] = np.full((cell_ds.shape[0], int(num_new_cells), cell_ds.shape[2]), np.nan)
+
+            new_row = np.full((1, cell_ds.shape[1], cell_ds.shape[2]), np.nan)
             for _, instance in current_instances.iterrows():
-                dataset_name = f'{int(instance["idx"]):04}'
-                if dataset_name not in cells_group:
-                    cells_group.create_dataset(dataset_name, shape=(0,), dtype=dtype, maxshape=(None,))
-                cell_ds = cells_group[dataset_name]
-                cell_ds.resize((cell_ds.shape[0]+1, ))
-                cell_ds[-1] = (i, instance['x'], instance['y'])
+                new_row[:, int(instance['idx'])-1] = [instance['x'], instance['y']]
+
+            cell_ds[-1] = new_row
             old_instances = current_instances
 
+            old_instances = current_instances
+
+def get_start_end_frames(f, mode, get_coords=True):
+    x_coords = tools.get_features_ds(f['Cells'][mode], 'x')
+    y_coords = tools.get_features_ds(f['Cells'][mode], 'y')
+    coords = np.stack((x_coords, y_coords), axis=2)
+
+    not_nan = ~np.isnan(coords[:,:,0])
+
+    start_frames = np.argmax(not_nan, axis=0)
+    end_frames = len(not_nan) - 1 - np.argmax(not_nan[::-1], axis=0)
+    if get_coords:
+        start_coords = coords[start_frames, np.arange(len(start_frames))]
+        end_coords = coords[end_frames, np.arange(len(end_frames))]
+        return start_frames, start_coords, end_frames, end_coords
+    else:
+        return start_frames, end_frames
+    
 def join_tracklets(file=SETTINGS.DATASET, mode='Epi', time_threshold=4, distance_threshold=10, min_track_length=30):
     with h5py.File(file, 'r+') as f:
         print('\nJoining Tracklets...')
         f['Cells'][mode].attrs['minimum time gap'] = time_threshold
         f['Cells'][mode].attrs['minimum track length'] = min_track_length
-        cell_idxs = np.array(list(f['Cells'][mode].keys()))
-        start_coords = pd.DataFrame([list(f['Cells'][mode][cell_idx][0]) for cell_idx in cell_idxs], index=cell_idxs, columns=['frame', 'x', 'y'])
-        end_coords = pd.DataFrame([list(f['Cells'][mode][cell_idx][-1]) for cell_idx in cell_idxs], index=cell_idxs, columns=['frame', 'x', 'y'])
-        dist_weights = np.linalg.norm(np.expand_dims(start_coords.loc[:, 'x':'y'].values, 0) - np.expand_dims(end_coords.loc[:, 'x':'y'].values, 1), axis=2)
-        time_weights = np.expand_dims(start_coords.loc[:, 'frame'].values, 0) - np.expand_dims(end_coords.loc[:, 'frame'].values, 1)
+        all_cell_idxs = np.arange(len(f['Cells'][mode][0][:]))
+
+        start_frames, start_coords, end_frames, end_coords = get_start_end_frames(f, mode)
+
+        dist_weights = np.linalg.norm(np.expand_dims(start_coords, 0) - np.expand_dims(end_coords, 1), axis=2)
+        time_weights = np.expand_dims(start_frames, 0) - np.expand_dims(end_frames, 1)
+
         weights = np.where((time_weights>0) & (time_weights<time_threshold) & (dist_weights<distance_threshold), dist_weights, np.inf)
         potential_idxs_0, potential_idxs_1 = ~np.all(np.isinf(weights), axis=1), ~np.all(np.isinf(weights), axis=0)
-        potential_cells_0, potential_cells_1 = cell_idxs[potential_idxs_0], cell_idxs[potential_idxs_1]
+
         potential_dist_weights = dist_weights[potential_idxs_0][:, potential_idxs_1]
         potential_time_weights = time_weights[potential_idxs_0][:, potential_idxs_1]
+
         old, new = linear_sum_assignment(potential_dist_weights)
         valid_pairs = (potential_dist_weights[old, new] < distance_threshold) & (potential_time_weights[old, new] < time_threshold) & (potential_time_weights[old, new] > 0)
+
         old, new = old[valid_pairs], new[valid_pairs]
-        cells_0 = potential_cells_0[old]
-        cells_1 = potential_cells_1[new]
+        cells_0 = all_cell_idxs[potential_idxs_0][old]
+        cells_1 = all_cell_idxs[potential_idxs_1][new]
+
         # join new_cells to old_cells, and adjust segmentations. Will need to repack hdf5 after, to clear space from unused datasets. Must also update cells0, cells1 list wiith new idxs.
         queue = np.column_stack((cells_0, cells_1))
-        for cell_0, cell_1 in queue:
+        for i, (cell_0, cell_1) in enumerate(queue):
+            sys.stdout.write(f'\rProgress {i + 1}/{len(queue)}')
+            sys.stdout.flush()
             # update Cells group
-            cell_0_ds, cell_1_ds = f['Cells'][mode][cell_0], f['Cells'][mode][cell_1]
-            cell_0_ds.resize((len(cell_0_ds) + len(cell_1_ds), ))
-            cell_0_ds[-len(cell_1_ds):] = cell_1_ds[:]
+            cell_1_ds = f['Cells'][mode][start_frames[cell_1]:, cell_1]
+            f['Cells'][mode][-len(cell_1_ds):, cell_0] = cell_1_ds
             # update queue
             queue[:, 0][queue[:, 0]==cell_1] = cell_0
             # update masks
-            for frame in cell_1_ds['frame'][:]:
+            for frame in range(start_frames[cell_1], end_frames[cell_1]+1):
                 mask = f['Segmentations'][mode][f'{int(frame):04}'][:]
-                mask[mask==int(cell_1)] = cell_0
+                mask[mask==cell_1+1] = cell_0+1
                 f['Segmentations'][mode][f'{int(frame):04}'][...] = mask
-            del f['Cells'][mode][cell_1]
+            f['Cells'][mode][:, cell_1] = np.full(f['Cells'][mode][:, cell_1].shape, np.nan)
 
-        for cell in f['Cells'][mode].keys():
-            if len(f['Cells'][mode][cell][:]) < min_track_length:
-                for frame in f['Cells'][mode][cell]['frame'][:]:
+        print('\nRemoving short tracks...')
+        start_frames, end_frames = get_start_end_frames(f, mode, get_coords=False)
+        track_lengths = end_frames - start_frames
+        for cell_idx in range(f['Cells'][mode].shape[1]):
+            if track_lengths[cell_idx] < min_track_length:
+                f['Cells'][mode][:, cell_idx] = np.full(f['Cells'][mode][:, cell_idx].shape, np.nan)
+                for frame in range(start_frames[cell_idx], end_frames[cell_idx]+1):
                     mask = f['Segmentations'][mode][f'{int(frame):04}'][:]
-                    mask[mask==int(cell)] = 0
+                    mask[mask==cell_idx+1] = 0
                     f['Segmentations'][mode][f'{int(frame):04}'][...] = mask
-                del f['Cells'][mode][cell]
 
 def main():
     for mode in ['Phase', 'Epi']:
         print('\nMode: ', mode)
-        if device=='cpu':
+        if device.type=='cpu':
             get_tracklets_np(mode=mode)
         else:
             get_tracklets_torch(mode=mode)
-        join_tracklets(mode='Phase')
+        join_tracklets(mode=mode)
     print('\nRepacking HDF5 file...')
     tools.repack_hdf5()
 
