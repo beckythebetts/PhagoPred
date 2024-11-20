@@ -55,9 +55,10 @@ def get_tracklets_np(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10):
 
             num_new_cells = max(np.max(cell_idxs), cell_ds.shape[1]) - cell_ds.shape[1]
             if num_new_cells > 0:
-                cell_ds.resize((cell_ds.shape[0]+1, cell_ds.shape[1]+num_new_cells, cell_ds.shape[2]))
+                cell_ds.resize((cell_ds.shape[0], cell_ds.shape[1]+num_new_cells, cell_ds.shape[2]))
                 cell_ds[:,-int(num_new_cells):] = np.full((cell_ds.shape[0], int(num_new_cells), cell_ds.shape[2]), np.nan)
-
+            
+            cell_ds.resize((cell_ds.shape[0]+1, cell_ds.shape[1], cell_ds.shape[2]))
             new_row = np.full((1, cell_ds.shape[1], cell_ds.shape[2]), np.nan)
             for _, instance in current_instances.iterrows():
                 new_row[:, int(instance['idx'])-1] = [instance['x'], instance['y']]
@@ -138,9 +139,10 @@ def get_tracklets_torch(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10
 
             num_new_cells = max(np.max(cell_idxs), cell_ds.shape[1]) - cell_ds.shape[1]
             if num_new_cells > 0:
-                cell_ds.resize((cell_ds.shape[0]+1, cell_ds.shape[1]+num_new_cells, cell_ds.shape[2]))
+                cell_ds.resize((cell_ds.shape[0], cell_ds.shape[1]+num_new_cells, cell_ds.shape[2]))
                 cell_ds[:,-int(num_new_cells):] = np.full((cell_ds.shape[0], int(num_new_cells), cell_ds.shape[2]), np.nan)
-
+            
+            cell_ds.resize((cell_ds.shape[0]+1, cell_ds.shape[1], cell_ds.shape[2]))
             new_row = np.full((1, cell_ds.shape[1], cell_ds.shape[2]), np.nan)
             for _, instance in current_instances.iterrows():
                 new_row[:, int(instance['idx'])-1] = [instance['x'], instance['y']]
@@ -194,7 +196,7 @@ def join_tracklets(file=SETTINGS.DATASET, mode='Epi', time_threshold=4, distance
         # join new_cells to old_cells, and adjust segmentations. Will need to repack hdf5 after, to clear space from unused datasets. Must also update cells0, cells1 list wiith new idxs.
         queue = np.column_stack((cells_0, cells_1))
         for i, (cell_0, cell_1) in enumerate(queue):
-            sys.stdout.write(f'\rProgress {i + 1}/{len(queue)}')
+            sys.stdout.write(f'\rProgress {int(((i + 1)/len(queue))*100):03}%')
             sys.stdout.flush()
             # update Cells group
             cell_1_ds = f['Cells'][mode][start_frames[cell_1]:, cell_1]

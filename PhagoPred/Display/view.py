@@ -49,7 +49,7 @@ def show_tracked_images(first_frame=0, last_frame=50):
         phase_data = tools.get_images(f, 'Phase', first_frame, last_frame)
         # segmentation_data = np.array([f['Segmentations']['Phase'][frame][:]
         #                               for frame in list(f['Segmentations']['Phase'].keys())][first_frame:last_frame], dtype='int16')
-        segmentation_data = tools.get_masks(f, 'Phase', first_frame, last_frame)
+        segmentation_data = tools.get_masks(f, 'Epi', first_frame, last_frame)
     max_cell_index = np.max(segmentation_data)
     LUT = torch.randint(low=10, high=255, size=(max_cell_index+1, 3)).to(device)
     LUT[0] = torch.tensor([0, 0, 0]).to(device)
