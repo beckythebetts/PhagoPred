@@ -6,6 +6,7 @@ import numpy as np
 import imageio
 import h5py
 import os
+import pandas as pd
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import mask_funcs
@@ -164,6 +165,11 @@ def get_features_ds(f, feature):
     column_idx = list(f.attrs['features']).index(feature)
     return f[:, :, column_idx]
     
+def fill_nans(array):
+    s = pd.Series(array)
+    filled_s = s.fillna(method='ffill').fillna(method='bfill')
+    return filled_s.to_numpy()
+
 
 # def append_hdf5(f, array):
 #     """

@@ -9,10 +9,11 @@ def get_phagocytosis(file=SETTINGS.DATASET):
         epi = tools.get_masks(f, 'Epi')
         phase = tools.get_masks(f, 'Phase')
     overlap = (epi>0) & (phase>0)
-    
-
-    phago_cells = np.unique(phase[overlap])
-    print(phago_cells)
+    epi_idxs = epi[overlap]
+    phase_idxs = phase[overlap]
+    frames = np.nonzero(overlap)[0]
+    events = np.unique(np.stack((phase_idxs, epi_idxs, frames), axis=1), axis=0)
+    print(events)
 
 def main():
     get_phagocytosis()

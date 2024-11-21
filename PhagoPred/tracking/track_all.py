@@ -19,7 +19,7 @@ def get_tracklets_np(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10):
         cell_ds.attrs['features'] = ['x', 'y']
         x_mesh_grid, y_mesh_grid = np.meshgrid(np.arange(SETTINGS.IMAGE_SIZE[0]), np.arange(SETTINGS.IMAGE_SIZE[1]))
         x_mesh_grid, y_mesh_grid = np.expand_dims(x_mesh_grid, 2), np.expand_dims(y_mesh_grid, 2)
-        for i, name in enumerate(list(f['Segmentations'][mode].keys())[:10]):
+        for i, name in enumerate(list(f['Segmentations'][mode].keys())):
             sys.stdout.write(f'\rFrame {i + 1}/{SETTINGS.NUM_FRAMES}')
             sys.stdout.flush()
             mask = f['Segmentations'][mode][name][:]
@@ -53,7 +53,7 @@ def get_tracklets_np(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10):
             # create dataset for each cell with centres info
             cell_idxs = current_instances.loc[:, 'idx']
 
-            num_new_cells = max(np.max(cell_idxs), cell_ds.shape[1]) - cell_ds.shape[1]
+            num_new_cells = max(np.max(cell_idxs)+1, cell_ds.shape[1]) - cell_ds.shape[1]
             if num_new_cells > 0:
                 cell_ds.resize((cell_ds.shape[0], cell_ds.shape[1]+num_new_cells, cell_ds.shape[2]))
                 cell_ds[:,-int(num_new_cells):] = np.full((cell_ds.shape[0], int(num_new_cells), cell_ds.shape[2]), np.nan)
@@ -61,7 +61,7 @@ def get_tracklets_np(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10):
             cell_ds.resize((cell_ds.shape[0]+1, cell_ds.shape[1], cell_ds.shape[2]))
             new_row = np.full((1, cell_ds.shape[1], cell_ds.shape[2]), np.nan)
             for _, instance in current_instances.iterrows():
-                new_row[:, int(instance['idx'])-1] = [instance['x'], instance['y']]
+                new_row[:, int(instance['idx'])] = [instance['x'], instance['y']]
 
             cell_ds[-1] = new_row
             old_instances = current_instances
@@ -137,7 +137,7 @@ def get_tracklets_torch(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10
             # create dataset for each cell with centres info
             cell_idxs = current_instances.loc[:, 'idx']
 
-            num_new_cells = max(np.max(cell_idxs), cell_ds.shape[1]) - cell_ds.shape[1]
+            num_new_cells = max(np.max(cell_idxs)+1, cell_ds.shape[1]) - cell_ds.shape[1]
             if num_new_cells > 0:
                 cell_ds.resize((cell_ds.shape[0], cell_ds.shape[1]+num_new_cells, cell_ds.shape[2]))
                 cell_ds[:,-int(num_new_cells):] = np.full((cell_ds.shape[0], int(num_new_cells), cell_ds.shape[2]), np.nan)
@@ -145,7 +145,7 @@ def get_tracklets_torch(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10
             cell_ds.resize((cell_ds.shape[0]+1, cell_ds.shape[1], cell_ds.shape[2]))
             new_row = np.full((1, cell_ds.shape[1], cell_ds.shape[2]), np.nan)
             for _, instance in current_instances.iterrows():
-                new_row[:, int(instance['idx'])-1] = [instance['x'], instance['y']]
+                new_row[:, int(instance['idx'])] = [instance['x'], instance['y']]
 
             cell_ds[-1] = new_row
             old_instances = current_instances
@@ -171,6 +171,7 @@ def get_start_end_frames(f, mode, get_coords=True):
 def join_tracklets(file=SETTINGS.DATASET, mode='Epi', time_threshold=4, distance_threshold=10, min_track_length=30):
     with h5py.File(file, 'r+') as f:
         print('\nJoining Tracklets...')
+        f['Cells'][mode][:, 0] = np.zeros(shape=f['Cells'][mode][:, 0][...].shape)
         f['Cells'][mode].attrs['minimum time gap'] = time_threshold
         f['Cells'][mode].attrs['minimum track length'] = min_track_length
         all_cell_idxs = np.arange(len(f['Cells'][mode][0][:]))
@@ -206,7 +207,7 @@ def join_tracklets(file=SETTINGS.DATASET, mode='Epi', time_threshold=4, distance
             # update masks
             for frame in range(start_frames[cell_1], end_frames[cell_1]+1):
                 mask = f['Segmentations'][mode][f'{int(frame):04}'][:]
-                mask[mask==cell_1+1] = cell_0+1
+                mask[mask==cell_1] = cell_0
                 f['Segmentations'][mode][f'{int(frame):04}'][...] = mask
             f['Cells'][mode][:, cell_1] = np.full(f['Cells'][mode][:, cell_1].shape, np.nan)
 
@@ -218,9 +219,33 @@ def join_tracklets(file=SETTINGS.DATASET, mode='Epi', time_threshold=4, distance
                 f['Cells'][mode][:, cell_idx] = np.full(f['Cells'][mode][:, cell_idx].shape, np.nan)
                 for frame in range(start_frames[cell_idx], end_frames[cell_idx]+1):
                     mask = f['Segmentations'][mode][f'{int(frame):04}'][:]
-                    mask[mask==cell_idx+1] = 0
+                    mask[mask==cell_idx] = 0
                     f['Segmentations'][mode][f'{int(frame):04}'][...] = mask
 
+def repack_cell_ds(file=SETTINGS.DATASET, mode='Epi'):
+    print('\nRemoving empty tracks and reindexing...')
+    with h5py.File(file, 'r+') as f:
+        old_cell_idxs = np.nonzero(np.any(~np.isnan(f['Cells'][mode][:]), axis=(0,2)))[0]
+        new_cell_idxs = np.arange(len(old_cell_idxs))
+        lut = np.zeros(f['Cells'][mode].shape[1])
+        lut[old_cell_idxs] = new_cell_idxs
+        # update masks
+        print('\nUpdating masks...')
+        for frame in range(f['Cells'][mode].shape[0]):
+            mask = f['Segmentations'][mode][f'{int(frame):04}'][:]
+            mask = lut[mask]
+            f['Segmentations'][mode][f'{int(frame):04}'][...] = mask
+        # squash dataset
+        print('\nSquashing dataset...')
+        ds = f['Cells'][mode][:]
+        squashed_ds = ds[:, old_cell_idxs]
+        f['Cells'][mode].resize(squashed_ds.shape)
+        f['Cells'][mode][...] = squashed_ds
+        squashed_ds = np.transpose(np.array([ds[:, i, :] for i in old_cell_idxs]), (1, 0, 2))
+    print('\nRepacking hdf5 file...')
+    tools.repack_hdf5()
+
+    
 def main():
     for mode in ['Phase', 'Epi']:
         print('\nMode: ', mode)
@@ -229,8 +254,8 @@ def main():
         else:
             get_tracklets_torch(mode=mode)
         join_tracklets(mode=mode)
-    print('\nRepacking HDF5 file...')
-    tools.repack_hdf5()
+    repack_cell_ds(mode=mode)
+
 
 if __name__=='__main__':
     main()

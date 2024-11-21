@@ -75,35 +75,70 @@ def show_tracked_images(first_frame=0, last_frame=50):
     ij.py.run_macro(macro='run("Make Composite")')
     time.sleep(99999)
 
-
 def show_cell_images(cell_idx, first_frame=0, last_frame=50, frame_size=150):
     print(f'\nSHOWING CELL: {cell_idx}, FRAMES: {first_frame} to {last_frame}')
+    hdf5_file = SETTINGS.DATASET
+    print(f'\nSHOWING CELL: {cell_idx}, FRAMES: {first_frame} to {last_frame}')
     phase_data = np.empty((last_frame-first_frame, frame_size, frame_size))
-    epi_data = np.empty((last_frame-first_frame, frame_size, frame_size))
+    epi_mask = np.empty((last_frame-first_frame, frame_size, frame_size), dtype=bool)
     mask_data = np.empty((last_frame-first_frame, frame_size, frame_size))
+
+    
     with h5py.File(hdf5_file, 'r') as f:
+        x_centres, y_centres = tools.get_features_ds(f['Cells']['Phase'], 'x')[first_frame:last_frame, cell_idx], tools.get_features_ds(f['Cells']['Phase'], 'y')[first_frame:last_frame, cell_idx]
+        # fill np.nan values with closest non np.values
+        x_centres, y_centres = tools.fill_nans(x_centres), tools.fill_nans(y_centres)
+
         for idx, frame in enumerate(range(first_frame, last_frame)):
-            xcentre = np.nan
-            framei = frame
-            while np.isnan(xcentre):
-                xcentre, ycentre = f['Features'][f'Cell{cell_idx:04}']['MorphologicalFeatures'][int(framei)]['xcentre'], f['Features'][f'Cell{cell_idx:04}']['MorphologicalFeatures'][int(framei)]['ycentre']
-                framei -= 1
-            ymin, ymax, xmin, xmax = mask_funcs.get_crop_indices((ycentre, xcentre), frame_size, SETTINGS.IMAGE_SIZE)
+            ymin, ymax, xmin, xmax = mask_funcs.get_crop_indices((x_centres[idx], y_centres[idx]), frame_size, SETTINGS.IMAGE_SIZE)
             phase_data[idx] = np.array(f['Images']['Phase'][f'{int(frame):04}'])[xmin:xmax, ymin:ymax]
-            epi_data[idx] = f['Images']['Epi'][f'{int(frame):04}'][xmin:xmax, ymin:ymax]
+            epi_mask[idx] = (f['Segmentations']['Epi'][f'{int(frame):04}'][xmin:xmax, ymin:ymax] > 0).astype(bool)
             mask_data[idx] = f['Segmentations']['Phase'][f'{int(frame):04}'][xmin:xmax, ymin:ymax]
             cell_mask = (mask_data == cell_idx)
     if not cell_mask.any():
         raise Exception(f'Cell of index {cell_idx} not found')
     cell_outline = mask_funcs.mask_outline(torch.tensor(cell_mask).byte().to(device), thickness=1).cpu().numpy()
     merged_im = np.stack((phase_data, phase_data, phase_data), axis=1)
-    merged_im[:, 0][epi_data > SETTINGS.THRESHOLD] = epi_data[epi_data > SETTINGS.THRESHOLD]
+    #merged_im[:, 0][epi_data > SETTINGS.THRESHOLD] = epi_data[epi_data > SETTINGS.THRESHOLD]
+    merged_im[:, 0][epi_mask] = 255
+    merged_im[:, 1][epi_mask] = 0
+    merged_im[:, 2][epi_mask] = 0
+    #merged_im[:, :][epi_data > SETTINGS.THRESHOLD] = 255
     merged_im[:, 0][cell_outline] = 255
     merged_im[:, 1][cell_outline] = 255
     merged_image = ij.py.to_dataset(merged_im, dim_order=['t', 'ch', 'row', 'col'])
     ij.ui().show(merged_image)
     ij.py.run_macro(macro='run("Make Composite")')
     time.sleep(99999)
+
+# def show_cell_images(cell_idx, first_frame=0, last_frame=50, frame_size=150):
+#     print(f'\nSHOWING CELL: {cell_idx}, FRAMES: {first_frame} to {last_frame}')
+#     phase_data = np.empty((last_frame-first_frame, frame_size, frame_size))
+#     epi_data = np.empty((last_frame-first_frame, frame_size, frame_size))
+#     mask_data = np.empty((last_frame-first_frame, frame_size, frame_size))
+#     with h5py.File(hdf5_file, 'r') as f:
+#         for idx, frame in enumerate(range(first_frame, last_frame)):
+#             xcentre = np.nan
+#             framei = frame
+#             while np.isnan(xcentre):
+#                 xcentre, ycentre = f['Features'][f'Cell{cell_idx:04}']['MorphologicalFeatures'][int(framei)]['xcentre'], f['Features'][f'Cell{cell_idx:04}']['MorphologicalFeatures'][int(framei)]['ycentre']
+#                 framei -= 1
+#             ymin, ymax, xmin, xmax = mask_funcs.get_crop_indices((ycentre, xcentre), frame_size, SETTINGS.IMAGE_SIZE)
+#             phase_data[idx] = np.array(f['Images']['Phase'][f'{int(frame):04}'])[xmin:xmax, ymin:ymax]
+#             epi_data[idx] = f['Images']['Epi'][f'{int(frame):04}'][xmin:xmax, ymin:ymax]
+#             mask_data[idx] = f['Segmentations']['Phase'][f'{int(frame):04}'][xmin:xmax, ymin:ymax]
+#             cell_mask = (mask_data == cell_idx)
+#     if not cell_mask.any():
+#         raise Exception(f'Cell of index {cell_idx} not found')
+#     cell_outline = mask_funcs.mask_outline(torch.tensor(cell_mask).byte().to(device), thickness=1).cpu().numpy()
+#     merged_im = np.stack((phase_data, phase_data, phase_data), axis=1)
+#     merged_im[:, 0][epi_data > SETTINGS.THRESHOLD] = epi_data[epi_data > SETTINGS.THRESHOLD]
+#     merged_im[:, 0][cell_outline] = 255
+#     merged_im[:, 1][cell_outline] = 255
+#     merged_image = ij.py.to_dataset(merged_im, dim_order=['t', 'ch', 'row', 'col'])
+#     ij.ui().show(merged_image)
+#     ij.py.run_macro(macro='run("Make Composite")')
+#     time.sleep(99999)
 
 def show_feature_plot(cell_idx, first_frame=0, last_frame=50):
     plt.rcParams["font.family"] = 'serif'
@@ -160,7 +195,7 @@ def main():
     elif args.command == 'show_tracked_images':
         show_tracked_images(args.first_frame, args.last_frame)
     elif args.command == 'show_cell':
-        show_cell(args.cell_idx, args.first_frame, args.last_frame)
+        show_cell_images(args.cell_idx, args.first_frame, args.last_frame)
 
 
 if __name__ == '__main__':
