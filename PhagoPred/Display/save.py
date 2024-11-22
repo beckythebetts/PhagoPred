@@ -39,46 +39,6 @@ def show_tracked_images(dir, first_frame=0, last_frame=50):
                     fontScale=3, color=(255, 255, 255), thickness=3)
         plt.imsave(dir / f'{i}.png', im/256)
 
-# def show_cell_images(dir, cell_idx, first_frame=0, last_frame=50, frame_size=150):
-#     hdf5_file = SETTINGS.DATASET
-#     print(f'\nSHOWING CELL: {cell_idx}, FRAMES: {first_frame} to {last_frame}')
-#     with h5py.File(hdf5_file, 'r') as f:
-#         phase_data = tools.get_images(f, 'Phase', first_frame, last_frame)
-#         epi_data = tools.get_images(f, 'Epi', first_frame, last_frame)
-#         mask_data = tools.get_masks(f, 'Phase', first_frame, last_frame)
-
-#         x_centres, y_centres = tools.get_features_ds(f['Cells']['Phase'], 'x')[first_frame:last_frame, cell_idx], tools.get_features_ds(f['Cells']['Phase'], 'y')[first_frame:last_frame, cell_idx]
-#         # fill np.nan values with closest non np.values
-#         x_centres, y_centres = tools.fill_nans(x_centres), tools.fill_nans(y_centres)
-#         for i in range(len(phase_data)):
-#             ymin, ymax, xmin, xmax = mask_funcs.get_crop_indices((x_centres[i], y_centres[i]), frame_size, SETTINGS.IMAGE_SIZE)
-#             phase_data
-#         print(x_centres, y_centres, phase_data, epi_data, mask_data)
-    
-    # with h5py.File(hdf5_file, 'r') as f:
-    #     for idx, frame in enumerate(range(first_frame, last_frame)):
-    #         xcentre = np.nan
-    #         framei = frame
-    #         direction = -1
-    #         while np.isnan(xcentre):
-    #             xcentre, ycentre = tools.get_features_ds(f['Cells']['Phase'], 'x')[frame, cell_idx], tools.get_features_ds(f['Cells']['Phase'], 'y')[frame, cell_idx]
-    #             framei += direction
-    #             if framei == 0:
-    #                 direction = 1
-    #         ymin, ymax, xmin, xmax = mask_funcs.get_crop_indices((xcentre, ycentre), frame_size, SETTINGS.IMAGE_SIZE)
-    #         phase_data[idx] = np.array(f['Images']['Phase'][f'{int(frame):04}'])[xmin:xmax, ymin:ymax]
-    #         epi_data[idx] = f['Images']['Epi'][f'{int(frame):04}'][xmin:xmax, ymin:ymax]
-    #         mask_data[idx] = f['Segmentations']['Phase'][f'{int(frame):04}'][xmin:xmax, ymin:ymax]
-    #         cell_mask = (mask_data == cell_idx)
-    # if not cell_mask.any():
-    #     raise Exception(f'Cell of index {cell_idx} not found')
-    # cell_outline = mask_funcs.mask_outline(torch.tensor(cell_mask).byte().to(device), thickness=1).cpu().numpy()
-    # merged_im = np.stack((phase_data, phase_data, phase_data), axis=1)
-    # merged_im[:, 0][epi_data > SETTINGS.THRESHOLD] = epi_data[epi_data > SETTINGS.THRESHOLD]
-    # merged_im[:, 0][cell_outline] = 255
-    # merged_im[:, 1][cell_outline] = 255
-    # for i, im in enumerate(merged_im):
-    #     plt.imsave(dir / (f'{i}.png'), np.transpose(im/255, (1, 2, 0)))
 
 def show_cell_images(dir, cell_idx, first_frame=0, last_frame=50, frame_size=150):
     hdf5_file = SETTINGS.DATASET
@@ -115,5 +75,5 @@ def show_cell_images(dir, cell_idx, first_frame=0, last_frame=50, frame_size=150
 
 
 if __name__ == '__main__':
-    #show_tracked_images(Path(r'C:\Users\php23rjb\Downloads\temp') / 'test_track', last_frame=10)
-    show_cell_images(Path(r'C:\Users\php23rjb\Downloads\temp') / 'test_track', cell_idx=78)
+    #show_tracked_images(Path(r'C:\Users\php23rjb\Downloads\temp') / 'test_track')
+    show_cell_images(Path(r'C:\Users\php23rjb\Downloads\temp') / 'test_track', cell_idx=347, first_frame=0, last_frame=50)

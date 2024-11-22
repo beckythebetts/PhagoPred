@@ -2,7 +2,7 @@ from pathlib import Path
 import h5py
 
 # ******* GENERAL *******
-DATASET = Path('PhagoPred')/'Datasets'/'filter01_short_imseg (copy).h5'
+DATASET = Path('PhagoPred')/'Datasets'/'filter01_short_imsegtrack - Copy.h5'
 MASK_RCNN_MODEL = Path("Models") / 'filter02'
 CELLPOSE_MODEL = Path("PhagoPred") / 'cellpose_segmentation' / 'Models' / '5ims'
 CLASSES = {'phase': 'Amoeba', 'epi': 'Yeast'}

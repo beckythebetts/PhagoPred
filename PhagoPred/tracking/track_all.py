@@ -14,12 +14,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def get_tracklets_np(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10):
     with h5py.File(file, 'r+') as f:
         print('\nTracking...')
-        cell_ds = f.create_dataset(f'Cells/{mode}', shape=(0,0,2), maxshape=(None,None,None), dtype=np.float32)
+        cell_ds = f.create_dataset(f'Cells/{mode}', shape=(0,0,3), maxshape=(None,None,None), dtype=np.float32)
         cell_ds.attrs['minimum distance'] = min_dist_threshold
-        cell_ds.attrs['features'] = ['x', 'y']
+        cell_ds.attrs['features'] = ['x', 'y', 'area']
         x_mesh_grid, y_mesh_grid = np.meshgrid(np.arange(SETTINGS.IMAGE_SIZE[0]), np.arange(SETTINGS.IMAGE_SIZE[1]))
         x_mesh_grid, y_mesh_grid = np.expand_dims(x_mesh_grid, 2), np.expand_dims(y_mesh_grid, 2)
-        for i, name in enumerate(list(f['Segmentations'][mode].keys())):
+        for i, name in enumerate(list(f['Segmentations'][mode].keys())[:10]):
             sys.stdout.write(f'\rFrame {i + 1}/{SETTINGS.NUM_FRAMES}')
             sys.stdout.flush()
             mask = f['Segmentations'][mode][name][:]
@@ -28,7 +28,7 @@ def get_tracklets_np(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10):
             areas = np.sum(expanded_mask, axis=(0,1))
             x_centres = np.sum(x_mesh_grid*expanded_mask, axis=(0,1)) / areas
             y_centres = np.sum(y_mesh_grid*expanded_mask, axis=(0,1)) / areas
-            current_instances = pd.DataFrame(np.vstack((idxs, x_centres, y_centres)).T, columns=['idx', 'x', 'y'])
+            current_instances = pd.DataFrame(np.vstack((idxs, x_centres, y_centres, areas)).T, columns=['idx', 'x', 'y', 'area'])
             if i != 0:
                 distances = np.linalg.norm(
                     np.expand_dims(old_instances.loc[:, 'x':'y'].values, 1) - np.expand_dims(current_instances.loc[:, 'x':'y'].values, 0), 
@@ -61,7 +61,7 @@ def get_tracklets_np(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10):
             cell_ds.resize((cell_ds.shape[0]+1, cell_ds.shape[1], cell_ds.shape[2]))
             new_row = np.full((1, cell_ds.shape[1], cell_ds.shape[2]), np.nan)
             for _, instance in current_instances.iterrows():
-                new_row[:, int(instance['idx'])] = [instance['x'], instance['y']]
+                new_row[:, int(instance['idx'])] = [instance['x'], instance['y'], instance['area']]
 
             cell_ds[-1] = new_row
             old_instances = current_instances
@@ -71,9 +71,9 @@ def get_tracklets_np(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10):
 def get_tracklets_torch(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10, cell_batch_size=50):
     with h5py.File(file, 'r+') as f:
         print('\nTracking...')
-        cell_ds = f.create_dataset(f'Cells/{mode}', shape=(0,0,2), maxshape=(None,None,None), dtype=np.float32)
+        cell_ds = f.create_dataset(f'Cells/{mode}', shape=(0,0,3), maxshape=(None,None,None), dtype=np.float32)
         cell_ds.attrs['minimum distance'] = min_dist_threshold
-        cell_ds.attrs['features'] = ['x', 'y']
+        cell_ds.attrs['features'] = ['x', 'y', 'area']
         x_mesh_grid, y_mesh_grid = torch.meshgrid(torch.arange(SETTINGS.IMAGE_SIZE[0]).to(device), torch.arange(SETTINGS.IMAGE_SIZE[1]).to(device), indexing='ij')
         x_mesh_grid, y_mesh_grid = x_mesh_grid.unsqueeze(2), y_mesh_grid.unsqueeze(2)
         for i, name in enumerate(list(f['Segmentations'][mode].keys())):
@@ -85,7 +85,6 @@ def get_tracklets_torch(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10
             x_centres_list = []
             y_centres_list = []
 
-            # Loop over the unique indices in batches
             for start_idx in range(0, len(idxs), cell_batch_size):
                 batch_idxs = idxs[start_idx:start_idx + cell_batch_size]
 
@@ -110,9 +109,9 @@ def get_tracklets_torch(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10
 
             # Create a DataFrame with the results
             current_instances = pd.DataFrame(
-                np.vstack((idxs.cpu().numpy(), y_centres, x_centres)).T,
-                columns=['idx', 'x', 'y']
-            ).astype(dtype={'idx': 'int16', 'x': 'float32', 'y': 'float32'})
+                np.vstack((idxs.cpu().numpy(), y_centres, x_centres, areas)).T,
+                columns=['idx', 'x', 'y', 'area']
+            ).astype(dtype={'idx': 'int16', 'x': 'float32', 'y': 'float32', 'area': 'float32'})
             if i != 0:
                 distances = np.linalg.norm(
                     np.expand_dims(old_instances.loc[:, 'x':'y'].values, 1) - np.expand_dims(current_instances.loc[:, 'x':'y'].values, 0), 
@@ -145,11 +144,9 @@ def get_tracklets_torch(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10
             cell_ds.resize((cell_ds.shape[0]+1, cell_ds.shape[1], cell_ds.shape[2]))
             new_row = np.full((1, cell_ds.shape[1], cell_ds.shape[2]), np.nan)
             for _, instance in current_instances.iterrows():
-                new_row[:, int(instance['idx'])] = [instance['x'], instance['y']]
+                new_row[:, int(instance['idx'])] = [instance['x'], instance['y'], instance['area']]
 
             cell_ds[-1] = new_row
-            old_instances = current_instances
-
             old_instances = current_instances
 
 def get_start_end_frames(f, mode, get_coords=True):
@@ -222,7 +219,7 @@ def join_tracklets(file=SETTINGS.DATASET, mode='Epi', time_threshold=4, distance
                     mask[mask==cell_idx] = 0
                     f['Segmentations'][mode][f'{int(frame):04}'][...] = mask
 
-def repack_cell_ds(file=SETTINGS.DATASET, mode='Epi'):
+def remove_empty_cells(file=SETTINGS.DATASET, mode='Epi'):
     print('\nRemoving empty tracks and reindexing...')
     with h5py.File(file, 'r+') as f:
         old_cell_idxs = np.nonzero(np.any(~np.isnan(f['Cells'][mode][:]), axis=(0,2)))[0]
@@ -241,11 +238,8 @@ def repack_cell_ds(file=SETTINGS.DATASET, mode='Epi'):
         squashed_ds = ds[:, old_cell_idxs]
         f['Cells'][mode].resize(squashed_ds.shape)
         f['Cells'][mode][...] = squashed_ds
-        squashed_ds = np.transpose(np.array([ds[:, i, :] for i in old_cell_idxs]), (1, 0, 2))
-    print('\nRepacking hdf5 file...')
-    tools.repack_hdf5()
 
-    
+
 def main():
     for mode in ['Phase', 'Epi']:
         print('\nMode: ', mode)
@@ -254,7 +248,9 @@ def main():
         else:
             get_tracklets_torch(mode=mode)
         join_tracklets(mode=mode)
-    repack_cell_ds(mode=mode)
+        remove_empty_cells(mode=mode)
+    print('\nRepacking hdf5 file...')
+    tools.repack_hdf5()
 
 
 if __name__=='__main__':
