@@ -49,7 +49,8 @@ def copy_hdf5_groups(src_filename, dest_filename, groups_to_copy):
             # Recursively copy datasets and subgroups
             for name, item in src_group.items():
                 if isinstance(item, h5py.Dataset):  # Copy datasets directly
-                    dest_group.create_dataset(name, data=item[()])
+                    maxshape = item.maxshape
+                    dest_group.create_dataset(name, data=item[()], maxshape=maxshape)
                     # Copy dataset attributes
                     for attr_name, attr_value in item.attrs.items():
                         dest_group[name].attrs[attr_name] = attr_value
@@ -191,11 +192,12 @@ def fill_nans(array):
 
 
 if __name__ == '__main__':
+    pass
     # test_list = [0, 1, 1, 1, 2, 5, 7, 8, 12, 54, 76, 79, 80]
     # print(split_list_into_sequences(test_list))
     # print(split_list_into_sequences(test_list, return_indices=True))
     #make_short_test_copy(orig_file=Path('PhagoPred')/'Datasets'/'filter01.h5', copy_file=Path('PhagoPred')/'Datasets'/'filter01_short.h5')
-    copy_hdf5_groups(Path(r'C:\Users\php23rjb\Documents\PhagoPred\PhagoPred\Datasets') / 'filter01.h5', Path(r'C:\Users\php23rjb\Documents\PhagoPred\PhagoPred\Datasets') / 'filter01_ims.h5', ['Images'])
+    #copy_hdf5_groups(SETTINGS.DATASET, Path('PhagoPred')/'Datasets'/'filter01_temp.h5', ['Images'])
     # array = read_tiff(Path('03') / 't0000_mask.tif')
     # print(np.shape(array))
     # save_tiff(array, Path('03') / 't0000_mask_test.tif')

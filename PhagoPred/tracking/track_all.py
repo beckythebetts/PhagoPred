@@ -86,7 +86,8 @@ def get_tracklets_torch(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10
             y_centres_list = []
 
             for start_idx in range(0, len(idxs), cell_batch_size):
-                batch_idxs = idxs[start_idx:start_idx + cell_batch_size]
+                last_idx = min(start_idx+cell_batch_size, len(idxs))
+                batch_idxs = idxs[start_idx:last_idx]
 
                 # Expand the mask for the current batch
                 expanded_mask = (mask.unsqueeze(2) == batch_idxs.unsqueeze(0).unsqueeze(1))
@@ -148,6 +149,7 @@ def get_tracklets_torch(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10
 
             cell_ds[-1] = new_row
             old_instances = current_instances
+        
 
 def get_start_end_frames(f, mode, get_coords=True):
     x_coords = tools.get_features_ds(f['Cells'][mode], 'x')
@@ -218,6 +220,7 @@ def join_tracklets(file=SETTINGS.DATASET, mode='Epi', time_threshold=4, distance
                     mask = f['Segmentations'][mode][f'{int(frame):04}'][:]
                     mask[mask==cell_idx] = 0
                     f['Segmentations'][mode][f'{int(frame):04}'][...] = mask
+        
 
 def remove_empty_cells(file=SETTINGS.DATASET, mode='Epi'):
     print('\nRemoving empty tracks and reindexing...')
@@ -237,7 +240,8 @@ def remove_empty_cells(file=SETTINGS.DATASET, mode='Epi'):
         ds = f['Cells'][mode][:]
         squashed_ds = ds[:, old_cell_idxs]
         f['Cells'][mode].resize(squashed_ds.shape)
-        f['Cells'][mode][...] = squashed_ds
+        f['Cells'][mode][()] = squashed_ds
+        
 
 
 def main():
