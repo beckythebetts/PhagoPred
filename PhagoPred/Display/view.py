@@ -78,35 +78,36 @@ def show_tracked_images(first_frame=0, last_frame=50):
 
 def show_cell_images(cell_idx, first_frame=0, last_frame=50, frame_size=150):
     print(f'\nSHOWING CELL: {cell_idx}, FRAMES: {first_frame} to {last_frame}')
-    hdf5_file = SETTINGS.DATASET
-    print(f'\nSHOWING CELL: {cell_idx}, FRAMES: {first_frame} to {last_frame}')
-    phase_data = np.empty((last_frame-first_frame, frame_size, frame_size))
-    epi_mask = np.empty((last_frame-first_frame, frame_size, frame_size), dtype=bool)
-    mask_data = np.empty((last_frame-first_frame, frame_size, frame_size))
-
     
     with h5py.File(hdf5_file, 'r') as f:
         x_centres, y_centres = tools.get_features_ds(f['Cells']['Phase'], 'x')[first_frame:last_frame, cell_idx], tools.get_features_ds(f['Cells']['Phase'], 'y')[first_frame:last_frame, cell_idx]
         # fill np.nan values with closest non np.values
         x_centres, y_centres = tools.fill_nans(x_centres), tools.fill_nans(y_centres)
 
-        for idx, frame in enumerate(range(first_frame, last_frame)):
-            ymin, ymax, xmin, xmax = mask_funcs.get_crop_indices((x_centres[idx], y_centres[idx]), frame_size, SETTINGS.IMAGE_SIZE)
-            phase_data[idx] = np.array(f['Images']['Phase'][f'{int(frame):04}'])[xmin:xmax, ymin:ymax]
-            epi_mask[idx] = (f['Segmentations']['Epi'][f'{int(frame):04}'][xmin:xmax, ymin:ymax] > 0).astype(bool)
-            mask_data[idx] = f['Segmentations']['Phase'][f'{int(frame):04}'][xmin:xmax, ymin:ymax]
-            cell_mask = (mask_data == cell_idx)
+        crop_idxs = mask_funcs.get_crop_indices_all(np.stack((x_centres, y_centres), axis=-1), side_length=frame_size, image_size=SETTINGS.IMAGE_SIZE)
+
+        x_idxs = np.array([np.arange(xmin, xmax) for xmin, xmax in zip(crop_idxs[:,2], crop_idxs[:,3])])[:, :, np.newaxis]
+        y_idxs = np.array([np.arange(ymin, ymax) for ymin, ymax in zip(crop_idxs[:,0], crop_idxs[:,1])])[:, np.newaxis, :]
+
+        phase_data = tools.get_images(f, 'Phase', first_frame, last_frame)[np.arange(last_frame-first_frame)[:, None, None], x_idxs, y_idxs]
+        epi_mask = (tools.get_masks(f, 'Epi', first_frame, last_frame)[np.arange(last_frame-first_frame)[:, None, None], x_idxs, y_idxs] > 0).astype(bool)
+        phase_mask = tools.get_masks(f, 'Phase', first_frame, last_frame)[np.arange(last_frame-first_frame)[:, None, None], x_idxs, y_idxs]
+
+        cell_mask = (phase_mask == cell_idx)
+        
     if not cell_mask.any():
         raise Exception(f'Cell of index {cell_idx} not found')
     cell_outline = mask_funcs.mask_outline(torch.tensor(cell_mask).byte().to(device), thickness=1).cpu().numpy()
     merged_im = np.stack((phase_data, phase_data, phase_data), axis=1)
-    #merged_im[:, 0][epi_data > SETTINGS.THRESHOLD] = epi_data[epi_data > SETTINGS.THRESHOLD]
+
     merged_im[:, 0][epi_mask] = 255
     merged_im[:, 1][epi_mask] = 0
     merged_im[:, 2][epi_mask] = 0
-    #merged_im[:, :][epi_data > SETTINGS.THRESHOLD] = 255
+
     merged_im[:, 0][cell_outline] = 255
     merged_im[:, 1][cell_outline] = 255
+    merged_im[:, 2][cell_outline] = 0
+
     merged_image = ij.py.to_dataset(merged_im, dim_order=['t', 'ch', 'row', 'col'])
     ij.ui().show(merged_image)
     ij.py.run_macro(macro='run("Make Composite")')
@@ -150,7 +151,8 @@ def print_phagocytosis():
         t.header(['Phagocyte index', 'Pathogen index', 'First frame', 'Last frame'])
         for phago_event in f['Cells']['Phagocytosis'].keys():
             phago_event = f['Cells']['Phagocytosis'][phago_event]
-            t.add_row([int(phago_event.attrs['phagocyte_idx']), int(phago_event.attrs['pathogen_idx']), int(phago_event[0][0]), int(phago_event[-1][0])])
+            if phago_event[-1, 0]-phago_event[0, 0] > 20:
+                t.add_row([int(phago_event.attrs['phagocyte_idx']), int(phago_event.attrs['pathogen_idx']), int(phago_event[0][0]), int(phago_event[-1][0])])
             #print(f"\n{phago_event.attrs['phagocyte_idx']}\t{phago_event.attrs['pathogen_idx']}\t{phago_event[0][0]}\t{phago_event[-1][0]}")
     print(t.draw())
 

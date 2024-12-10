@@ -88,9 +88,13 @@ def frame_by_frame_features(phase_masks, phase_ims, cell_batchsize, num_cells):
 
 def derived_features(f, first_frame, last_frame):
     # speed, displacement, displacement speed
-    x0, y0 = tools.get_features_ds(f['Cells']['Phase'], 'x')[0], tools.get_features_ds(f['Cells']['Phase'], 'y')[0]
-    xs = tools.get_features_ds(f['Cells']['Phase'], 'x')[first_frame:last_frame]
-    ys = tools.get_features_ds(f['Cells']['Phase'], 'y')[first_frame:last_frame]
+    all_xs, all_ys = tools.get_features_ds(f['Cells']['Phase'], 'x'), tools.get_features_ds(f['Cells']['Phase'], 'y')
+    x0, y0 = all_xs[~np.isnan(all_xs)][0], all_ys[~np.isnan(all_ys)][0]
+    xs = all_xs[first_frame:last_frame]
+    ys = all_ys[first_frame:last_frame]
+    # x0, y0 = tools.get_features_ds(f['Cells']['Phase'], 'x')[0], tools.get_features_ds(f['Cells']['Phase'], 'y')[0]
+    # xs = tools.get_features_ds(f['Cells']['Phase'], 'x')[first_frame:last_frame]
+    # ys = tools.get_features_ds(f['Cells']['Phase'], 'y')[first_frame:last_frame]
     
     pathogen_xs = tools.get_features_ds(f['Cells']['Epi'], 'x')[first_frame:last_frame]
     pathogen_ys = tools.get_features_ds(f['Cells']['Epi'], 'y')[first_frame:last_frame]
@@ -113,10 +117,8 @@ def derived_features(f, first_frame, last_frame):
     yspeeds = np.diff(ys, axis=0)
     speeds = np.sqrt(xspeeds**2 + yspeeds**2)
 
-    
     if first_frame == 0: speeds = np.insert(speeds, 0, np.full(xs.shape[1], np.nan), axis=0)
 
-    
     return np.stack((speeds, displacements, displacement_speeds, phago_densities, pathogen_densities), axis=2)
 
 

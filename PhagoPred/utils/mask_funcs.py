@@ -176,6 +176,55 @@ def get_crop_indices(center, side_length, image_size):
     return (y_start, y_end, x_start, x_end)
 
 
+def get_crop_indices_all(centers, side_length, image_size):
+    """
+    Get the crop indices for square crops from an image for multiple centers.
+
+    Parameters:
+        centers (np.array): Array of shape (N, 2) containing (y, x) coordinates of the crop centers.
+        side_length (int): Length of the sides of the square crop.
+        image_size (tuple): (height, width) of the original image.
+
+    Returns:
+        np.array: Array of shape (N, 4) containing (y_start, y_end, x_start, x_end) for each crop.
+    """
+    # Calculate half the side length
+    half_length = side_length // 2
+
+    # Unpack image dimensions
+    height, width = image_size
+
+    # Compute initial crop boundaries
+    y_centers, x_centers = centers[:, 0], centers[:, 1]
+    y_start = y_centers - half_length
+    y_end = y_centers + half_length
+    x_start = x_centers - half_length
+    x_end = x_centers + half_length
+
+    # Clip boundaries to the image dimensions
+    y_start = np.clip(y_start, 0, height)
+    y_end = np.clip(y_end, 0, height)
+    x_start = np.clip(x_start, 0, width)
+    x_end = np.clip(x_end, 0, width)
+
+    # Adjust for cases where the crop is smaller than the side length
+    adjusted_y_end = np.where((y_end - y_start) < side_length, y_start + side_length, y_end)
+    adjusted_y_start = np.where((y_end - y_start) < side_length, y_end - side_length, y_start)
+    adjusted_x_end = np.where((x_end - x_start) < side_length, x_start + side_length, x_end)
+    adjusted_x_start = np.where((x_end - x_start) < side_length, x_end - side_length, x_start)
+
+    # Ensure final boundaries stay within image dimensions
+    y_start = np.clip(adjusted_y_start, 0, height).astype(int)
+    y_end = np.clip(adjusted_y_end, 0, height).astype(int)
+    x_start = np.clip(adjusted_x_start, 0, width).astype(int)
+    x_end = np.clip(adjusted_x_end, 0, width).astype(int)
+
+    # Stack results into a single array
+    crop_indices = np.stack((y_start, y_end, x_start, x_end), axis=-1)
+
+    return crop_indices
+
+
 if __name__ == '__main__':
     # get_centre(np.zeros((5, 5)))
     array_1 = np.array([[0,0], [1,0], [2, 2]])

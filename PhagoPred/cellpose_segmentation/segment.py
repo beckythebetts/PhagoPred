@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 import torch
 
 from PhagoPred import SETTINGS
-import threshold_epi
+from PhagoPred.cellpose_segmentation import threshold_epi
 
 
 class CellposeModel_withsave(models.CellposeModel):
@@ -114,7 +114,7 @@ class CellposeModel_withsave(models.CellposeModel):
                     epi_im = f['Segmentations']['Epi'][f'{int(i):04}'][:]
                     overlap_idxs, counts = np.unique(maski[np.logical_and(maski>0, epi_im>0)], return_counts=True)
                     for idx, count in zip(overlap_idxs, counts):
-                        if count / np.count_nonzero(maski[maski==idx]) > 0.75 and idx !=0:
+                        if count / np.count_nonzero(maski[maski==idx]) > 0.4 and idx !=0:
                             maski[maski==idx] = 0
                     f.create_dataset(f'Segmentations/Phase/{int(i):04}', dtype='i2', data=maski)
                 self.timing.append(time.time() - tic)

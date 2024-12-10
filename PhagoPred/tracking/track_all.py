@@ -11,7 +11,7 @@ from PhagoPred import SETTINGS
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def get_tracklets_np(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10):
+def get_tracklets_np(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=SETTINGS.MINIMUM_DISTANCE_THRESHOLD):
     with h5py.File(file, 'r+') as f:
         print('\nTracking...')
         cell_ds = f.create_dataset(f'Cells/{mode}', shape=(0,0,3), maxshape=(None,None,None), dtype=np.float32)
@@ -68,7 +68,7 @@ def get_tracklets_np(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10):
 
             old_instances = current_instances
 
-def get_tracklets_torch(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=10, cell_batch_size=50):
+def get_tracklets_torch(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=SETTINGS.MINIMUM_DISTANCE_THRESHOLD, cell_batch_size=50):
     with h5py.File(file, 'r+') as f:
         print('\nTracking...')
         cell_ds = f.create_dataset(f'Cells/{mode}', shape=(0,0,3), maxshape=(None,None,None), dtype=np.float32)
@@ -167,7 +167,7 @@ def get_start_end_frames(f, mode, get_coords=True):
     else:
         return start_frames, end_frames
     
-def join_tracklets(file=SETTINGS.DATASET, mode='Epi', time_threshold=4, distance_threshold=10, min_track_length=30):
+def join_tracklets(file=SETTINGS.DATASET, mode='Epi', time_threshold=SETTINGS.FRAME_MEMORY, distance_threshold=SETTINGS.MINIMUM_DISTANCE_THRESHOLD, min_track_length=SETTINGS.MINIMUM_TRACK_LENGTH):
     with h5py.File(file, 'r+') as f:
         print('\nJoining Tracklets...')
         f['Cells'][mode][:, 0] = np.zeros(shape=f['Cells'][mode][:, 0][...].shape)

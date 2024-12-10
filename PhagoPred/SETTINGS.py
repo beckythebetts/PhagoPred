@@ -2,8 +2,8 @@ from pathlib import Path
 import h5py
 
 # ******* GENERAL *******
-DATASET = Path('PhagoPred')/'Datasets'/'filter01.h5'
-#DATASET = Path('PhagoPred')/'Datasets'/'filter01_short_imsegtrack - Copy.h5'
+# DATASET = Path('PhagoPred')/'Datasets'/'filter01_short_imsegtrack - Copy.h5'
+DATASET = Path('PhagoPred')/'Datasets'/'no_filter01_short.h5'
 MASK_RCNN_MODEL = Path("Models") / 'filter02'
 CELLPOSE_MODEL = Path("PhagoPred") / 'cellpose_segmentation' / 'Models' / '5ims'
 CLASSES = {'phase': 'Amoeba', 'epi': 'Yeast'}
@@ -18,11 +18,12 @@ with h5py.File(DATASET, 'r') as f:
 THRESHOLD = 250
 
 # ******* TRACKING *******
-OVERLAP_THRESHOLD = 0.2
-FRAME_MEMORY = 8
-TRACK = True
+MINIMUM_DISTANCE_THRESHOLD = 10
+FRAME_MEMORY = 5
 CLEAN_TRACKS = True
-MINIMUM_TRACK_LENGTH = 40
+MINIMUM_TRACK_LENGTH = 30
+
+
 VIEW_TRACKS = True # Save labelled tracked images
 NUM_FRAMES_TO_VIEW = 50 # Set as None to view all (slow)
 

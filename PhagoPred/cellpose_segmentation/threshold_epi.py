@@ -1,5 +1,5 @@
 import skimage.restoration
-import utils
+
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import ImageGrid
 import torch
@@ -11,6 +11,7 @@ import numpy as np
 import h5py
 
 from PhagoPred import SETTINGS
+from PhagoPred.utils import tools
 
 
 def test_chan_vese():

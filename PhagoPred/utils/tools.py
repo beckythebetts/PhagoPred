@@ -197,7 +197,7 @@ if __name__ == '__main__':
     # print(split_list_into_sequences(test_list))
     # print(split_list_into_sequences(test_list, return_indices=True))
     #make_short_test_copy(orig_file=Path('PhagoPred')/'Datasets'/'filter01.h5', copy_file=Path('PhagoPred')/'Datasets'/'filter01_short.h5')
-    #copy_hdf5_groups(SETTINGS.DATASET, Path('PhagoPred')/'Datasets'/'filter01_temp.h5', ['Images'])
+    copy_hdf5_groups(SETTINGS.DATASET, Path('PhagoPred')/'Datasets'/'no_filter01_short_temp.h5', ['Images'])
     # array = read_tiff(Path('03') / 't0000_mask.tif')
     # print(np.shape(array))
     # save_tiff(array, Path('03') / 't0000_mask_test.tif')
