@@ -1,0 +1,23 @@
+# Ignore Python cache and virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+
+src/
+detectron2/
+
+*.png
+
+PhagoPred/cellpose_segmentation/Models
+PhagoPred/Datasets
+PhagoPred/datasets
+PhagoPred/detectron_segmentation/Models
+
+logs/
+output/
+checkpoints/
+*.pth
+*.pt
+*.ckpt

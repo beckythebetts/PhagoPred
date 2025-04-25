@@ -1,0 +1,38 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x00007e205e0453fc, pid=21629, tid=21838
+#
+# JRE version: OpenJDK Runtime Environment (11.0.26+4) (build 11.0.26+4-post-Ubuntu-1ubuntu122.04)
+# Java VM: OpenJDK 64-Bit Server VM (11.0.26+4-post-Ubuntu-1ubuntu122.04, mixed mode, sharing, tiered, compressed oops, g1 gc, linux-amd64)
+# Problematic frame:
+# C  [libc.so.6+0x453fc]
+#
+# Core dump will be written. Default location: Core dumps may be processed with "/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -- %E" (or dumping to /home/ubuntu/PhagoPred/core.21629)
+#
+# If you would like to submit a bug report, please visit:
+#   https://bugs.launchpad.net/ubuntu/+source/openjdk-lts
+# The crash happened outside the Java Virtual Machine in native code.
+# See problematic frame for where to report the bug.
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.desktop/sun.awt.X11=ALL-UNNAMED 
+
+Host: AMD EPYC 7R32, 16 cores, 62G, Ubuntu 22.04.4 LTS
+Time: Thu Feb 20 17:05:24 2025 UTC elapsed time: 1326.587324 seconds (0d 0h 22m 6s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x0000000015e2d000):  JavaThread "AWT-XAWT" daemon [_thread_in_native, id=21838, stack(0x00007e204621b000,0x00007e204631b000)]
+
+Stack: [0x00007e204621b000,0x00007e204631b000],  sp=0x00007e2046319720,  free space=1017k
+Native frames: (J=compiled Java code, A=aot compiled Java code, j=interpreted, Vv=VM code, C=native code)
+C  [libc.so.6+0x453fc]
+
+Java frames: (J=compiled Java code, j=interpreted, Vv=VM code)
+J 3899  sun.awt.X11.XlibWrapper.XEventsQueued(JI)I java.desktop@11.0.26 (0 bytes) @ 0x00007e1f18f1f814 [0x00007e1f18f1f7c0+0x0000000000000054]
+j  sun.awt.X11.XToolkit.run(Z)V+63 java.desktop@11.0.26
+j  sun.awt.X11.XToolkit.run()V+5 java.desktop@11.0.26
+j  java.lang.Thread.run()V
