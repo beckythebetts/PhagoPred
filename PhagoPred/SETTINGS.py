@@ -31,7 +31,7 @@ VIEW_TRACKS = True # Save labelled tracked images
 NUM_FRAMES_TO_VIEW = 50 # Set as None to view all (slow)
 
 # ******* FEATURE EXTRACTION *******
-NUM_TRAINING_FRAMES = 50
+NUM_TRAINING_FRAMES = 10
 NUM_CONTOUR_POINTS = 50
 PCA_COMPONENTS = 10
 KMEANS_CLUSTERS = 4

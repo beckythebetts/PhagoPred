@@ -379,7 +379,7 @@ def get_border_representation(mask_im, num_cells, f, frame):
 
     cropped_masks = expanded_mask[np.arange(num_cells)[:, None, None], x_idxs, y_idxs]
     cell_contours = [skimage.measure.find_contours(mask, level=0.5, fully_connected='high') for mask in cropped_masks]
-    cell_contours = [cell_contour[0] if len(cell_contour)>0 else np.array([]) for cell_contour in cell_contours ]
+    cell_contours = [cell_contour[0] if len(cell_contour)>0 else np.array([]) for cell_contour in cell_contours]
     for i, cell_contour in enumerate(cell_contours):
         if len(cell_contour > 0):
             if (cell_contour[-1] != cell_contour[0]).any():
@@ -393,12 +393,13 @@ def get_minimum_mask_crop(mask):
 
     return slice(rows.min(), rows.max()+1), slice(cols.min(), cols.max()+1)
 
-def get_haralick_texture_features(image, mask, distances=[1,2,3,4,5]):
+def get_haralick_texture_features(image, mask, distances=[1,3,5, 10, 20]):
     """mask - binary mask for one cell
     average over all (4) directions"""
-    row_slice, col_slice = get_minimum_mask_crop(mask)
-    image, mask = image[row_slice, col_slice], mask[row_slice, col_slice]
-    image = image * mask
+    if mask is not None:
+        row_slice, col_slice = get_minimum_mask_crop(mask)
+        image, mask = image[row_slice, col_slice], mask[row_slice, col_slice]
+        image = image * mask
     
     features = np.empty((len(distances), 13))
 

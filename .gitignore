@@ -14,6 +14,7 @@ PhagoPred/cellpose_segmentation/Models
 PhagoPred/Datasets
 PhagoPred/datasets
 PhagoPred/detectron_segmentation/Models
+temp/
 
 logs/
 output/
