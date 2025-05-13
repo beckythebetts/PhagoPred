@@ -1,0 +1,1 @@
+{"name": "my_dataset_train", "json_file": "PhagoPred/detectron_segmentation/models/toumai_01_05/model_0/Training_Data/train/labels.json", "image_root": "PhagoPred/detectron_segmentation/models/toumai_01_05/model_0/Training_Data/train/images", "evaluator_type": "coco", "thing_classes": ["Amoeba", "Yeast"], "thing_dataset_id_to_contiguous_id": {"1": 0, "2": 1}}

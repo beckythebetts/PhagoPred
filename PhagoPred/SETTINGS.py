@@ -6,6 +6,7 @@ import h5py
 DATASET = Path('PhagoPred')/'Datasets'/'mac_07_03_short (copy).h5'
 # DATASET = Path('PhagoPred')/'Datasets'/'mac_short_seg.h5'
 MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'mac_20x'
+MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'toumai_01_05'
 CELLPOSE_MODEL = Path("PhagoPred") / 'cellpose_segmentation' / 'Models' / 'ash'
 UNET_MODEL = Path("PhagoPred") / 'unet_segmentation' / 'models' / '20x_flir_8'
 TRAINING_DATA = Path("PhagoPred") / 'segmentation' / 'models' / '20x_flir_8'
@@ -31,7 +32,7 @@ VIEW_TRACKS = True # Save labelled tracked images
 NUM_FRAMES_TO_VIEW = 50 # Set as None to view all (slow)
 
 # ******* FEATURE EXTRACTION *******
-NUM_TRAINING_FRAMES = 10
+NUM_TRAINING_FRAMES = 50
 NUM_CONTOUR_POINTS = 50
 PCA_COMPONENTS = 10
 KMEANS_CLUSTERS = 4

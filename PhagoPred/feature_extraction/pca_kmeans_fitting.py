@@ -111,7 +111,7 @@ class PCAKmeansFit:
             # kmeans_group.create_dataset('cluster_centers_', data=self.kmeans.cluster_centers_)
             # kmeans_group.create_dataset('train_labels', data=train_labels)
 
-            # kmeans_group.attrs['n_clusters'] = self.num_kmeans_clusters
+            kmeans_group.attrs['n_clusters'] = self.num_kmeans_clusters
 
     def fit(self):
         self.fit_pca()
@@ -137,6 +137,7 @@ class PCAKmeansFit:
         with h5py.File(self.h5py_file, 'r') as f:
             kmeans_group = f[self.h5py_group]['KMeans']
             cluster_centers_ = kmeans_group["cluster_centers_"][:]
+            # kmeans_group.attrs['n_clusters'] = self.num_kmeans_clusters 
             n_clusters = kmeans_group.attrs["n_clusters"]
 
             self.kmeans = KMeans(n_clusters=n_clusters)
@@ -175,7 +176,24 @@ class PCAKmeansFit:
                 idxs = np.nonzero(clusters==cluster)
                 ax.scatter(pcs[idxs, 0], pcs[idxs, 1], pcs[idxs, 2], label=str(cluster), color=colours[cluster])
         plt.legend()
+        plt.savefig('temp/example.png')
         plt.show()
+
+    def view_clusters_2d(self):
+        plt.rcParams["font.family"] = 'serif'
+        with h5py.File(self.h5py_file, 'r') as f:
+            clusters = f[self.h5py_group]['KMeans']['train_labels'][:]
+            pcs = f[self.h5py_group]['PCA']['train_pcs'][:]
+
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            colours = ['blue', 'orange', 'green', 'red']
+            for cluster in range(self.num_kmeans_clusters):
+                idxs = np.nonzero(clusters==cluster)
+                ax.scatter(pcs[idxs, 0], pcs[idxs, 1], label=str(cluster), color=colours[cluster])
+        plt.legend()
+        plt.savefig('temp/example.png')
+
 
     def pc_heatmap(self):
         plt.rcParams["font.family"] = 'serif'

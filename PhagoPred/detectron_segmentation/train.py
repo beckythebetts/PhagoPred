@@ -164,24 +164,21 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
     cfg = get_cfg()
     cfg.MODEL.DEVICE = "cuda"
     cfg.OUTPUT_DIR = str(config_directory)
-    cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_DC5_3x.yaml"))
+    cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_DC5_3x.yaml")) # pretrained model to use, doesn't make much difference which you pick
     cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-InstanceSegmentation/mask_rcnn_R_50_DC5_3x.yaml")
     cfg.DATASETS.TRAIN = ("my_dataset_train",)
     cfg.DATASETS.TEST = ("my_dataset_val",)
     cfg.DATALOADER.NUM_WORKERS = 1
-    cfg.SOLVER.IMS_PER_BATCH = 4  # This is the real "batch size" commonly known to deep learning people
-    cfg.SOLVER.BASE_LR = 0.00025  # pick a good LR
-    cfg.SOLVER.MAX_ITER = 500 # iteration = run through one batch
-    cfg.SOLVER.STEPS = []  # do not decay learning rate
-    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 32  # (default: 512)
-    cfg.MODEL.ROI_HEADS.NUM_CLASSES = 1 # note: this config means the number of classes, but a few popular unofficial tutorials incorrect uses num_classes+1 here.
-    cfg.TEST.DETECTIONS_PER_IMAGE = 500
+    cfg.SOLVER.IMS_PER_BATCH = 4  
+    cfg.SOLVER.BASE_LR = 0.00025 
+    cfg.SOLVER.MAX_ITER = 500 
+    cfg.SOLVER.STEPS = []  
+    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 32  
+    cfg.MODEL.ROI_HEADS.NUM_CLASSES = 1 
+    cfg.TEST.DETECTIONS_PER_IMAGE = 500 
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
 
-    # cfg.MODEL.ROI_HEADS.POOLER_RESOLUTION = 20
-
-    # cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[15, 20, 30, 50, 100]]
-    # cfg.MODEL.ANCHOR_GENERATOR.ASPECT_RATIOS = [[0.6, 1.0, 1.5]]
+    # The default settings apply some size augmenations to the images. I've found this decreases performance so this section makes sure all images are the same size
     with open(dataset_dir / 'train' / 'labels.json', 'r') as f:
         train_coco = json.load(f)
     min_size = min(train_coco['images'][0]['height'], train_coco['images'][0]['width'])
@@ -190,15 +187,15 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
     cfg.INPUT.MAX_SIZE_TRAIN = max_size
     cfg.INPUT.MIN_SIZE_TRAIN_SAMPLING = "choice"
 
-    cfg.INPUT.MIN_SIZE_TEST = min_size  # Set as an integer
-    cfg.INPUT.MAX_SIZE_TEST = max_size  # Set as an integer
+    cfg.INPUT.MIN_SIZE_TEST = min_size 
+    cfg.INPUT.MAX_SIZE_TEST = max_size 
 
-    # Adjust the TEST section parameters if necessary
     cfg.TEST.AUG = cfg.TEST.AUG if "AUG" in cfg.TEST else {}
-    cfg.TEST.AUG["MAX_SIZE"] = max_size # Ensure consistency with max size
-    cfg.TEST.AUG["MIN_SIZES"] = [min_size]  # Ensure consistency with min size
+    cfg.TEST.AUG["MAX_SIZE"] = max_size 
+    cfg.TEST.AUG["MIN_SIZES"] = [min_size] 
 
     cfg.TEST.EVAL_PERIOD = 100
+
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
     trainer = MyTrainer(cfg)
     trainer.resume_or_load(resume=False)

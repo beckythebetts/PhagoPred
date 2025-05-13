@@ -13,6 +13,7 @@ from PIL import Image
 import shutil
 import copy
 import mahotas
+from scipy.ndimage import binary_erosion
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import tools
@@ -389,24 +390,39 @@ def get_border_representation(mask_im, num_cells, f, frame):
 
 def get_minimum_mask_crop(mask):
     """binary mask of one cell"""
-    rows, cols = np.where(mask > 0)
-
-    return slice(rows.min(), rows.max()+1), slice(cols.min(), cols.max()+1)
-
-def get_haralick_texture_features(image, mask, distances=[1,3,5, 10, 20]):
-    """mask - binary mask for one cell
-    average over all (4) directions"""
-    if mask is not None:
-        row_slice, col_slice = get_minimum_mask_crop(mask)
-        image, mask = image[row_slice, col_slice], mask[row_slice, col_slice]
-        image = image * mask
+    if mask.any() > 0:
+        rows, cols = np.where(mask > 0)
+        return slice(rows.min(), rows.max()+1), slice(cols.min(), cols.max()+1)
     
-    features = np.empty((len(distances), 13))
+    else:
+        print('NO MASK?')
+        return slice(0,0), slice(0,0)
+
+def get_haralick_texture_features(image, mask, distances=[1,3,5, 10, 20], erode_mask=None):
+    """mask - binary mask for one cell
+    average over all (4) directions
+    erode mask to remove perimeter textures from calculation, value is approx num pixels to to remove"""
+
+    # features = np.empty((len(distances), 13))
+    features = np.full((len(distances), 13), np.nan)
+
+    if mask is not None:
+        if erode_mask is not None:
+            struct = np.ones((2*erode_mask+1, 2*erode_mask+1))  
+            mask = binary_erosion(mask, structure=struct)
+
+        try:
+            row_slice, col_slice = get_minimum_mask_crop(mask)
+            image, mask = image[row_slice, col_slice], mask[row_slice, col_slice]
+            image = image * mask
+        except ValueError:
+            return features
 
     for i, distance in enumerate(distances):
         try:
             features[i] = mahotas.features.haralick(image, distance=distance, ignore_zeros=True, return_mean=True)
-        except ValueError:
+        except ValueError as e:
+            print(e)
             pass
     return features
 

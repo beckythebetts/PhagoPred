@@ -1,1 +1,0 @@
-{"name": "my_dataset_train", "json_file": "PhagoPred/detectron_segmentation/models/20x_flir/model_2/Training_Data/train/labels.json", "image_root": "PhagoPred/detectron_segmentation/models/20x_flir/model_2/Training_Data/train/Images", "evaluator_type": "coco", "thing_classes": ["Macrophage", "Cluster"], "thing_dataset_id_to_contiguous_id": {"1": 0, "2": 1}}
