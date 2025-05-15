@@ -18,25 +18,48 @@ class MorphologyFit(PCAKmeansFit):
         super().__init__(h5py_file)
         self.h5py_group = 'Morphology'
         self.num_training_images = SETTINGS.NUM_TRAINING_FRAMES
-        self.num_pca_componeents = 10
-        self.num_kmeans_clusters = 4
+        self.num_pca_componeents = SETTINGS.PCA_COMPONENTS
+        self.num_kmeans_clusters = SETTINGS.KMEANS_CLUSTERS
 
-    def feature_func(self, frame):
-        """
+    # def feature_func(self, frame):
+    #     """
+    #     Gets contours of cells for given frame index
+    #     """
+    #     # results = []
         
-        """
-        # results = []
-        
+    #     with h5py.File(self.h5py_file, 'r') as f:
+    #         results = np.full((f['Cells']['Phase'][:].shape[1], SETTINGS.NUM_CONTOUR_POINTS*2), np.nan)
+
+    #         mask = f['Segmentations']['Phase'][f'{frame:04}'][:]
+    #         contours = mask_funcs.get_border_representation(mask, f['Cells']['Phase'][:].shape[1], f, frame)
+
+    #         for i, contour in enumerate(contours):
+    #             if len(contour) > 2:
+    #                 # results.append(PreProcessing(contour).pre_process().flatten())
+    #                 results[i] = PreProcessing(contour).pre_process().flatten()
+    #     return np.array(results)
+
+    def feature_func(self, frame_idx):
         with h5py.File(self.h5py_file, 'r') as f:
-            results = np.full((f['Cells']['Phase'][:].shape[1], SETTINGS.NUM_CONTOUR_POINTS*2), np.nan)
+            mask = f['Segmentations']['Phase'][f'{frame_idx:04}'][:]
+            num_cells = f['Cells']['Phase'].shape[1]
 
-            mask = f['Segmentations']['Phase'][f'{frame:04}'][:]
-            contours = mask_funcs.get_border_representation(mask, f['Cells']['Phase'][:].shape[1], f, frame)
+        expanded_mask = (np.expand_dims(mask, 0) == np.expand_dims(np.arange(num_cells), (1,2)))
 
-            for i, contour in enumerate(contours):
-                if len(contour) > 2:
-                    # results.append(PreProcessing(contour).pre_process().flatten())
-                    results[i] = PreProcessing(contour).pre_process().flatten()
+        return self.feature_func_expanded_mask(expanded_mask, num_cells)
+    
+    def feature_func_expanded_mask(self, expanded_mask, num_cells):
+        """
+        Gets contours of cells for expanded frame mask dims [num_cells, x, y]
+        """
+        results = np.full((num_cells, SETTINGS.NUM_CONTOUR_POINTS*2), np.nan)
+
+        contours = mask_funcs.get_border_representation(expanded_mask)
+
+        for i, contour in enumerate(contours):
+            if len(contour) > 2:
+                # results.append(PreProcessing(contour).pre_process().flatten())
+                results[i] = PreProcessing(contour).pre_process().flatten()
         return np.array(results)
 
     # def feature_func(self, frame):

@@ -9,7 +9,7 @@
             "type": "debugpy",
             "request": "launch",
             // "module": "PhagoPred.feature_extraction.batch_extract_features_no_epi",
-            "module": "PhagoPred.feature_extraction.texture.wavelets",
+            "module": "PhagoPred.feature_extraction.texture.gabor",
             // "module": "PhagoPred.detectron_segmentation.segment"
             "justMyCode": false
         }
