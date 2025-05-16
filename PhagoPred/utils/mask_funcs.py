@@ -365,20 +365,32 @@ def get_crop_indices_all(centers, side_length, image_size):
     
     return crop_indices
 
-def get_border_representation(mask_im, num_cells, f, frame):
-    """
-    Return list of cell contours from mask. 
-    [cell_idx: ](Nx2) array of (x, y) coords]
-    num_cells must be totalnumber of cells in datset (for indexing to be correct)
-    """
-    expanded_mask = (np.expand_dims(mask_im, 0) == np.expand_dims(np.arange(num_cells), (1,2)))
-    crop_idxs = get_crop_indices_all(np.stack((tools.get_features_ds(f['Cells']['Phase'], 'x')[frame], 
-                                                            tools.get_features_ds(f['Cells']['Phase'], 'y')[frame]), axis=1), 150, SETTINGS.IMAGE_SIZE)
+# def get_border_representation(mask_im, num_cells, f, frame):
+#     """
+#     Return list of cell contours from mask. 
+#     [cell_idx: ](Nx2) array of (x, y) coords]
+#     num_cells must be totalnumber of cells in datset (for indexing to be correct)
+#     """
+#     expanded_mask = (np.expand_dims(mask_im, 0) == np.expand_dims(np.arange(num_cells), (1,2)))
+#     crop_idxs = get_crop_indices_all(np.stack((tools.get_features_ds(f['Cells']['Phase'], 'x')[frame], 
+#                                                             tools.get_features_ds(f['Cells']['Phase'], 'y')[frame]), axis=1), 150, SETTINGS.IMAGE_SIZE)
     
-    x_idxs = np.array([np.arange(xmin, xmax) if xmin != xmax else np.zeros(150) for xmin, xmax in zip(crop_idxs[:,2], crop_idxs[:,3])]).astype(int)[:, :, np.newaxis]
-    y_idxs = np.array([np.arange(ymin, ymax) if ymin != ymax else np.zeros(150) for ymin, ymax in zip(crop_idxs[:,0], crop_idxs[:,1])]).astype(int)[:, np.newaxis, :]
+#     x_idxs = np.array([np.arange(xmin, xmax) if xmin != xmax else np.zeros(150) for xmin, xmax in zip(crop_idxs[:,2], crop_idxs[:,3])]).astype(int)[:, :, np.newaxis]
+#     y_idxs = np.array([np.arange(ymin, ymax) if ymin != ymax else np.zeros(150) for ymin, ymax in zip(crop_idxs[:,0], crop_idxs[:,1])]).astype(int)[:, np.newaxis, :]
 
-    cropped_masks = expanded_mask[np.arange(num_cells)[:, None, None], x_idxs, y_idxs]
+#     cropped_masks = expanded_mask[np.arange(num_cells)[:, None, None], x_idxs, y_idxs]
+#     cell_contours = [skimage.measure.find_contours(mask, level=0.5, fully_connected='high') for mask in cropped_masks]
+#     cell_contours = [cell_contour[0] if len(cell_contour)>0 else np.array([]) for cell_contour in cell_contours]
+#     for i, cell_contour in enumerate(cell_contours):
+#         if len(cell_contour > 0):
+#             if (cell_contour[-1] != cell_contour[0]).any():
+#                 cell_contours[i] = np.append(cell_contour, cell_contour[0][np.newaxis, :], axis=0)
+
+#     return cell_contours
+
+def get_border_representation(expanded_mask):
+    crop_idxs = [get_minimum_mask_crop(mask) for mask in expanded_mask]
+    cropped_masks = [mask[crop_idx[0], crop_idx[1]] for mask, crop_idx in zip(expanded_mask, crop_idxs)]
     cell_contours = [skimage.measure.find_contours(mask, level=0.5, fully_connected='high') for mask in cropped_masks]
     cell_contours = [cell_contour[0] if len(cell_contour)>0 else np.array([]) for cell_contour in cell_contours]
     for i, cell_contour in enumerate(cell_contours):
