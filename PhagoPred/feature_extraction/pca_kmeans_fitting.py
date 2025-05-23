@@ -163,6 +163,26 @@ class PCAKmeansFit:
 
         return results
     
+    def apply_expanded_mask(self, expanded_mask):
+        if self.pca is None:
+            self.load_pca()
+        if self.kmeans is None:
+            self.load_kmeans()
+
+        features = self.feature_func_expanded_mask(expanded_mask)
+        #only apply to cells with no np.nan values
+        valid_mask = ~np.isnan(features).any(axis=1)
+
+        pcs = self.pca.transform(features[valid_mask])
+
+        kmeans_distances = self.kmeans.transform(pcs)
+        
+        #refill np.nan values to ensure consistaent indexing
+        results = np.full((features.shape[0], self.num_kmeans_clusters), np.nan)
+        results[valid_mask] = kmeans_distances
+
+        return results
+    
     def view_clusters(self):
         plt.rcParams["font.family"] = 'serif'
         with h5py.File(self.h5py_file, 'r') as f:

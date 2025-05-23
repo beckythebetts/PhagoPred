@@ -12,7 +12,7 @@ from pathlib import Path
 from PIL import Image
 import shutil
 import copy
-import mahotas
+# import mahotas
 from scipy.ndimage import binary_erosion
 
 from PhagoPred import SETTINGS

@@ -1,3 +1,5 @@
+from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
+
 class BaseFeature:
 
     primary_feature = False
@@ -14,7 +16,7 @@ class BaseFeature:
         raise NotImplementedError(f"{self.get_name()} has no compute method implemented")
     
     def set_index_positions(self, start: int, end: int = None) -> None:
-        self.index_positions = list(range(start, end))
+        self.index_positions = (start, end)
     
     def get_index_positions(self) -> list[int]:
         return self.index_positions
@@ -35,6 +37,6 @@ class MorphologyModes(BaseFeature):
         Results are of dims [num_cells, num_clusters]
         """
         expanded_frame_mask = expanded_frame_mask.cpu().numpy()
-        results = self.model.apply(expanded_frame_mask, num_cells)
+        results = self.model.apply_expanded_mask(expanded_frame_mask, num_cells)
         return results
 
