@@ -391,7 +391,17 @@ def get_crop_indices_all(centers, side_length, image_size):
 def get_border_representation(expanded_mask):
     crop_idxs = [get_minimum_mask_crop(mask) for mask in expanded_mask]
     cropped_masks = [mask[crop_idx[0], crop_idx[1]] for mask, crop_idx in zip(expanded_mask, crop_idxs)]
-    cell_contours = [skimage.measure.find_contours(mask, level=0.5, fully_connected='high') for mask in cropped_masks]
+
+    cell_contours = []
+    for mask in cropped_masks:
+        try:
+            cell_contour = skimage.measure.find_contours(mask, level=0.5, fully_connected='high')
+        except ValueError:
+            cell_contour = []
+        
+        cell_contours.append(cell_contour)
+
+    # cell_contours = [skimage.measure.find_contours(mask, level=0.5, fully_connected='high') for mask in cropped_masks]
     cell_contours = [cell_contour[0] if len(cell_contour)>0 else np.array([]) for cell_contour in cell_contours]
     for i, cell_contour in enumerate(cell_contours):
         if len(cell_contour > 0):
@@ -407,7 +417,7 @@ def get_minimum_mask_crop(mask):
         return slice(rows.min(), rows.max()+1), slice(cols.min(), cols.max()+1)
     
     else:
-        print('NO MASK?')
+        # print('NO MASK?')
         return slice(0,0), slice(0,0)
 
 def get_haralick_texture_features(image, mask, distances=[1,3,5, 10, 20], erode_mask=None):

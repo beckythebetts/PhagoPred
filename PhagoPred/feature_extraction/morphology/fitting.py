@@ -48,11 +48,11 @@ class MorphologyFit(PCAKmeansFit):
 
         return self.feature_func_expanded_mask(expanded_mask, num_cells)
     
-    def feature_func_expanded_mask(self, expanded_mask, num_cells):
+    def feature_func_expanded_mask(self, expanded_mask):
         """
         Gets contours of cells for expanded frame mask dims [num_cells, x, y]
         """
-        results = np.full((num_cells, SETTINGS.NUM_CONTOUR_POINTS*2), np.nan)
+        results = np.full((expanded_mask.shape[0], SETTINGS.NUM_CONTOUR_POINTS*2), np.nan)
 
         contours = mask_funcs.get_border_representation(expanded_mask)
 

@@ -142,6 +142,10 @@ class PCAKmeansFit:
 
             self.kmeans = KMeans(n_clusters=n_clusters)
             self.kmeans.cluster_centers_ = cluster_centers_
+
+    def load_model(self):
+        self.load_pca()
+        self.load_kmeans()
         
     def apply(self, frame):
         if self.pca is None:
@@ -173,12 +177,17 @@ class PCAKmeansFit:
         #only apply to cells with no np.nan values
         valid_mask = ~np.isnan(features).any(axis=1)
 
-        pcs = self.pca.transform(features[valid_mask])
+        results = np.full((features.shape[0], self.num_kmeans_clusters), np.nan)
+
+        try:
+            pcs = self.pca.transform(features[valid_mask])
+        
+        except ValueError:
+            return results
 
         kmeans_distances = self.kmeans.transform(pcs)
         
         #refill np.nan values to ensure consistaent indexing
-        results = np.full((features.shape[0], self.num_kmeans_clusters), np.nan)
         results[valid_mask] = kmeans_distances
 
         return results
