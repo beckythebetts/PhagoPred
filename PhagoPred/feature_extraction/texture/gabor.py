@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import h5py
 from scipy import ndimage
+import torch
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import mask_funcs
@@ -65,8 +66,25 @@ class Gabor:
 
         return relative_energies
     
-    # def get_dominant_scale(self, image_array, mask):
+    def get_dominant_scales(self, image_array, masks):
+        dominant_scales = np.full(len(masks), np.nan)
+        if torch.is_tensor(image_array):
+             image_array = image_array.cpu().numpy()
+        if torch.is_tensor(masks):
+            masks = masks.cpu().numpy()
+        for i, mask in enumerate(masks):
+            if mask.sum() > 10:
+                mask = mask_funcs.erode_mask(mask)
+                row_slice, column_slice = mask_funcs.get_minimum_mask_crop(mask)
 
+                cropped_image_array = image_array[row_slice, column_slice].astype(float)
+                mask = mask[row_slice, column_slice]
+
+                relative_energies = self.get_relative_energies(cropped_image_array, mask)
+
+                dominant_scales[i] = self.wavelengths[np.argmax(relative_energies)]
+
+        return dominant_scales
 
     def view_convolved_im(self, image_array=0):
         if image_array == 0:
@@ -128,6 +146,9 @@ class Gabor:
         axs[2, 0].set_ylabel('relative energy')
         plt.tight_layout()
         plt.savefig('temp/example.png')
+
+
+
 
 def get_random_cell(erosion_val=10):
     with h5py.File(SETTINGS.DATASET, 'r') as f:

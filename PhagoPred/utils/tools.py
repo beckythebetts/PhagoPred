@@ -1,3 +1,6 @@
+from typing import Optional
+
+import re
 from pathlib import Path
 import shutil
 import torch
@@ -11,13 +14,15 @@ import sys
 import json
 import matplotlib.pyplot as plt
 import nd2
+import tifffile
+from pyometiff import OMETIFFReader
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import mask_funcs
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def hdf5_from_nd2(nd2_file, hdf5_file, phase_channel=1, epi_channel=0, start_frame=0, end_frame=1500):
+def hdf5_from_nd2(nd2_file: Path, hdf5_file: Path, phase_channel: int=1, epi_channel: int=0, start_frame: int=0, end_frame: Optional[int] = None) -> None:
     if os.path.exists(hdf5_file):
         os.remove(hdf5_file)
     with nd2.ND2File(nd2_file) as n:
@@ -52,9 +57,193 @@ def hdf5_from_nd2(nd2_file, hdf5_file, phase_channel=1, epi_channel=0, start_fra
                     im = (min_max_normalise(im) * 256).astype(np.uint8)
                     group.create_dataset(f'{frame_idx:04}', data=im)
 
- 
-        
+
+def natural_sort_key(s):
+    parts = re.split(r'(\d+)', str(s))
+    return [int(part) if part.isdigit() else part.lower() for part in parts]
+
+def hdf5_from_tiffs(tiff_files_path: Path, hdf5_file: Path,
+                    phase_channel: int = 1, epi_channel: int = 0,
+                    batch_size: int = 100) -> None:
+    """Convert multi-file, multi-page .ome.tif files to HDF5 with batched reading and processing."""
+
+    if os.path.exists(hdf5_file):
+        os.remove(hdf5_file)
+
+    tiff_files = sorted(tiff_files_path.glob("*.ome.tif"), key=natural_sort_key)
+    print(tiff_files)
+    if not tiff_files:
+        raise ValueError("No .ome.tif files found.")
+
+    # Get shape info from first file
+    with tifffile.TiffFile(str(tiff_files[0])) as tif:
+        series = tif.series[0]
+        shape = series.shape
+        T, C, Y, X = shape
+
+    # Create HDF5 file and datasets (extendable)
+    with h5py.File(hdf5_file, 'w') as h:
+        Images = h.create_group('Images')
+        Images.attrs['Camera'] = "Orca Flash 4.0, C11440"
+        Images.attrs['Pixel Size / um'] = 6.5
+        Images.attrs['Image size / pixels'] = [Y, X]
+        Images.attrs['Objective magnification'] = 20
+        res_um = Images.attrs['Pixel Size / um'] / Images.attrs['Objective magnification']
+        Images.attrs['Resolution / um'] = res_um
+        Images.attrs['FOV / um'] = [Y * res_um, X * res_um]
+        Images.attrs['Phase exposure / ms'] = 1000
+        Images.attrs['Epi exposure / ms'] = 10000
+        Images.attrs['Time interval / s'] = 60
+        Images.attrs['Objective NA'] = 0.45
+        Images.attrs['Number of frames'] = 0  # to be updated
+        Images.attrs['Notes'] = "J774 macrphages, SH1000 S.Aureus MCherry, grown in TSB + 0.1% Tet overnight. Imaged in DMEM. 1*10**5 cells per dish 1:1 MOI."
+
+        Phase = Images.create_group('Phase')
+        Epi = Images.create_group('Epi')
+
+        phase_ds = Phase.create_dataset("Data", shape=(0, Y, X), maxshape=(None, Y, X),
+                                        dtype='uint8', chunks=(1, Y, X))
+        epi_ds = Epi.create_dataset("Data", shape=(0, Y, X), maxshape=(None, Y, X),
+                                    dtype='uint8', chunks=(1, Y, X))
+
+        total_frames = 0
+        pages_per_file = []
+
+        # First, gather number of pages per file to manage global indexing
+        for file in tiff_files:
+            with tifffile.TiffFile(str(file)) as tif:
+                pages_per_file.append(len(tif.pages))
+
+        # Iterate files and read batches of pages correctly by local indexing
+        for i, file in enumerate(tiff_files):
+            sys.stdout.write(f"\rProcessing file {i + 1} / {len(tiff_files)}; total frames: {total_frames}")
+            sys.stdout.flush()
+            with tifffile.TiffFile(str(file)) as tif:
+                pages = tif.pages
+                num_pages = len(pages)
+                num_channels = C  # or get from series shape as needed
+
+                for start_idx in range(0, num_pages // num_channels, batch_size):
+                    end_idx = min(start_idx + batch_size, num_pages // num_channels)
+                    current_batch_size = end_idx - start_idx
+
+                    phase_batch = np.empty((current_batch_size, Y, X), dtype=np.uint16)
+                    epi_batch = np.empty((current_batch_size, Y, X), dtype=np.uint16)
+
+                    for t_idx in range(current_batch_size):
+                        frame_idx = start_idx + t_idx
+                        phase_page_idx = frame_idx * num_channels + phase_channel
+                        epi_page_idx = frame_idx * num_channels + epi_channel
+
+                        phase_batch[t_idx] = pages[phase_page_idx].asarray()
+                        epi_batch[t_idx] = pages[epi_page_idx].asarray()
+
+                    # Convert batches to uint8 with per-frame min-max scaling
+                    phase_uint8 = batch_convert_to_uint8(phase_batch)
+                    epi_uint8 = batch_convert_to_uint8(epi_batch)
+
+                    # Resize datasets
+                    phase_ds.resize((total_frames + current_batch_size, Y, X))
+                    epi_ds.resize((total_frames + current_batch_size, Y, X))
+
+                    # Write batches
+                    phase_ds[total_frames:total_frames + current_batch_size] = phase_uint8
+                    epi_ds[total_frames:total_frames + current_batch_size] = epi_uint8
+
+                    total_frames += current_batch_size
+
             
+
+        Images.attrs['Number of frames'] = total_frames
+        print(f"\nHDF5 creation complete. {total_frames} frames written.")
+
+
+def convert_to_uint8(image: np.ndarray, min_val=None, max_val=None) -> np.ndarray:
+    """
+    Convert a 16-bit image (or higher bit depth) to 8-bit using linear contrast stretching.
+    If min_val and max_val are not given, they're computed from the image.
+    """
+    if min_val is None:
+        min_val = image.min()
+    if max_val is None:
+        max_val = image.max()
+
+    if min_val == max_val:
+        # Prevent division by zero if the image is flat
+        return np.zeros_like(image, dtype=np.uint8)
+
+    scaled = (image.astype(np.float32) - min_val) / (max_val - min_val)
+    return np.clip(scaled * 255, 0, 255).astype(np.uint8)
+
+def batch_convert_to_uint8(images: np.ndarray, min_val=None, max_val=None) -> np.ndarray:
+    """
+    Convert a batch of images (T, Y, X) to 8-bit using linear contrast stretching.
+    If min_val/max_val are None, compute per-frame min and max.
+
+    Returns array of shape (T, Y, X), dtype=uint8.
+    """
+    images = images.astype(np.float32)
+
+    if min_val is None:
+        min_val = images.reshape(images.shape[0], -1).min(axis=1).reshape(-1, 1, 1)
+    else:
+        min_val = np.array(min_val, dtype=np.float32).reshape(-1, 1, 1)
+
+    if max_val is None:
+        max_val = images.reshape(images.shape[0], -1).max(axis=1).reshape(-1, 1, 1)
+    else:
+        max_val = np.array(max_val, dtype=np.float32).reshape(-1, 1, 1)
+
+    # Avoid division by zero: where max == min, set range to 1
+    scale = np.where(max_val != min_val, max_val - min_val, 1)
+
+    scaled = (images - min_val) / scale
+    scaled = np.clip(scaled * 255, 0, 255)
+
+    # Set flat images (min == max) to 0
+    flat_mask = (max_val == min_val).reshape(-1)
+    if np.any(flat_mask):
+        scaled[flat_mask] = 0
+
+    return scaled.astype(np.uint8)
+
+# def batch_convert_to_uint8(
+#     images: np.ndarray,
+#     lower_percentile: float = 1.0,
+#     upper_percentile: float = 99.5
+# ) -> np.ndarray:
+#     """
+#     Convert a batch of images (T, Y, X) to 8-bit using contrast stretching.
+#     Uses percentile-based min/max to avoid outliers like hot pixels.
+
+#     Parameters:
+#         images: (T, Y, X) array
+#         lower_percentile: percentile used as minimum (e.g., 1%)
+#         upper_percentile: percentile used as maximum (e.g., 99.5%)
+
+#     Returns:
+#         uint8 image array of shape (T, Y, X)
+#     """
+#     images = images.astype(np.float32)
+
+#     # Compute per-frame percentiles
+#     T = images.shape[0]
+#     flat_images = images.reshape(T, -1)
+
+#     min_vals = np.percentile(flat_images, lower_percentile, axis=1).reshape(-1, 1, 1)
+#     max_vals = np.percentile(flat_images, upper_percentile, axis=1).reshape(-1, 1, 1)
+
+#     # Avoid division by zero
+#     scale = np.where(max_vals != min_vals, max_vals - min_vals, 1)
+#     scaled = (images - min_vals) / scale
+#     scaled = np.clip(scaled * 255, 0, 255)
+
+#     # Set flat images to zero
+#     flat_mask = (max_vals == min_vals).reshape(-1)
+#     if np.any(flat_mask):
+#         scaled[flat_mask] = 0
+
+#     return scaled.astype(np.uint8)
 
 
 def min_max_normalise(array):
@@ -228,6 +417,8 @@ def create_hdf5(hdf5_filename, phase_tiffs_path, epi_tiffs_path):
             sys.stdout.flush()
             Epi.create_dataset(im.stem, data=np.array(Image.open(im, mode='r')))
             i += 1
+
+
 
 def rename_datasets_in_group(h5_file_path, group_path):
     """
@@ -695,8 +886,20 @@ def plot_correlations(features='all'):
 
 
 if __name__ == '__main__':
+    hdf5_from_tiffs(Path("D:/27_05_1"), 
+                    Path('D:/27_05.h5'),
+                    phase_channel=1,
+                    epi_channel=2,
+                    )
+    
+    # with h5py.File(Path('D:/27_05.h5'), 'r') as f:
+    #     dset = f['Images/Epi/Data']
+    #     plt.imsave('D:/test0.png', dset[0])
+    #     plt.imsave('D:/test200.png', dset[200])
+        # print(dset.shape)
+        # print(dset[0])
     # get_hist('intensity_mean')
-    plot_correlations(['area', 'intensity_mean', 'intensity_variance', 'perimeter', 'speed', 'displacement_speed', 'phagocyte_density_500', 'perimeter_over_area'])
+    # plot_correlations(['area', 'intensity_mean', 'intensity_variance', 'perimeter', 'speed', 'displacement_speed', 'phagocyte_density_500', 'perimeter_over_area'])
     # hdf5_from_nd2(r'D:\7_3\260228.nd2', Path('PhagoPred') / 'Datasets' / 'mac_07_03.h5')
     # with h5py.File(SETTINGS.DATASET, 'r+') as f:
     #     del f['Cells']['Phagocytosis']

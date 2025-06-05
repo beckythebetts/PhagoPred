@@ -172,11 +172,13 @@ class FeaturesExtraction:
                 cell_type.set_num_cells(f[cell_type.features_ds].shape[cell_type.DIMS.index("Cell Index")])
                 cell_type.set_feature_idxs()
 
-                # cell_type.set_initial_num_features(3)
-                # cell_type.get_feature_names()
+
                 cell_type.set_initial_num_features(f[cell_type.features_ds].shape[cell_type.DIMS.index("Feature")])
 
-                cell_type.set_up_features_ds(f)
+                # cell_type.set_up_features_ds(f)
+
+                cell_type.set_initial_num_features(cell_type.initial_num_features-1)
+                cell_type.get_feature_names()
 
     def extract_features(self) -> None:
         with h5py.File(self.h5py_file, 'r+') as f:
@@ -205,6 +207,8 @@ class FeaturesExtraction:
 
                     expanded_mask = torch.tensor(mask).to(self.DEVICE).unsqueeze(0) == cell_idxs.unsqueeze(1).unsqueeze(2)
 
+                    if first_cell == 0:
+                        expanded_mask[0] = torch.zeros_like(expanded_mask[0])
                     for feature in cell_type.primary_features:
                         result = feature.compute(mask=expanded_mask, image=image)
                         if result.ndim == 1:
@@ -241,10 +245,12 @@ def main():
 
     phase_features = [
         # features.MorphologyModes(), 
-        features.Speed(),
-        features.DensityPhase(),
-        features.Displacement()
-        # features.Perimeter()
+        # features.Speed(),
+        # features.DensityPhase(),
+        # features.Displacement()
+        # features.Perimeter(),
+        # features.Circularity()
+        features.GaborScale()
         ]
     
     for feature in phase_features:

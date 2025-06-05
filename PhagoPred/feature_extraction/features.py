@@ -3,6 +3,7 @@ import torch
 import numpy as np
 
 from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
+from PhagoPred.feature_extraction.texture.gabor import Gabor
 from PhagoPred import SETTINGS
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -87,18 +88,12 @@ class Displacement(BaseFeature):
 
     def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
         positions = phase_xr.sel(Feature=['x', 'y'])
-        # positions = positions.where(positions.notnull())
+
         positions_0 = positions.isel(Frame=0).expand_dims({'Frame': positions.sizes['Frame']})
 
         displacements = ((positions-positions_0)**2).sum(dim='Feature')**0.5
 
-        
-        
-
         mask = positions.sel(Feature='x').notnull()
-        # print(mask.sum().compute())
-        # print(mask.size)
-        # mask = mask.reindex_like(displacements)
 
         displacements = displacements.where(mask)
 
@@ -159,4 +154,26 @@ class Perimeter(BaseFeature):
 
         return result
         
+class Circularity(BaseFeature):
+    """
+    C = 4*pi*(Area) / (Perimeter)**2
+    """
+
+    derived_feature = True
+
+    def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
+        circularity = phase_xr.sel(Feature=['area']) * 4 * np.pi / phase_xr.sel(Feature='Perimeter')**2
+        return circularity.values
+    
+class GaborScale(BaseFeature):
+
+    primary_feature = True
+
+    def __init__(self):
+        super().__init__()
+        self.gabor = Gabor()
+
+    def compute(self, mask: torch.tensor, image: torch.tensor) -> np.array:
+        dominant_scales = self.gabor.get_dominant_scales(image, mask)
+        return np.array(dominant_scales)
 

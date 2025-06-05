@@ -485,6 +485,9 @@ def calculate_mean_diameter(training_folder):
     # Return the average diameter of all cells
     return np.mean(diameters).astype(float)  # Fallback to a default if no cells are found
 
+def erode_mask(mask: np.array, erosion_val: int=10) -> np.array:
+    struct = np.ones((2*erosion_val+1, 2*erosion_val+1))
+    return binary_erosion(mask, structure=struct)
 
 if __name__ == '__main__':
     # get_centre(np.zeros((5, 5)))
