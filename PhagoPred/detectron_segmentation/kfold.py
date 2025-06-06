@@ -84,127 +84,71 @@ class KFold:
         # for names in [('00', '01'), ('01', '10'), ('10', '11'), ('11', '10')]:
         #     self.make_split(names)
 
-    def train_and_eval(self):
-        APs = []
-        for file in self.directory.glob('*model_1*'):
-            # if '3' not in file.name and '1' not in file.name:
+    def train(self):
+        for file in self.directory.glob('*model_*'):
             train(directory=file)
-
-            num_training_cells = 0
-            with open(file / 'Training_Data' / 'train' / 'labels.json', 'r') as f:
-                labels = json.load(f)
-            for annotation in labels['annotations']:
-                if annotation['category_id'] == 1:
-                    num_training_cells += 1
-            with open(file / 'number_training_cells.txt', 'w') as f:
-                f.write(str(num_training_cells))
-
-            for im_name in (file / 'Training_Data' / 'validate' / 'images').iterdir():
-
-                # im = plt.imread(im_name)[:, :, :3]*255
-
-                im = plt.imread(im_name)
-
-                im_8bit = (im / im.max() * 255).astype(np.uint8)
-                print(im_8bit.shape)
-                frame_processed = np.stack([np.array(im)]*3, axis=-1)
-
-                # print(im.shape)
-                # if im.ndim == 3:
-                #     im = im[:, :, :3]
-                # elif im.ndim == 2:
-                #     im = im[:, :, None]*np.ones(3)
-                # else:
-                #     raise ValueError
-
-                pred_cells, pred_clusters = seg_image(cfg_dir = file / 'Model', im = frame_processed)
-                true_cells, true_clusters = mask_funcs.coco_to_masks(coco_file = file / 'Training_Data' / 'validate' / 'labels.json', im_name = im_name) 
-
-                view_cells = tools.show_segmentation(im, pred_cells, true_cells)
-                view_all = tools.show_segmentation(im, mask_funcs.combine_cells_clusters(pred_cells, pred_clusters), mask_funcs.combine_cells_clusters(true_cells, true_clusters))
-
-                plt.imsave(file / 'Training_Data' / 'validate' / f'{im_name.stem}_cells.png', view_cells/255)
-                plt.imsave(file / 'Training_Data' / 'validate' / f'{im_name.stem}_clusters.png', view_all/255)
-
-                pred_mask_im = Image.fromarray(pred_cells.astype(np.int32), mode='I')
-                pred_mask_im.save(file / 'Training_Data' / 'validate' / f'{im_name.stem}_pred_mask.png')
-                # plt.imsave(file / 'Training_Data' / 'validate' / f'{im_name.stem}_pred_mask.png', pred_cells, cmap='gray')
-
-                thresholds = np.arange(0.5, 1.0, 0.05)
-                APs, TPs, FPs, FNs = cellpose.metrics.average_precision(true_cells.astype(int), pred_cells.astype(int), threshold=thresholds)
-                precisions = TPs / (TPs+FPs)
-                recalls = TPs / (TPs+FNs)
-                F1s = TPs / (TPs + 0.5*(FPs+FNs))
-                df = pd.DataFrame({'Precision': precisions,
-                                'Recall': recalls,
-                                'F1': F1s},
-                                index=thresholds)
-                df.to_csv(str(file / 'Training_Data' / 'validate' / f'{im_name.stem}_results.txt'), sep='\t')
-                iou_total = mask_funcs.cal_iou(mask_funcs.combine_cells_clusters(pred_cells, pred_clusters)>0, mask_funcs.combine_cells_clusters(true_cells, true_clusters)>0)
-                with open(file / 'Training_Data' / 'validate' / f'{im_name.stem}_iou.txt', 'w') as f:
-                    f.write(str(iou_total))
-
             unregister_coco_instances('my_dataset_train')
             unregister_coco_instances('my_dataset_val')
             evaluator(directory=file)
             unregister_coco_instances('my_dataset_train')
             unregister_coco_instances('my_dataset_val')
 
-
     def eval(self):
         for file in self.directory.glob('*model_*'):
-            num_training_cells = 0
-            with open(file / 'Training_Data' / 'train' / 'labels.json', 'r') as f:
-                labels = json.load(f)
-            for annotation in labels['annotations']:
-                if annotation['category_id'] == 1:
-                    num_training_cells += 1
-            with open(file / 'number_training_cells.txt', 'w') as f:
-                f.write(str(num_training_cells))
-
             for im_name in (file / 'Training_Data' / 'validate' / 'images').iterdir():
-                # im = plt.imread(im_name)*255
-                # # print(im.shape)
-                # if im.ndim == 3:
-                #     im = im[:, :, :3]
-                # elif im.ndim == 2:
-                #     im = im[:, :, None]*np.ones(3)
-                # else:
-                #     raise ValueError
-                # pred_cells, pred_clusters = seg_image(cfg_dir = file / 'Model', im = im)
-
                 im = plt.imread(im_name)
 
-                im_8bit = (im / im.max() * 255).astype(np.uint8)
-                print(im_8bit.shape)
                 frame_processed = np.stack([np.array(im)]*3, axis=-1)
 
-                pred_cells, pred_clusters = seg_image(cfg_dir = file / 'Model', im = frame_processed)
-                true_cells, true_clusters = mask_funcs.coco_to_masks(coco_file = file / 'Training_Data' / 'validate' / 'labels.json', im_name = im_name) 
+                pred_masks = seg_image(cfg_dir = file / 'Model', im = frame_processed)
+                true_masks = mask_funcs.coco_to_masks(coco_file = file / 'Training_Data' / 'validate' / 'labels.json', im_name = im_name) 
+                
+            
+                #binary masks showing positions of all cateogries
+                combi_pred = mask_funcs.combine_masks(list(pred_masks.values()))
+                combi_true = mask_funcs.combine_masks(list(true_masks.values()))
 
-                view_cells = tools.show_segmentation(im, pred_cells, true_cells)
-                view_all = tools.show_segmentation(im, mask_funcs.combine_cells_clusters(pred_cells, pred_clusters), mask_funcs.combine_cells_clusters(true_cells, true_clusters))
+                view_all = tools.show_segmentation(im, combi_pred, combi_true)
+                plt.imsave(file / f'{im_name.stem}_view.png', view_all/255)
 
-                plt.imsave(file / 'Training_Data' / 'validate' / f'{im_name.stem}_cells.png', view_cells/255)
-                plt.imsave(file / 'Training_Data' / 'validate' / f'{im_name.stem}_clusters.png', view_all/255)
-                # print('numpy, ', np.unique(pred_cells))
-                pred_mask_im = Image.fromarray(pred_cells.astype(np.int32), mode='I')
-                pred_mask_im.save(file / 'Training_Data' / 'validate' / f'{im_name.stem}_pred_mask.png')
-                # plt.imsave(file / 'Training_Data' / 'validate' / f'{im_name.stem}_pred_mask.png', pred_cells/2**16, cmap='gray')
+                for category in pred_masks.keys():
+                    view = tools.show_segmentation(im, pred_masks[category], true_masks[category])
+                    plt.imsave(file / f'{im_name.stem}_{category}_view.png', view)
 
-                thresholds = np.arange(0.5, 1.0, 0.05)
-                APs, TPs, FPs, FNs = cellpose.metrics.average_precision(true_cells.astype(int), pred_cells.astype(int), threshold=thresholds)
-                precisions = TPs / (TPs+FPs)
-                recalls = TPs / (TPs+FNs)
-                F1s = TPs / (TPs + 0.5*(FPs+FNs))
-                df = pd.DataFrame({'Precision': precisions,
-                                'Recall': recalls,
-                                'F1': F1s},
-                                index=thresholds)
-                df.to_csv(str(file / 'Training_Data' / 'validate' / f'{im_name.stem}_results.txt'), sep='\t')
-                iou_total = mask_funcs.cal_iou(mask_funcs.combine_cells_clusters(pred_cells, pred_clusters)>0, mask_funcs.combine_cells_clusters(true_cells, true_clusters)>0)
-                with open(file / 'Training_Data' / 'validate' / f'{im_name.stem}_iou.txt', 'w') as f:
-                    f.write(str(iou_total))
+                    pred_mask_im = Image.fromarray(pred_masks[category].astype(np.int32), mode='I')
+                    pred_mask_im.save(file / f'{im_name.stem}_{category}_pred_mask.png')
+
+                    prec_recall_curves = prec_recall_curves(true_masks[category], pred_masks[category])
+                    prec_recall_curves.to_csv(str(file / f'{im_name.stem}_{category}_results.txt'), sep='\t')
+                
+                prec_recall_curves = prec_recall_curves()
+                prec_recall_curves.to_csv(str(file / f'{im_name.stem}_results.txt'), sep='\t')
+    
+    def prec_recall_curve(self, true_mask: np.ndarray, 
+                          pred_mask: np.ndarray, 
+                          thresholds: np.ndarray = np.arange(0.5, 1.0, 0.05)
+                          ) -> pd.DataFrame:
+        """
+        Computes pandas datframe representing preciosn, recall and f1 curves over iou threshold sspecifed
+        Parameters:
+            true_mask:
+            pred_mask:
+        Returns:
+            thresholds
+        """
+        APs, TPs, FPs, FNs = cellpose.metrics.average_precision(
+            true_mask.astype(int), 
+            pred_mask.astype(int), 
+            threshold=thresholds
+            )
+        precisions = TPs / (TPs+FPs)
+        recalls = TPs / (TPs+FNs)
+        F1s = TPs / (TPs + 0.5*(FPs+FNs))
+        df = pd.DataFrame({'Precision': precisions,
+                        'Recall': recalls,
+                        'F1': F1s},
+                        index=thresholds)
+        return df
     
     def plot_results(self):
         results = []
@@ -476,12 +420,12 @@ def split_masks_by_area(true_masks, pred_masks, n_groups=4):
 def main():
     faulthandler.enable()
     # merge_jsons(Path('PhagoPred')/ 'detectron_segmentation' / 'models' / 'toumai_01_05' / 'labels')
-    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / 'toumai_01_05')
+    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac')
     # my_kfold.split_all()
     # my_kfold.train_and_eval()
-    
+    # my_kfold.train()
     my_kfold.eval()
-    my_kfold.plot_results()
+    # my_kfold.plot_results()
     # my_kfold.eval_feature(feature_func=mask_funcs.get_densities, feature_name='num cells within 500 pixels', n_groups=3)
     # my_kfold.features_scatter_plot(feature_func=mask_funcs.get_perimeters_over_areas, feature_name='perimeter/area')
 

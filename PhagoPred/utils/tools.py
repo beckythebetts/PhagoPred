@@ -15,7 +15,7 @@ import json
 import matplotlib.pyplot as plt
 import nd2
 import tifffile
-from pyometiff import OMETIFFReader
+
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import mask_funcs
@@ -270,7 +270,9 @@ def standardise(image):
 def show_segmentation(image_array, mask_array, true_mask_array=None):
     if len(image_array.shape) == 2:
         image_array = torch.tensor(np.stack((image_array, image_array, image_array), axis=-1))
-    image_array, mask_array = torch.tensor(image_array), torch.tensor(mask_array)
+    else:
+        image_array = torch.tensor(image_array)
+    mask_array = torch.tensor(mask_array)
     outline = mask_funcs.mask_outline(torch.where(mask_array>0, 1, 0), thickness=2)
 
     image_array[:,:,0][outline] = torch.max(image_array)

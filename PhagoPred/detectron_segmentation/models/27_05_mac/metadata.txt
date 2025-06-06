@@ -1,0 +1,9 @@
+Camera: Orca Flash 4.0, C11440
+Exposure: 1000ms
+FOV/um: 665.6, 665.6
+Image size / pixels: 2048, 2048
+Objective NA: 0.45
+Objective Magnification: 20
+Pixel Size / um: 6.5
+Resolution/um: 0.325
+Notes: J774 macrophages, SH1000 S.Aureus MCherry, grown in TSB + 0.1% Tet overnight. Imaged in DMEM. 1*10**5 cells per dish 1:1 MOI.

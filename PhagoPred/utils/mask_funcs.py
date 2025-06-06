@@ -1,4 +1,4 @@
-
+from typing import Union
 import numpy as np
 import cv2
 import torch
@@ -18,7 +18,15 @@ from scipy.ndimage import binary_erosion
 from PhagoPred import SETTINGS
 from PhagoPred.utils import tools
 
-def coco_to_masks(coco_file, im_name):
+def coco_to_masks(coco_file: Union[Path,str], im_name: str) -> dict[str, np.ndarray]:
+    """
+    Get a mask for each class category in coco_file
+    Parameters:
+        coco_file: coco file containing annnotations for im_name
+        im_name: image for which to get mask/s
+    Returns: 
+        dictionary {category name: np array mask}
+    """
     with open(coco_file, 'r') as f:
         coco_json = json.load(f)
 
@@ -32,19 +40,82 @@ def coco_to_masks(coco_file, im_name):
 
     assert im_id is not None, f"image {im_name} not found"
 
-    cell_mask = np.zeros(shape=(height, width))
-    cluster_mask = np.zeros(shape=(height, width))
+    masks = {category["id"]: np.zeros(shape=(height, width)) for category in coco_json["categories"]}
+    category_counts = {category["id"]: 0 for category in coco_json['categories']}
 
     for annotation in coco_json['annotations']:
         if annotation['image_id'] == im_id:
             outline_coords = np.array(np.array(annotation['segmentation']).reshape(-1, 2))
             outline_coords = outline_coords[:, [1,0]]
-            binary_mask = skimage.draw.polygon2mask(cell_mask.shape, outline_coords)
-            if annotation['category_id'] == 1:
-                cell_mask[binary_mask] = annotation['id']
-            elif annotation['category_id'] == 2:
-                cluster_mask[binary_mask] = annotation['id']
-    return cell_mask, cluster_mask
+            binary_mask = skimage.draw.polygon2mask((height, width), outline_coords)
+            for category_id, mask in masks.items():
+                if annotation['category_id'] == category_id:
+                    category_counts[category_id] += 1
+                    mask[binary_mask] = category_counts[category_id]
+    
+    id_to_name = {cat['id']: cat['name'] for cat in coco_json['categories']}
+    masks = {id_to_name[id]: mask for id, mask in masks.items()}
+
+    return masks
+
+def boolean_combine_masks(masks: list[np.ndarray]) -> np.ndarray:
+    """
+    Combine multiple masks (values 1, .., N) to one binary mask
+    Parameters:
+        masks: list of masks
+    Returns:
+        boolean mask showing where objects are in any of masks
+    """
+    binary_mask = np.zeros_like(masks[0])
+    for mask in masks:
+        binary_mask = np.logical_or(binary_mask, mask > 0)
+    
+    return binary_mask
+
+def combine_masks(masks: list[np.ndarray]) -> np.ndarray:
+    """
+    Combine multiple masks so that all objects are indexed
+    Parameter:
+        masks: list of masks
+    Returns:
+        mask
+    """
+    combined_mask = np.zeros_like(masks[0])
+    idx_count = 0
+    for mask in masks:
+        combined_mask = np.where(mask>0, mask+idx_count, combined_mask)
+        idx_count = np.max(combined_mask)
+    
+    return combined_mask
+
+
+# def coco_to_masks(coco_file, im_name):
+#     with open(coco_file, 'r') as f:
+#         coco_json = json.load(f)
+
+#     im_id = None
+#     for image in coco_json['images']:
+#         if image['file_name'] == im_name.name:
+#             im_id = image['id']
+#             height = image['height']
+#             width = image['width']
+#             break
+
+#     assert im_id is not None, f"image {im_name} not found"
+
+#     cell_mask = np.zeros(shape=(height, width))
+#     cluster_mask = np.zeros(shape=(height, width))
+
+#     for annotation in coco_json['annotations']:
+#         if annotation['image_id'] == im_id:
+#             outline_coords = np.array(np.array(annotation['segmentation']).reshape(-1, 2))
+#             outline_coords = outline_coords[:, [1,0]]
+#             binary_mask = skimage.draw.polygon2mask(cell_mask.shape, outline_coords)
+#             if annotation['category_id'] == 1:
+#                 cell_mask[binary_mask] = annotation['id']
+#             elif annotation['category_id'] == 2:
+#                 cluster_mask[binary_mask] = annotation['id']
+#     return cell_mask, cluster_mask
 
 def coco_to_binary_mask(coco_file, im_name):
     with open(coco_file, 'r') as f:

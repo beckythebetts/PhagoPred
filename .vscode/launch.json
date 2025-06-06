@@ -11,7 +11,8 @@
             // "module": "PhagoPred.feature_extraction.batch_extract_features_no_epi",
             // "module": "PhagoPred.feature_extraction.extract_features",
             // "module": "PhagoPred.detectron_segmentation.segment",
-            "module": "PhagoPred.utils.dataset_creation",
+            // "module": "PhagoPred.utils.dataset_creation",
+            "module": "PhagoPred.detectron_segmentation.kfold",
             "justMyCode": false
         }
     ]

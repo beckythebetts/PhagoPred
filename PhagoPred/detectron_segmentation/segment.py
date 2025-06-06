@@ -27,87 +27,128 @@ from PhagoPred.utils import tools
 os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def seg_image(cfg_dir, im):
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+def get_model(cfg_dir: Path) -> tuple[dict, detectron2.config.CfgNode]:
+    """
+    Get training metadata and model from cfg_dir
+    Parameters:
+        cfg_dir: path containing train_metadata.json, config.yaml. model_final.pth
+    Returns:
+        train_metadata dict
+        cfg
+    """
     with open(str(cfg_dir / 'train_metadata.json')) as json_file:
       train_metadata = json.load(json_file)
     cfg = get_cfg()
     cfg.merge_from_file(str(cfg_dir / 'config.yaml'))
-    cfg.MODEL.WEIGHTS = str(cfg_dir / 'model_final.pth') # path to the model we just trained
+    cfg.MODEL.WEIGHTS = str(cfg_dir / 'model_final.pth')
+
+    return train_metadata, cfg
+
+def seg_image(cfg_dir: Path, 
+              im: np.ndarray, 
+            #   categories: tuple[str, ...]
+              ) -> dict[str, np.ndarray]:
+    """
+    Segment a single image using model in cfg_dir
+    Parameters:
+        cfg_dir: Path to cfg dir
+        im: np.ndarry image [X, Y, 3]
+        # categories: tuple of the category names to segment
+    Returns:
+        masks: Dict of {caetgory name: mask}. Each mask shape [X, Y], 0 for background with each item labelled 1, ..,N
+    """
+    device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(device_str)
+
+    train_metadata, cfg = get_model(cfg_dir)
+
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5   # set a custom testing threshold
-    cfg.MODEL.DEVICE = "cuda"
-    # cfg.MODEL.DEVICE = 'cpu'
+    cfg.MODEL.DEVICE = device_str
     predictor = DefaultPredictor(cfg)
     detectron_outputs = predictor(im)
-    # class_masks = {class_name: torch.zeros_like(detectron_outputs["instances"].pred_masks[0], dtype=torch.int16,
-    #                                             device=device)
-    #                for class_name in train_metadata['thing_classes']}
-    mask_cell = torch.zeros_like(detectron_outputs["instances"].pred_masks[0], dtype=torch.int16,
-                                                device=device)
-    mask_cluster = torch.zeros_like(detectron_outputs["instances"].pred_masks[0], dtype=torch.int16,
-                                                device=device)
 
+    categories = train_metadata["thing_classes"]
+
+    masks = {category: torch.zeros_like(detectron_outputs["instances"].pred_masks[0], dtype=torch.int16,
+                                                device=device) for category in categories}
+    category_count = {category: 0 for category in categories}
     for i, pred_class in enumerate(detectron_outputs["instances"].pred_classes):
         class_name = train_metadata['thing_classes'][pred_class]
         instance_mask = detectron_outputs["instances"].pred_masks[i].to(device=device)
 
         # ******* ADJUST FOR NON SQUARE IMAGES*********
-        # if SETTINGS.REMOVE_EDGE_CELLS:
-        #     if torch.any(torch.nonzero(instance_mask)==1) or torch.any(torch.nonzero(instance_mask)==SETTINGS.IMAGE_SIZE[0]-1):
-        #         continue
-        if class_name == 'Amoeba':
-            mask_cell = torch.where(instance_mask,
-                                torch.tensor(i, dtype=torch.int16),
-                                mask_cell)
+        if SETTINGS.REMOVE_EDGE_CELLS:
+            if torch.any(torch.nonzero(instance_mask)==1) or torch.any(torch.nonzero(instance_mask)==SETTINGS.IMAGE_SIZE[0]-1):
+                continue
 
-        elif class_name == 'Cluster':
-            mask_cluster = torch.where(instance_mask,
-                                torch.tensor(i, dtype=torch.int16),
-                                mask_cluster)
-            
-    torch.cuda.empty_cache()
+        for category in categories:
+            if class_name == category:
+                category_count[category] += 1
+                masks[category] = torch.where(instance_mask,
+                                torch.tensor(category_count[category], dtype=torch.int16),
+                                masks[category])
+        torch.cuda.empty_cache()
 
+    return {category: mask.cpu().numpy().astype(np.int16) for category, mask in masks.items()}
 
-    return mask_cell.cpu().numpy().astype(np.int16), mask_cluster.cpu().numpy().astype(np.int16)
+def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model', 
+                dataset: Path = SETTINGS.DATASET,
+                channel: str = 'Phase') -> None:
+    
+    device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(device_str)
+    
+    train_metadata, cfg = get_model(cfg_dir)
 
-def segment_tiff(tiff_file: Path, save_dir: Path, model_dir=SETTINGS.MASK_RCNN_MODEL):
-    save_dir.mkdir(exist_ok=True)
-
-    tiff_stack = tiff.imread(str(tiff_file))
-
-    config_directory = model_dir / 'Model'
-    with open(str(config_directory / 'train_metadata.json')) as json_file:
-      train_metadata = json.load(json_file)
-    cfg = get_cfg()
-    cfg.merge_from_file(str(config_directory / 'config.yaml'))
-    cfg.MODEL.WEIGHTS = str(config_directory / 'model_final.pth') # path to the model we just trained
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5   # set a custom testing threshold
-    cfg.MODEL.DEVICE = "cuda"
-    # cfg.MODEL.DEVICE = 'cpu'
+    cfg.MODEL.DEVICE = device_str
     predictor = DefaultPredictor(cfg)
 
-    for frame_idx, frame in enumerate(tiff_stack):
-        sys.stdout.write(f'\rSegmenting image {frame_idx} / {len(tiff_stack)}')
-        sys.stdout.flush()
-        frame_8bit = (frame / frame.max() * 255).astype(np.uint8)
-        frame_processed = np.stack([np.array(frame_8bit)]*3, axis=-1)
-        detectron_outputs = predictor(frame_processed)
+    categories = train_metadata["thing_classes"]    
 
-        mask = torch.zeros_like(detectron_outputs["instances"].pred_masks[0], dtype=torch.int16,
-                                                        device=device)
-        for i, pred_class in enumerate(detectron_outputs["instances"].pred_classes):
-            class_name = train_metadata["thing_classes"][pred_class]
-            instance_mask = detectron_outputs["instances"].pred_masks[i].to(device=device)
-            if class_name == 'Amoeba':
-                mask = torch.where(instance_mask, i, mask)
+    with h5py.File(SETTINGS.DATASET, 'r+') as f:
 
-        mask = mask.cpu().numpy()
+        for group_name in ('Segmentations', 'Cells'):
+            group = f.require_group(group_name)
+            if channel in group:
+                del group[channel]
+        images_ds = f['Images'][channel]
+        segmentations_ds = f.create_dataset(f'Segmentations/{channel}', shape=images_ds.shape,
+                                            max_shape=images_ds.shape, dtype='i2')
+        cells_ds = f.create_dataset(f'Cells/{channel}', shape=(images_ds.shape[0], 0, len(train_metadata["thing_classes"])), 
+                                    max_shape=(images_ds.shape[0], None, None), dtype=np.float32)
+        cells_ds.attrs['features'] = train_metadata["thing_classes"]
 
-        mask_im = Image.fromarray(mask)
+        for frame_idx in range(images_ds.shape[0]):
+            sys.stdout.write(f'\rSegmenting image {int(frame_idx)+1} / {f["Images"].attrs["Number of frames"]}')
+            sys.stdout.flush()
 
-        mask_im.save(save_dir / f'{frame_idx:04}.png')
+            image = images_ds[frame_idx]
+
+            detectron_outputs = predictor(np.stack([np.array(image)]*3, axis=-1))
+
+            mask = torch.zeros_like(detectron_outputs["instances"].pred_masks[0], dtype=torch.int16,
+                                    device=device)
+            
+            for i, pred_class in enumerate(detectron_outputs["instances"].pred_classes):
+                class_name = train_metadata['thing_classes'][pred_class]
+                instance_mask = detectron_outputs["instances"].pred_masks[i].to(device=device)
+
+                # ******* ADJUST FOR NON SQUARE IMAGES!!!*********
+                if SETTINGS.REMOVE_EDGE_CELLS:
+                    if torch.any(torch.nonzero(instance_mask)==1) or torch.any(torch.nonzero(instance_mask)==SETTINGS.IMAGE_SIZE[0]-1):
+                        continue
+                
+                if class_name == 'Cell':
+                    mask = torch.where(instance_mask,
+                                       torch.tensor(cell_idx, dtype=torch.int16),
+                                       mask)
+                    cell_idx += 1
+                elif class_name == 'Cluster':
+                    mask = torch.where(instance_mask,
+                                       torch.tensor(1, dtype=torch.int16),
+                                       mask)
+            mask = mask.cpu().numpy()
 
 
         
