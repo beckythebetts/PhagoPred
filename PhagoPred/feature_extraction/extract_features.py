@@ -141,7 +141,8 @@ class FeaturesExtraction:
             self, 
             h5py_file=SETTINGS.DATASET, 
             frame_batchsize=10,
-            cell_batch_size=100):
+            cell_batch_size=100
+            ) -> None:
         
         self.num_frames = None
         
@@ -154,6 +155,9 @@ class FeaturesExtraction:
 
         self.set_up()
 
+    def get_cell_type(self, cell_type_name: str):
+        return self.cell_types[self.cell_type_names.index(cell_type_name)]
+    
     def add_feature(self, feature, cell_type: str) -> None:
         """
         Add feature to specified cell type

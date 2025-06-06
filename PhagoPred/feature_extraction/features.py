@@ -29,7 +29,33 @@ class BaseFeature:
     def get_index_positions(self) -> list[int]:
         return self.index_positions
     
+class Coords(BaseFeature):
+    """
+    Centroid x, y coordinates and area
+    """
+    primary_feature = True
 
+    def __inti__(self):
+        self.x_grid, self.y_grid = None, None
+    def get_names(self):
+        return ['X', 'Y', 'Area']
+    
+    def compute(self, mask: torch.tensor, image: torch.tensor) -> np.array:
+        if self.x_grid is None or self.y_grid is None:
+            self.x_grid, self.y_grid = torch.meshgrid(
+                torch.arange(mask.shape[0]).to(device),
+                torch.arange(mask.shape[1]).to(device),
+                indexing='ij')
+            for grid in (self.x_grid, self.y_grid): grid.unsqueeze(2) 
+
+        areas = torch.sum(mask, dim=(1, 2))
+        xs = torch.sum(self.x_grid * mask, dim=(1, 2)) / areas
+        ys = torch.sum(self.y_grid * mask) / areas
+
+        return np.stack((xs.cpu().numpy(), 
+                         ys.cpu().numpy(),
+                         areas.cpu().numpy()), axis=-1)
+    
 class MorphologyModes(BaseFeature):
 
     primary_feature = True

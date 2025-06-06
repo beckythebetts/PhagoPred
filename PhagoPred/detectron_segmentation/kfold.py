@@ -55,6 +55,8 @@ class KFold:
         self.directory = directory
         self.ims = sorted([im for im in (self.directory / 'images').iterdir()])
         self.coco = directory / 'labels.json'
+        with open(self.coco, 'r') as f:
+            self.categories = json.load(f)["categories"]
 
     def split_all(self, num_val=1):
         for i in range(int(len(self.ims)/num_val)):
@@ -122,7 +124,7 @@ class KFold:
                     prec_recall_curves.to_csv(str(file / f'{im_name.stem}_{category}_results.txt'), sep='\t')
                 
                 prec_recall_curves = prec_recall_curves()
-                prec_recall_curves.to_csv(str(file / f'{im_name.stem}_results.txt'), sep='\t')
+                prec_recall_curves.to_csv(str(file / f'{im_name.stem}_all_results.txt'), sep='\t')
     
     def prec_recall_curve(self, true_mask: np.ndarray, 
                           pred_mask: np.ndarray, 
@@ -150,6 +152,14 @@ class KFold:
                         index=thresholds)
         return df
     
+    def plot(self):
+        fig, axs = plt.subplots(1, 3)
+        colours = ['b', 'g', 'r']
+        for category, colour in zip(self.categories+'all', colours):
+            self.plot_multiple(category, axs, colour)
+
+        plt.savefig(self.directory / 'results.png')
+
     def plot_results(self):
         results = []
         ious = []
@@ -333,36 +343,26 @@ class KFold:
         plt.legend(title=feature_name)
         plt.show()
 
-
-    def plot_multiple(self, name, axs, colour):
+    def plot_multiple(self, category: str, axs: plt.Axes, colour) -> None:
+        """
+        Plot precision-recall curves for given category on axs.
+        """
         results = []
-        ious = []
-        num_training_cells = []
         for dir in self.directory.glob('*model*'):
-            for file in (dir / 'Training_Data' / 'validate').glob('*_results.txt'):
+            for file in (dir / 'Training_Data' / 'validate').glob(f'*{category}_results.txt'):
                 results.append(pd.read_csv(file, sep = '\t', index_col = 0))
-            for file in (dir / 'Training_Data' / 'validate').glob('*_iou.txt'):
-                with open(file, 'r') as f:
-                    ious.append(float(f.read()))
-            with open(dir / 'number_training_cells.txt') as f:
-                num_training_cells.append(int(f.read()))
-        # results = [pd.read_csv(file, sep='\t', index_col=0) for file in self.directory.iterdir() if file.suffix=='.txt']
         results = pd.concat(results, axis=0)
         means, stds = results.groupby(level=0).mean(), results.groupby(level=0).std()
         metrics = means.columns.values
         thresholds = means.index.values
         
-
         for ax, metric in zip(axs, metrics):
-            # ax.plot(thresholds, cellpose_means[metric], color='red', label='Cellpose')
-            # ax.fill_between(thresholds, cellpose_means[metric]-cellpose_stds[metric], cellpose_means[metric]+cellpose_stds[metric], color='red', alpha=0.5, edgecolor='none')
-            ax.plot(thresholds, means[metric], color=colour, label=name)
+            ax.plot(thresholds, means[metric], color=colour, label=category)
             ax.fill_between(thresholds, means[metric]-stds[metric], means[metric]+stds[metric], color=colour, alpha=0.5, edgecolor='none')
             ax.set_xlabel('IOU Threshold')
             ax.set_ylabel(metric)
             ax.grid(True)
                 
-
     def getAP(self, file):
         try:
             with open(file / 'Model' / 'eval.txt', 'r') as f:
@@ -425,6 +425,7 @@ def main():
     # my_kfold.train_and_eval()
     # my_kfold.train()
     my_kfold.eval()
+    my_kfold.plot()
     # my_kfold.plot_results()
     # my_kfold.eval_feature(feature_func=mask_funcs.get_densities, feature_name='num cells within 500 pixels', n_groups=3)
     # my_kfold.features_scatter_plot(feature_func=mask_funcs.get_perimeters_over_areas, feature_name='perimeter/area')

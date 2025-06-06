@@ -11,6 +11,7 @@ from PhagoPred import SETTINGS
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
 def get_tracklets_np(file=SETTINGS.DATASET, mode='Epi', min_dist_threshold=SETTINGS.MINIMUM_DISTANCE_THRESHOLD):
     with h5py.File(file, 'r+') as f:
         print('\nTracking...')
