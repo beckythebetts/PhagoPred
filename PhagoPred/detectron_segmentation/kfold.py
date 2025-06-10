@@ -56,7 +56,7 @@ class KFold:
         self.ims = sorted([im for im in (self.directory / 'images').iterdir()])
         self.coco = directory / 'labels.json'
         with open(self.coco, 'r') as f:
-            self.categories = json.load(f)["categories"]
+            self.categories = [category['name'] for category in json.load(f)["categories"]]
 
     def split_all(self, num_val=1):
         for i in range(int(len(self.ims)/num_val)):
@@ -113,6 +113,12 @@ class KFold:
                 view_all = tools.show_segmentation(im, combi_pred, combi_true)
                 plt.imsave(file / f'{im_name.stem}_view.png', view_all/255)
 
+                pred_mask_im = Image.fromarray(combi_pred.astype(np.int32), mode='I')
+                pred_mask_im.save(file / f'{im_name.stem}_pred_mask.png')
+                
+                results = self.prec_recall_curve(combi_true, combi_pred)
+                results.to_csv(str(file / f'{im_name.stem}_all_results.txt'), sep='\t')
+
                 for category in pred_masks.keys():
                     view = tools.show_segmentation(im, pred_masks[category], true_masks[category])
                     plt.imsave(file / f'{im_name.stem}_{category}_view.png', view)
@@ -120,11 +126,10 @@ class KFold:
                     pred_mask_im = Image.fromarray(pred_masks[category].astype(np.int32), mode='I')
                     pred_mask_im.save(file / f'{im_name.stem}_{category}_pred_mask.png')
 
-                    prec_recall_curves = prec_recall_curves(true_masks[category], pred_masks[category])
-                    prec_recall_curves.to_csv(str(file / f'{im_name.stem}_{category}_results.txt'), sep='\t')
+                    results = self.prec_recall_curve(true_masks[category], pred_masks[category])
+                    results.to_csv(str(file / f'{im_name.stem}_{category}_results.txt'), sep='\t')
                 
-                prec_recall_curves = prec_recall_curves()
-                prec_recall_curves.to_csv(str(file / f'{im_name.stem}_all_results.txt'), sep='\t')
+                
     
     def prec_recall_curve(self, true_mask: np.ndarray, 
                           pred_mask: np.ndarray, 
@@ -152,12 +157,17 @@ class KFold:
                         index=thresholds)
         return df
     
-    def plot(self):
-        fig, axs = plt.subplots(1, 3)
-        colours = ['b', 'g', 'r']
-        for category, colour in zip(self.categories+'all', colours):
-            self.plot_multiple(category, axs, colour)
-
+    def plot(self) -> None:
+        """
+        Plot precision-recall and f1 curves of each category + all categories
+        """
+        plt.rcParams["font.family"] = 'serif'
+        fig, axs = plt.subplots(1, 3, figsize=(12, 4))
+        cmap = plt.cm.get_cmap('gist_rainbow')
+        colours = [cmap(i / (len(self.categories)+1)) for i in range(len(self.categories)+1)]
+        for category, colour in zip(self.categories+['all'], colours):
+            self.plot_category(category, axs, colour)
+        plt.legend()
         plt.savefig(self.directory / 'results.png')
 
     def plot_results(self):
@@ -205,10 +215,11 @@ class KFold:
         for file in self.directory.glob('*model*'):               
             for im_name in (file / 'Training_Data' / 'validate' / 'images').iterdir():
                 print(im_name)
-                with Image.open(file / 'Training_Data' / 'validate' / f'{im_name.stem}_pred_mask.png') as im:
+                with Image.open(file / f'{im_name.stem}_pred_mask.png') as im:
                     pred_mask = np.array(im)
-                true_mask, _ = mask_funcs.coco_to_masks(coco_file = file / 'Training_Data' / 'validate' / 'labels.json', im_name = im_name) 
+                true_masks = mask_funcs.coco_to_masks(coco_file = file / 'Training_Data' / 'validate' / 'labels.json', im_name = im_name) 
 
+                true_mask = mask_funcs.combine_masks(list(true_masks.values()))
                 true_areas = feature_func(true_mask)
                 pred_areas = feature_func(pred_mask)
 
@@ -234,7 +245,7 @@ class KFold:
         plt.xlabel(feature_name)
         plt.legend()
         plt.grid()
-        plt.show()
+        plt.savefig(self.directory / f'per_ar_scatter.png')
 
     def eval_feature(self, feature_func=mask_funcs.get_areas, feature_name='area/pixels', n_groups=4):
         # calculte area percentiles based on true masks
@@ -242,8 +253,9 @@ class KFold:
         num_ims = 0
         for file in self.directory.glob('*model*'):
             for im_name in (file / 'Training_Data' / 'validate' / 'images').iterdir():
-                true_cells,_ = mask_funcs.coco_to_masks(coco_file = file / 'Training_Data' / 'validate' / 'labels.json', im_name = im_name) 
-                all_areas = np.append(all_areas, feature_func(true_cells))
+                true_masks = mask_funcs.coco_to_masks(coco_file = file / 'Training_Data' / 'validate' / 'labels.json', im_name = im_name) 
+                true_mask = mask_funcs.combine_masks(list(true_masks.values()))
+                all_areas = np.append(all_areas, feature_func(true_mask))
                 num_ims += 1
 
         area_thresholds = np.percentile(all_areas, np.linspace(0, 100, n_groups+1))
@@ -268,9 +280,10 @@ class KFold:
             for im_name in (file / 'Training_Data' / 'validate' / 'images').iterdir():
 
                 # pred_mask = plt.imread(file / 'Training_Data' / 'validate' / f'{im_name.stem}_pred_mask.png')
-                with Image.open(file / 'Training_Data' / 'validate' / f'{im_name.stem}_pred_mask.png') as im:
+                with Image.open(file / f'{im_name.stem}_pred_mask.png') as im:
                     pred_mask = np.array(im)
-                true_mask, _ = mask_funcs.coco_to_masks(coco_file = file / 'Training_Data' / 'validate' / 'labels.json', im_name = im_name) 
+                true_masks = mask_funcs.coco_to_masks(coco_file = file / 'Training_Data' / 'validate' / 'labels.json', im_name = im_name) 
+                true_mask = mask_funcs.combine_masks(list(true_masks.values()))
                 true_areas, pred_areas = feature_func(true_mask), feature_func(pred_mask)
 
                 for col, (lower_threshold, upper_threshold) in enumerate(zip(area_thresholds[:-1], area_thresholds[1:])):
@@ -341,15 +354,15 @@ class KFold:
                 ax.set_ylabel(metric)
                 ax.grid(True)
         plt.legend(title=feature_name)
-        plt.show()
+        plt.savefig(self.directory / f'{feature_name}_results.png')
 
-    def plot_multiple(self, category: str, axs: plt.Axes, colour) -> None:
+    def plot_category(self, category: dict, axs: plt.Axes, colour) -> None:
         """
         Plot precision-recall curves for given category on axs.
         """
         results = []
         for dir in self.directory.glob('*model*'):
-            for file in (dir / 'Training_Data' / 'validate').glob(f'*{category}_results.txt'):
+            for file in (dir).glob(f"*{category}_results.txt"):
                 results.append(pd.read_csv(file, sep = '\t', index_col = 0))
         results = pd.concat(results, axis=0)
         means, stds = results.groupby(level=0).mean(), results.groupby(level=0).std()
@@ -424,10 +437,10 @@ def main():
     # my_kfold.split_all()
     # my_kfold.train_and_eval()
     # my_kfold.train()
-    my_kfold.eval()
-    my_kfold.plot()
+    # my_kfold.eval()
+    # my_kfold.plot()
     # my_kfold.plot_results()
-    # my_kfold.eval_feature(feature_func=mask_funcs.get_densities, feature_name='num cells within 500 pixels', n_groups=3)
+    my_kfold.eval_feature(feature_func=mask_funcs.get_perimeters_over_areas, feature_name='perim_over_area', n_groups=3)
     # my_kfold.features_scatter_plot(feature_func=mask_funcs.get_perimeters_over_areas, feature_name='perimeter/area')
 
 

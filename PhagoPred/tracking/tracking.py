@@ -52,6 +52,7 @@ class Tracking:
             old_cells: xr.DataArray with 'idx', 'x', 'y' coords in 'Features' dim (no np.nan values)
             current_cells: xr.DataArray with 'idx', 'x', 'y' columns (no np.nan values)
         Return:
+            LUT for reindexing cells
             Reindexed current cells to be used as old_cells in next frame.
         """
         # need no np.nan values in reindexed current cells (need to add idx column to xr.DataArray)
@@ -79,6 +80,7 @@ class Tracking:
                                          np.max(old_cells.sel(Features='idx'), 
                                          np.max(old_cells.sel(Features='idx'))+len(unmatched_current_idxs))+1)
                                     ).astype(int)
+            
             
             #update mask
             lut = np.zeros(np.max(current_idxs)+1)
