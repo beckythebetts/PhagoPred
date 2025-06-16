@@ -11,12 +11,13 @@ from PhagoPred.feature_extraction import extract_features, features
 
 class Tracking:
 
-    def __init__(self, file: Path = SETTINGS.DATSET, channel: str = 'Phase') -> None:
-        self.file = file
-        self.channel = channel
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.feature_extractor = extract_features.FeaturesExtraction(self.file)
-        self.cell_type = self.feature_extractor.get_cell_type(self.channel)
+    def __init__(self, file: Path = SETTINGS.DATASET, channel: str = 'Phase') -> None:
+        if file is not None:
+            self.file = file
+            self.channel = channel
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.feature_extractor = extract_features.FeaturesExtraction(self.file)
+            self.cell_type = self.feature_extractor.get_cell_type(self.channel)
 
     def get_cell_info(self):
         """
@@ -39,15 +40,16 @@ class Tracking:
                 current_cells = all_cells_xr.isel(Frame=frame).sel(Feature=('X', 'Y'))
                 # Add 'idx' feature and drop np.nan cells
                 current_cells = current_cells.assign_coords(
-                    idx=('Features', np.arange(current_cells.size['Cell Index'])))
+                    idx=('Feature', np.arange(current_cells.size['Cell Index'])))
                 current_cells = current_cells.dropna(dim='Cell Index', how='all')
 
                 old_cells = self.frame_to_frame_matching(old_cells, current_cells, min_dist)
                 
-    def frame_to_frame_matching(self, old_cells: Optional[xr.DataArray], current_cells: xr.DataArray, min_dist: int) -> xr.DataArray:
+    def frame_to_frame_matching(self, old_cells: Optional[xr.DataArray], current_cells: xr.DataArray, min_dist: int) -> tuple[np.array, xr.DataArray]:
         """
         Reindex current cells to match with old_cells using linear sum assignemnt to minimise total distance between cells.
         Update mask and cells_ds with new indices.
+        Idxs/cell idxs refers to the index assigned to each cell. Pos refers to the position of a given cell index in an array.
         Parameters:
             old_cells: xr.DataArray with 'idx', 'x', 'y' coords in 'Features' dim (no np.nan values)
             current_cells: xr.DataArray with 'idx', 'x', 'y' columns (no np.nan values)
@@ -57,33 +59,44 @@ class Tracking:
         """
         # need no np.nan values in reindexed current cells (need to add idx column to xr.DataArray)
         if old_cells is not None:
+
+            current_idxs = current_cells.sel(Feature='idx').values.astype(int)
+            old_idxs = old_cells.sel(Feature='idx').values.astype(int)
+
             distances = np.linalg.norm(
-                        np.expand_dims(old_cells.values, 1) -
-                        np.expand_dims(current_cells, 0),
+                        np.expand_dims(old_cells.sel(Feature=['x', 'y']).values, 1) -
+                        np.expand_dims(current_cells.sel(Feature=['x', 'y']).values, 0),
                         axis=2
                     )
 
-            old_idxs, current_idxs = linear_sum_assignment(distances)
-            valid_pairs = distances[old_idxs, current_idxs] < min_dist
+            old_pos, current_pos = linear_sum_assignment(distances)
+            valid_pairs = distances[old_pos, current_pos] < min_dist
             # get actual cell idxs (not position idxs)
-            old_idxs = old_cells.sel(Feature='idx').values[old_idxs[valid_pairs]]
-            matched_current_idxs = current_cells.sel(Features='idx').values[current_idxs[valid_pairs]]
+            matched_old_idxs = old_cells.sel(Feature='idx').values[old_pos[valid_pairs]]
+            matched_current_idxs = current_cells.sel(Feature='idx').values[current_pos[valid_pairs]]
             
-            if len(current_cells) > current_idxs:
+            # if len(current_cells) > len(current_idxs):
                 # add missing current_idxs to end of current_idxs, and add idxs to old_idxs. Current_idxs will be transformed to old_idxs.
-                current_idxs = current_cells.sel(Features='idx').values
-                unmatched_current_idxs = current_idxs[~current_idxs.isin(matched_current_idxs)]
-                current_idxs = np.append(matched_current_idxs, unmatched_current_idxs)
-
-                old_idxs = np.append(old_idxs, 
-                                     np.arange(
-                                         np.max(old_cells.sel(Features='idx'), 
-                                         np.max(old_cells.sel(Features='idx'))+len(unmatched_current_idxs))+1)
-                                    ).astype(int)
+                
+            # unmatched_current_idxs = current_idxs[~current_idxs.isin(matched_current_idxs)]
+            unmatched_current_idxs = current_idxs[~np.isin(current_idxs, matched_current_idxs)]
             
+            current_idxs = np.append(matched_current_idxs, unmatched_current_idxs)
+            old_idxs = np.append(matched_old_idxs, 
+                                    np.arange(
+                                        np.max(old_cells.sel(Feature='idx').values)+1, 
+                                        np.max(old_cells.sel(Feature='idx'))+len(unmatched_current_idxs)+1)
+                                ).astype(int)
             
+            assert len(old_idxs) == len(current_idxs), "Old idxs and new idxs different lengths" 
             #update mask
             lut = np.zeros(np.max(current_idxs)+1)
             lut[current_idxs] = old_idxs
 
+            current_cells.loc[dict(Feature='idx')] = lut[current_cells.sel(Feature='idx')]
 
+            return lut, current_cells
+
+
+if __name__ == '__main__':
+    pass
