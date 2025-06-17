@@ -15,15 +15,14 @@ from PhagoPred.utils import tools
 class CellType:
     FRAME_DIM = 0
     CELL_DIM = 1
-    FEATURES_DIM = 2
 
-    DIMS = ["Frame", "Cell Index", "Feature"]
+    DIMS = ["Frame", "Cell Index"]
 
     def __init__(self, name: str) -> None:
 
         self.name = name
 
-        self.features_ds = f'Cells/{name}'
+        self.features_group = f'Cells/{name}'
         self.images = f'Images/{name}'
         self.masks = f'Segmentations/{name}'
 
@@ -92,36 +91,39 @@ class CellType:
     def set_num_cells(self, num_cells):
         self.num_cells = num_cells
     
-    def set_feature_idxs(self):
-        for feature_type in (self.primary_features, self.derived_features):
-            current_idx = 0
-            for feature in feature_type:
-                feature_len = len(feature.get_names())
-                feature.set_index_positions(current_idx, current_idx+feature_len)
-                current_idx += feature_len
+    # def set_feature_idxs(self):
+    #     for feature_type in (self.primary_features, self.derived_features):
+    #         current_idx = 0
+    #         for feature in feature_type:
+    #             feature_len = len(feature.get_names())
+    #             feature.set_index_positions(current_idx, current_idx+feature_len)
+    #             current_idx += feature_len
 
     # def set_feature_idxs(self):
     # #     current_idx = 0
     #     for feature 
 
-    def set_up_features_ds(self, h5py_file: h5py.File):
-        dataset = h5py_file[self.features_ds]
-        dataset.attrs['dimensions'] = self.DIMS
+    def set_up_features_group(self, h5py_file: h5py.File):
+        for feature_name in self.primary_feature_names + self.derived_feature_names:
+            dataset = h5py_file.require_dataset(f'{self.features_group}/{feature_name}')
+            dataset.attrs['dimensions'] = self.DIMS
+        # dataset = h5py_file[self.features_ds]
+        # dataset.attrs['dimensions'] = self.DIMS
 
-        self.set_initial_num_features(dataset.shape[self.DIMS.index("Feature")])
+        # self.set_initial_num_features(dataset.shape[self.DIMS.index("Feature")])
     
-        features_list = self.get_feature_names()
-        if len(features_list) > 0:
-            # for feature_name in features_list:
-            #     if feature_name not in dataset.attrs['features']:
-            #         dataset.attrs['features'] = np.append(dataset.attrs['features'], feature_name)
-            dataset.attrs['features'] = np.concatenate((dataset.attrs['features'], np.array(features_list)))
+        # features_list = self.get_feature_names()
+        # if len(features_list) > 0:
+        #     # for feature_name in features_list:
+        #     #     if feature_name not in dataset.attrs['features']:
+        #     #         dataset.attrs['features'] = np.append(dataset.attrs['features'], feature_name)
+        #     dataset.attrs['features'] = np.concatenate((dataset.attrs['features'], np.array(features_list)))
 
-        dataset.attrs['dimensions'] = ['frames', 'cells', 'features']
+        # dataset.attrs['dimensions'] = ['frames', 'cells', 'features']
 
-        dataset.resize(self.initial_num_features + len(features_list), axis=2)
+        # dataset.resize(self.initial_num_features + len(features_list), axis=2)
 
-        self.set_num_cells(dataset.shape[self.DIMS.index("Cell Index")])
+        # self.set_num_cells(dataset.shape[self.DIMS.index("Cell Index")])
 
     def get_features_xr(self, h5py_file: h5py.File) -> xr.Dataset:
         """
@@ -173,15 +175,15 @@ class FeaturesExtraction:
             self.num_frames = f[self.cell_types[0].features_ds].shape[self.cell_types[0].DIMS.index("Frame")]
 
             for cell_type in self.cell_types:
-                cell_type.set_num_cells(f[cell_type.features_ds].shape[cell_type.DIMS.index("Cell Index")])
-                cell_type.set_feature_idxs()
+                # cell_type.set_num_cells(f[cell_type.features_ds].shape[cell_type.DIMS.index("Cell Index")])
+                # cell_type.set_feature_idxs()
 
 
-                cell_type.set_initial_num_features(f[cell_type.features_ds].shape[cell_type.DIMS.index("Feature")])
+                # cell_type.set_initial_num_features(f[cell_type.features_ds].shape[cell_type.DIMS.index("Feature")])
 
                 # cell_type.set_up_features_ds(f)
 
-                cell_type.set_initial_num_features(cell_type.initial_num_features-1)
+                # cell_type.set_initial_num_features(cell_type.initial_num_features-1)
                 cell_type.get_feature_names()
 
     def extract_features(self) -> None:
