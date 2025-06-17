@@ -29,21 +29,23 @@ class Tracking:
 
     def get_tracklets(self, min_dist: int = SETTINGS.MINIMUM_DISTANCE_THRESHOLD) -> None:
         with h5py.File(self.file, 'r+') as f:
-            masks_ds = f['Segmentations'][self.channel]
-            cells_ds = f['Cells'][self.channel]
+            self.masks_ds = f['Segmentations'][self.channel]
+            self.cells_ds = f['Cells'][self.channel]
             
-            cells_ds.attrs['minimum distance'] = min_dist
+            self.cells_ds.attrs['minimum distance'] = min_dist
 
             all_cells_xr = self.cell_type.get_features_xr(self.file)
             old_cells = None
-            for frame in range(masks_ds.shape[0]):
+            for frame in range(self.masks_ds.shape[0]):
                 current_cells = all_cells_xr.isel(Frame=frame).sel(Feature=('X', 'Y'))
                 # Add 'idx' feature and drop np.nan cells
                 current_cells = current_cells.assign_coords(
                     idx=('Feature', np.arange(current_cells.size['Cell Index'])))
                 current_cells = current_cells.dropna(dim='Cell Index', how='all')
 
-                old_cells = self.frame_to_frame_matching(old_cells, current_cells, min_dist)
+                lut, old_cells = self.frame_to_frame_matching(old_cells, current_cells, min_dist)
+
+                # Apply lut to segmentation mask and reorder Cells dataset
                 
     def frame_to_frame_matching(self, old_cells: Optional[xr.DataArray], current_cells: xr.DataArray, min_dist: int) -> tuple[np.array, xr.DataArray]:
         """
@@ -96,7 +98,13 @@ class Tracking:
             current_cells.loc[dict(Feature='idx')] = lut[current_cells.sel(Feature='idx')]
 
             return lut, current_cells
-
+        
+    def apply_lut(self, frame: int, lut: np.ndarray) -> None:
+        """
+        In the given frame, apply the LUT to reindex cells in the segmentation mask and Cells dataset.
+        """
+        self.masks_ds[frame] = lut[self.masks_ds[frame][:]]
+        
 
 if __name__ == '__main__':
     pass
