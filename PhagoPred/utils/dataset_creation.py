@@ -140,11 +140,102 @@ def hdf5_from_tiffs(tiff_files_path: Path, hdf5_file: Path,
         Images.attrs['Number of frames'] = frame_count
         print(f"\nHDF5 file created: {frame_count} frames")
 
+def make_short_test_copy(orig_file: Path, short_file: Path, start_frame: int = 0, end_frame: int = 50) -> None:
+    """
+    Copy the images group from the orig_file, taking only frames from start_frame to end_frame
+    """
+    group_name = 'Images'
+    with h5py.File(orig_file, 'r') as orig:
+        with h5py.File(short_file, 'x') as short:
+            orig_group = orig[group_name]
+            short_group = short.create_group(group_name)
+
+            for name, dataset in orig_group.items():
+                if isinstance(dataset, h5py.Dataset):
+                    print(f"Copying dataset '{name}'")
+                    try:
+                        # Extract the slice of data
+                        sliced_data = dataset[start_frame:end_frame].copy()
+                        print(f"{name} sliced data shape: {sliced_data.shape}, dtype: {sliced_data.dtype}")
+                        # Get creation properties
+                        kwargs = {
+                            'dtype': dataset.dtype,
+                            'compression': dataset.compression,
+                            'compression_opts': dataset.compression_opts,
+                            'chunks': dataset.chunks,
+                            'shuffle': dataset.shuffle,
+                            'fletcher32': dataset.fletcher32,
+                            'maxshape': dataset.maxshape
+                        }
+
+                        # Create dataset in destination
+                        short_group.create_dataset(
+                            name,
+                            data=sliced_data,
+                            shape=sliced_data.shape,
+                            **{k: v for k, v in kwargs.items() if v is not None}
+                            )
+                        short.flush()
+
+                    except Exception as e:
+                        print(e)
+
+            for attr_name, attr_value in orig.attrs.items():
+                        short_group.attrs[attr_name] = attr_value
+                    
+            short_group.attrs['Number of frames'] = end_frame - start_frame
+            short.flush()
+
+# def make_short_test_copy(orig_file: Path, short_file: Path, start_frame: int = 0, end_frame: int = 50):
+#     with h5py.File(orig_file, 'r') as orig, h5py.File(short_file, 'w') as short:
+#         if 'Images' not in orig:
+#             raise ValueError("No 'Images' group found in original file")
+
+#         orig_group = orig['Images']
+#         short_group = short.create_group('Images')
+
+#         # Copy group-level attributes
+#         for attr, val in orig_group.attrs.items():
+#             short_group.attrs[attr] = val
+
+#         for name, dataset in orig_group.items():
+#             if not isinstance(dataset, h5py.Dataset):
+#                 continue
+
+#             print(f"Copying dataset: {name}")
+
+#             try:
+#                 sliced_data = dataset[start_frame:end_frame].copy()
+#                 print(f"→ sliced shape: {sliced_data.shape}")
+
+#                 short_dset = short_group.create_dataset(name, data=sliced_data)
+                
+#                 # Copy dataset attributes
+#                 for attr, val in dataset.attrs.items():
+#                     short_dset.attrs[attr] = val
+
+#             except Exception as e:
+#                 print(f"❌ Failed writing dataset '{name}': {e}")
+
+#         # File-level info (optional)
+#         short.attrs['Number of frames'] = end_frame - start_frame
+#         short.flush()
 if __name__ == '__main__':
-    hdf5_from_tiffs(Path("D:/27_05_1"), 
-                    Path('D:/27_05.h5'),
-                    phase_channel=1,
-                    epi_channel=2,
-                    )
+    # hdf5_from_tiffs(Path("D:/27_05_1"), 
+    #                 Path('D:/27_05.h5'),
+    #                 phase_channel=1,
+    #                 epi_channel=2,
+    #                 )
+    make_short_test_copy(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05.h5"),
+                         Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_short.h5"))
+    # Create dummy data similar to your sliced data
+    # data = np.random.randint(0, 256, size=(50, 2048, 2048), dtype=np.uint8)
+
+    # with h5py.File(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_tets.h5"), "w") as f:
+    #     dset = f.create_dataset("Epi", data=data)
+    #     f.flush()
+
+    # import os
+    # print("File size:", os.path.getsize(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_tets.h5")), "bytes")
         
 
