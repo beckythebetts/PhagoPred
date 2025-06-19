@@ -120,10 +120,17 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
         images_ds = f['Images'][channel]
         segmentations_ds = f.create_dataset(f'Segmentations/{channel}', shape=images_ds.shape,
                                             max_shape=images_ds.shape, dtype='i2')
-        cells_ds = f.create_dataset(f'Cells/{channel}', shape=(images_ds.shape[0], 0, len(categories)), 
-                                    max_shape=(images_ds.shape[0], None, None), dtype=np.float32)
+        cells_group = f.require_group(f'Cells/{channel}')
+        # cell_features = {}
+        for category in categories:
+            f.create_dataset_dataset(cells_group[category], 
+                                    shape=(images_ds.shape[0], 0),
+                                    max_shape=(images_ds.shape[0], None),
+                                    dtype=np.float32)
+        # cells_ds = f.create_dataset(f'Cells/{channel}', shape=(images_ds.shape[0], 0, len(categories)), 
+        #                             max_shape=(images_ds.shape[0], None, None), dtype=np.float32)
         
-        cells_ds.attrs['features'] = train_metadata["thing_classes"]
+        # cells_ds.attrs['features'] = train_metadata["thing_classes"]
 
         for frame_idx in range(images_ds.shape[0]):
             sys.stdout.write(f'\rSegmenting image {int(frame_idx)+1} / {f["Images"].attrs["Number of frames"]}')
