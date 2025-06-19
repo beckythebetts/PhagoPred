@@ -344,25 +344,47 @@ def copy_hdf5_groups(src_filename, dest_filename, groups_to_copy):
             else:
                 print(f"Warning: Group '{group_name}' not found in the source file.")
 
-def make_short_test_copy(orig_file, copy_file, frames=50):
+def make_short_test_copy(orig_file: Path, short_file: Path, start_frame: int = 0, end_frame: int = 50) -> None:
+    """
+    Copy the images group from the orig_file, taking only frames from start_frame to end_frame
+    """
+    group_name = 'Images'
     with h5py.File(orig_file, 'r') as orig:
-        with h5py.File(copy_file, 'x') as copy:
-            Images = copy.create_group('Images')
-            for attr_name, attr_value in orig['Images'].attrs.items():
-                Images.attrs[attr_name] = attr_value
-            Images.attrs['Number of frames'] = frames
-            phase = Images.create_group('Phase')
-            epi = Images.create_group('Epi')
-            if len(orig['Images']['Epi'].keys()) > 0:
-                for name, phase_image, epi_image in zip(list(orig['Images']['Phase'].keys())[:frames],
-                                                        list(orig['Images']['Phase'].values())[:frames],
-                                                        list(orig['Images']['Epi'].values())[:frames]):
-                    phase.create_dataset(name, data=phase_image[:])
-                    epi.create_dataset(name, data=epi_image[:])
-            else:
-                for name, phase_image in zip(list(orig['Images']['Phase'].keys())[:frames],
-                                             list(orig['Images']['Phase'].values())[:frames]):
-                    phase.create_dataset(name, data=phase_image[:], maxshape=(None, None))
+        with h5py.File(short_file, 'x') as short:
+            orig_group = orig_file[group_name]
+            short_group = short.create_group(group_name)
+
+            for name, dataset in orig_group.items():
+                if isinstance(dataset, h5py.Dataset):
+                    print(f"Copying dataset '{name}'")
+
+                    # Extract the slice of data
+                    sliced_data = dataset[start_frame:end_frame]
+
+                    # Get creation properties
+                    kwargs = {
+                        'dtype': dataset.dtype,
+                        'compression': dataset.compression,
+                        'compression_opts': dataset.compression_opts,
+                        'chunks': dataset.chunks,
+                        'shuffle': dataset.shuffle,
+                        'fletcher32': dataset.fletcher32,
+                        'maxshape': dataset.maxshape
+                    }
+
+                    # Create dataset in destination
+                    short_dset = short_group.create_dataset(
+                        name,
+                        data=sliced_data,
+                        shape=sliced_data.shape,
+                        **{k: v for k, v in kwargs.items() if v is not None}
+                        )
+                    
+                    for attr_name, attr_value in orig.attrs.items():
+                        short.attrs[attr_name] = attr_value
+                    
+                    short.attrs['Number of frames'] = end_frame - start_frame
+
 
 def crop_hdf5(file, crop_size=[2048, 2048]):
     """
