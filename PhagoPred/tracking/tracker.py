@@ -9,7 +9,7 @@ import xarray as xr
 from PhagoPred import SETTINGS
 from PhagoPred.feature_extraction import extract_features, features
 
-class Tracking:
+class Tracker:
 
     def __init__(self, file: Path = SETTINGS.DATASET, channel: str = 'Phase') -> None:
         if file is not None:
@@ -18,6 +18,8 @@ class Tracking:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             self.feature_extractor = extract_features.FeaturesExtraction(self.file)
             self.cell_type = self.feature_extractor.get_cell_type(self.channel)
+            self.masks_ds = f'Segmentations/{self.channel}'
+            self.cells_group = f'Cells/{self.channel}'
 
     def get_cell_info(self):
         """
@@ -29,14 +31,14 @@ class Tracking:
 
     def get_tracklets(self, min_dist: int = SETTINGS.MINIMUM_DISTANCE_THRESHOLD) -> None:
         with h5py.File(self.file, 'r+') as f:
-            self.masks_ds = f['Segmentations'][self.channel]
-            self.cells_ds = f['Cells'][self.channel]
+            # self.masks_ds = f['Segmentations'][self.channel]
+            # self.cells_group = f['Cells'][self.channel]
             
             self.cells_ds.attrs['minimum distance'] = min_dist
 
-            all_cells_xr = self.cell_type.get_features_xr(self.file)
+            all_cells_xr = self.cell_type.get_features_xr(f, ['X', 'Y'])
             old_cells = None
-            for frame in range(self.masks_ds.shape[0]):
+            for frame in range(f[self.masks_ds].shape[0]):
                 current_cells = all_cells_xr.isel(Frame=frame).sel(Feature=('X', 'Y'))
                 # Add 'idx' feature and drop np.nan cells
                 current_cells = current_cells.assign_coords(
@@ -44,7 +46,8 @@ class Tracking:
                 current_cells = current_cells.dropna(dim='Cell Index', how='all')
 
                 lut, old_cells = self.frame_to_frame_matching(old_cells, current_cells, min_dist)
-
+                self.apply_lut(frame, lut, f)
+                old_cells = current_cells
                 # Apply lut to segmentation mask and reorder Cells dataset
                 
     def frame_to_frame_matching(self, old_cells: Optional[xr.DataArray], current_cells: xr.DataArray, min_dist: int) -> tuple[np.array, xr.DataArray]:
@@ -99,12 +102,21 @@ class Tracking:
 
             return lut, current_cells
         
-    def apply_lut(self, frame: int, lut: np.ndarray) -> None:
+    def apply_lut(self, frame: int, lut: np.ndarray, h5py_file: h5py.File) -> None:
         """
-        In the given frame, apply the LUT to reindex cells in the segmentation mask and Cells dataset.
+        In the given frame, apply the LUT to reindex cells in the segmentation mask and Cells group.
         """
-        self.masks_ds[frame] = lut[self.masks_ds[frame][:]]
-        
+        h5py_file[self.masks_ds][frame] = lut[self.masks_ds[frame][:]]
+        for feature_name, feature_data in h5py_file[self.cells_group].items():
+            reindexed_feature_data = np.full(np.max(lut)+1, np.nan)
+            reindexed_feature_data[lut] = feature_data[()]
+            h5py_file[self.cells_group][feature_name] = reindexed_feature_data
+            # h5py_file[self.cells_group][feature_name] = h5py_file[self.cells_group][feature_name][lut]
 
+def main():
+    my_tracker = Tracker()
+    my_tracker.get_cell_info()
+    my_tracker.get_tracklets()
+    
 if __name__ == '__main__':
-    pass
+    main()

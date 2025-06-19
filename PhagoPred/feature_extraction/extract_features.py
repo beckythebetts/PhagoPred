@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import pandas as pd
 import xarray as xr
+import dask.array as da
 
 from PhagoPred import SETTINGS
 from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
@@ -104,9 +105,21 @@ class CellType:
     #     for feature 
 
     def set_up_features_group(self, h5py_file: h5py.File):
-        for feature_name in self.primary_feature_names + self.derived_feature_names:
-            dataset = h5py_file.require_dataset(f'{self.features_group}/{feature_name}')
+        """
+        Create hdf5 datset for each feature
+        """
+        num_frames = h5py.file[self.images].shape(self.FRAME_DIM)
+
+        self.primary_feature_datasets = []
+        self.derived_feature_datsets = []
+        for feature_name in self.primary_feature_names:
+            dataset = h5py_file.require_dataset(f'{self.features_group}/{feature_name}', shape=(num_frames, 0), maxshape=(num_frames, None))
             dataset.attrs['dimensions'] = self.DIMS
+            self.primary_feature_datasets.append(dataset)
+        for feature_name in self.derived_feature_names:
+            dataset = h5py_file.require_dataset(f'{self.features_group}/{feature_name}', shape=(num_frames, 0), maxshape=(num_frames, None))
+            dataset.attrs['dimensions'] = self.DIMS
+            self.derived_feature_datasets.append(dataset)
         # dataset = h5py_file[self.features_ds]
         # dataset.attrs['dimensions'] = self.DIMS
 
@@ -125,13 +138,24 @@ class CellType:
 
         # self.set_num_cells(dataset.shape[self.DIMS.index("Cell Index")])
 
-    def get_features_xr(self, h5py_file: h5py.File) -> xr.Dataset:
+    def get_features_xr(self, h5py_file: h5py.File, features: list = None) -> xr.Dataset:
         """
-        h5py file is open file, returns x_array (chunked like h5py)
+        h5py file is open file, returns x_array (chunked like h5py). If features no tspecified, reads all features.
         """
-        data = h5py_file[self.features_ds]
-        feature_names = data.attrs['features']
-        return xr.DataArray(data, dims=self.DIMS, coords={"Feature":feature_names})
+        data_dict = {}
+        for feature_name, feature_data in h5py_file[self.features_group].items():
+            if features:
+                if feature_name not in features:
+                    continue
+            # read as dask array, preserving chunks
+            data = da.from_array(feature_data, chunks=feature_data.chunks)
+            data_dict[feature_name] = ((self.DIMS[0], self.DIMS[1]), data)
+
+        return xr.Dataset(data_dict)
+
+        # data = h5py_file[self.features_ds]
+        # feature_names = data.attrs['features']
+        # return xr.DataArray(data, dims=self.DIMS, coords={"Feature":feature_names})
 
 
     
@@ -197,17 +221,22 @@ class FeaturesExtraction:
             print(f'\nCalculating primary features for {cell_type.name}\n')
             for frame_idx in range(self.num_frames):
 
+                num_cells = np.max(mask) + 1
+
                 sys.stdout.write(f'\rFrame {frame_idx+1} / {self.num_frames}')
                 sys.stdout.flush()
 
-                frame_results = np.full((cell_type.num_cells, len(cell_type.primary_feature_names)), np.nan)
+                # frame_results = np.full((num_cells, len(cell_type.primary_feature_names)), np.nan)
 
                 mask = cell_type.get_masks(f, frame_idx)
                 image = cell_type.get_images(f, frame_idx)
 
-                for first_cell in range(0, cell_type.num_cells, self.cell_batch_size):
+                if num_cells>f[cell_type.features_ds].shape(cell_type.CELL_DIM):
+                    f[cell_type.features_ds].resize(num_cells, num_cells)
 
-                    last_cell = min(first_cell + self.cell_batch_size, cell_type.num_cells)
+                for first_cell in range(0, num_cells, self.cell_batch_size):
+
+                    last_cell = min(first_cell + self.cell_batch_size, num_cells)
 
                     cell_idxs = torch.arange(first_cell, last_cell).to(self.DEVICE)
 
@@ -219,32 +248,35 @@ class FeaturesExtraction:
                         result = feature.compute(mask=expanded_mask, image=image)
                         if result.ndim == 1:
                             result = result[:, np.newaxis]
-                        frame_results[first_cell:last_cell, feature.index_positions[0]:feature.index_positions[1]] = result
+                        for i, feature_name in enumerate(feature.get_names()):
+                            f[cell_type.features_group][feature_name][frame_idx, first_cell:last_cell] = result[:, i]
+                #         frame_results[first_cell:last_cell, feature.index_positions[0]:feature.index_positions[1]] = result
 
-                f[cell_type.features_ds][frame_idx, :, cell_type.initial_num_features:cell_type.initial_num_features+len(cell_type.primary_feature_names)] = frame_results
+                # f[cell_type.features_ds][frame_idx, 0:num_cells, cell_type.initial_num_features:cell_type.initial_num_features+len(cell_type.primary_feature_names)] = frame_results
 
     def extract_derived_features(self, f: h5py.File, cell_type: CellType) -> None:
         if len(cell_type.derived_features) > 0:
             print(f'\nCalculating derived features for {cell_type.name}\n')
 
             phase_features_xr = self.cell_types[self.cell_type_names.index('Phase')].get_features_xr(f)
-
-            phase_features_xr = phase_features_xr.chunk({'Frame': self.frame_batchsize, 'Cell Index': self.cell_batch_size})
+            # phase_features_xr = phase_features_xr.chunk({'Frame': self.frame_batchsize, 'Cell Index': self.cell_batch_size})
 
             epi_features_xr = None
             if 'Epi' in self.cell_type_names:
                 epi_features_xr = self.cell_types[np.argwhere(self.cell_type_names == 'Epi')].get_features_xr(f)
-                epi_features_xr = epi_features_xr.chunk({'Frame': self.frame_batchsize, 'Cell index': self.cell_batch_size})
+                # epi_features_xr = epi_features_xr.chunk({'Frame': self.frame_batchsize, 'Cell index': self.cell_batch_size})
 
             for feature in cell_type.derived_features:
                 result = feature.compute(phase_xr=phase_features_xr, epi_xr=epi_features_xr)
 
-                first_idx = -len(cell_type.derived_feature_names)+feature.index_positions[0]
-                last_idx = -len(cell_type.derived_feature_names)+feature.index_positions[1]
-                if last_idx == 0:
-                    last_idx = None
+                # first_idx = -len(cell_type.derived_feature_names)+feature.index_positions[0]
+                # last_idx = -len(cell_type.derived_feature_names)+feature.index_positions[1]
+                # if last_idx == 0:
+                #     last_idx = None
 
-                f[cell_type.features_ds][:, :, first_idx:last_idx] = result
+                for i, feature_name in enumerate(feature.get_names()):
+                    f[cell_type.features_group][feature_name] = result[:, :, i]
+                # f[cell_type.features_ds][:, :, first_idx:last_idx] = result
 
 def main():
     feature_extractor = FeaturesExtraction()
