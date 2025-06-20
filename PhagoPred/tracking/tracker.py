@@ -25,7 +25,7 @@ class Tracker:
         """
         Add each cells centroid cooridnates and areas to cells dataset
         """
-        self.feature_extractor.add_feature(features.Coords())
+        self.feature_extractor.add_feature(features.Coords(), cell_type=self.channel)
         self.feature_extractor.set_up()
         self.feature_extractor.extract_features()
 

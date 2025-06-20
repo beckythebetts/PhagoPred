@@ -35,22 +35,24 @@ class Coords(BaseFeature):
     """
     primary_feature = True
 
-    def __inti__(self):
+    def __init__(self):
         self.x_grid, self.y_grid = None, None
+
     def get_names(self):
         return ['X', 'Y', 'Area']
     
     def compute(self, mask: torch.tensor, image: torch.tensor) -> np.array:
+        print(device)
         if self.x_grid is None or self.y_grid is None:
             self.x_grid, self.y_grid = torch.meshgrid(
-                torch.arange(mask.shape[0]).to(device),
                 torch.arange(mask.shape[1]).to(device),
+                torch.arange(mask.shape[2]).to(device),
                 indexing='ij')
             for grid in (self.x_grid, self.y_grid): grid.unsqueeze(2) 
 
         areas = torch.sum(mask, dim=(1, 2))
-        xs = torch.sum(self.x_grid * mask, dim=(1, 2)) / areas
-        ys = torch.sum(self.y_grid * mask) / areas
+        xs = torch.sum(self.x_grid * mask, dim=(1, 2)) / areas.unsqueeze(-1).unsqueeze(-1)
+        ys = torch.sum(self.y_grid * mask, dim=(1, 2)) / areas
 
         return np.stack((xs.cpu().numpy(), 
                          ys.cpu().numpy(),

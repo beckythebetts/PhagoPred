@@ -12,8 +12,10 @@
             // "module": "PhagoPred.feature_extraction.extract_features",
             // "module": "PhagoPred.detectron_segmentation.segment",
             // "module": "PhagoPred.utils.dataset_creation",
-            // "module": "PhagoPred.detectron_segmentation.kfold",
-            "module": "PhagoPred.utils.dataset_creation",
+            // "module": "PhagoPred.detectron_segmentation.train",
+            // "module": "PhagoPred.utils.dataset_creation",
+            // "module": "PhagoPred.display.save",
+            "module": "PhagoPred.tracking.tracker",
             "justMyCode": false
         }
     ]

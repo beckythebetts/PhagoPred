@@ -180,7 +180,7 @@ def make_short_test_copy(orig_file: Path, short_file: Path, start_frame: int = 0
                     except Exception as e:
                         print(e)
 
-            for attr_name, attr_value in orig.attrs.items():
+            for attr_name, attr_value in orig_group.attrs.items():
                         short_group.attrs[attr_name] = attr_value
                     
             short_group.attrs['Number of frames'] = end_frame - start_frame
