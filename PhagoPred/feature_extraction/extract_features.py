@@ -34,12 +34,12 @@ class CellType:
         self.primary_feature_names = []
         self.derived_feature_names = []
 
-        self.initial_num_features = None
+        # self.initial_num_features = None
 
         self.num_cells = None
 
-    def set_initial_num_features(self, num: int) -> None:
-        self.initial_num_features = num
+    # def set_initial_num_features(self, num: int) -> None:
+    #     self.initial_num_features = num
 
     def add_feature(self, feature):
         if feature.primary_feature:
@@ -68,8 +68,9 @@ class CellType:
         """
         if last_frame is None:
             last_frame = first_frame + 1
-        frame_list = list(h5py_file[self.masks].keys())[first_frame:last_frame]
-        masks = np.array([h5py_file[self.masks][frame][:] for frame in frame_list], dtype='int16')
+        # frame_list = list(h5py_file[self.masks].keys())[first_frame:last_frame]
+        # masks = np.array([h5py_file[self.masks][frame][:] for frame in frame_list], dtype='int16')
+        masks = h5py_file[self.masks][first_frame:last_frame]
         if len(masks) == 1:
             return masks[0]
         else:
@@ -82,8 +83,9 @@ class CellType:
         """
         if last_frame is None:
             last_frame = first_frame + 1
-        frame_list = list(h5py_file[self.images].keys())[first_frame:last_frame]
-        images = np.array([h5py_file[self.images][frame][:] for frame in frame_list], dtype='uint8')
+        # frame_list = list(h5py_file[self.images].keys())[first_frame:last_frame]
+        # images = np.array([h5py_file[self.images][frame][:] for frame in frame_list], dtype='uint8')
+        images = h5py_file[self.images][first_frame:last_frame]
         if len(images) == 1:
             return images[0]
         else:
@@ -196,8 +198,8 @@ class FeaturesExtraction:
         """
 
         with h5py.File(self.h5py_file, 'r+') as f:
-            self.num_frames = f[self.cell_types[0].features_ds].shape[self.cell_types[0].DIMS.index("Frame")]
-
+            # self.num_frames = f[self.cell_types[0].features_group].shape[self.cell_types[0].DIMS.index("Frame")]
+            self.num_frames = SETTINGS.NUM_FRAMES
             for cell_type in self.cell_types:
                 # cell_type.set_num_cells(f[cell_type.features_ds].shape[cell_type.DIMS.index("Cell Index")])
                 # cell_type.set_feature_idxs()
@@ -221,7 +223,6 @@ class FeaturesExtraction:
             print(f'\nCalculating primary features for {cell_type.name}\n')
             for frame_idx in range(self.num_frames):
 
-                num_cells = np.max(mask) + 1
 
                 sys.stdout.write(f'\rFrame {frame_idx+1} / {self.num_frames}')
                 sys.stdout.flush()
@@ -231,8 +232,10 @@ class FeaturesExtraction:
                 mask = cell_type.get_masks(f, frame_idx)
                 image = cell_type.get_images(f, frame_idx)
 
-                if num_cells>f[cell_type.features_ds].shape(cell_type.CELL_DIM):
-                    f[cell_type.features_ds].resize(num_cells, num_cells)
+                num_cells = np.max(mask) + 1
+
+                # if num_cells>f[cell_type.features_ds].shape(cell_type.CELL_DIM):
+                #     f[cell_type.features_ds].resize(num_cells, num_cells)
 
                 for first_cell in range(0, num_cells, self.cell_batch_size):
 
@@ -245,6 +248,10 @@ class FeaturesExtraction:
                     if first_cell == 0:
                         expanded_mask[0] = torch.zeros_like(expanded_mask[0])
                     for feature in cell_type.primary_features:
+
+                        # if num_cells>f[cell_type.features_ds].shape(cell_type.CELL_DIM):
+                        #     f[cell_type.features_ds].resize(num_cells, num_cells)
+
                         result = feature.compute(mask=expanded_mask, image=image)
                         if result.ndim == 1:
                             result = result[:, np.newaxis]

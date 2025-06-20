@@ -3,11 +3,11 @@ import h5py
 
 # ******* GENERAL *******
 # DATASET = Path('PhagoPred')/'Datasets'/'secondwithlight - Copy.h5'
-DATASET = Path('PhagoPred')/'Datasets'/'27_05.h5'
+DATASET = Path('PhagoPred')/'Datasets'/'27_05_short.h5'
 # DATASET = Path('PhagoPred')/'Datasets'/'mac_07_03_short.h5'
 # DATASET = Path('PhagoPred')/'Datasets'/'mac_short_seg.h5'
-MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'mac_20x'
-MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'toumai_01_05'
+# MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'mac_20x'
+MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / '27_05_mac'
 CELLPOSE_MODEL = Path("PhagoPred") / 'cellpose_segmentation' / 'Models' / 'ash'
 UNET_MODEL = Path("PhagoPred") / 'unet_segmentation' / 'models' / '20x_flir_8'
 TRAINING_DATA = Path("PhagoPred") / 'segmentation' / 'models' / '20x_flir_8'
@@ -52,10 +52,10 @@ MINIMUM_PIXELS_PER_PATHOGEN = 10
 #   - model name
 #       - 'Training_Data'
 #           - 'train'
-#               - 'Images' .jpegs
+#               - 'images' .jpegs
 #               - 'labels.json'
 #           - 'validate'
-#               - 'Images' .jpegs
+#               - 'images' .jpegs
 #               - 'labels.json'
 
 # ******* CELLPOSE MODEL TRAINING DIRECTORY STRUCTURE *******

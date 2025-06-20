@@ -119,18 +119,16 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
 
         images_ds = f['Images'][channel]
         segmentations_ds = f.create_dataset(f'Segmentations/{channel}', shape=images_ds.shape,
-                                            max_shape=images_ds.shape, dtype='i2')
+                                            maxshape=images_ds.shape, dtype='i2')
         cells_group = f.require_group(f'Cells/{channel}')
-        # cell_features = {}
+
         for category in categories:
-            f.create_dataset_dataset(cells_group[category], 
+            cells_group.require_dataset(category, 
                                     shape=(images_ds.shape[0], 0),
-                                    max_shape=(images_ds.shape[0], None),
-                                    dtype=np.float32)
-        # cells_ds = f.create_dataset(f'Cells/{channel}', shape=(images_ds.shape[0], 0, len(categories)), 
-        #                             max_shape=(images_ds.shape[0], None, None), dtype=np.float32)
-        
-        # cells_ds.attrs['features'] = train_metadata["thing_classes"]
+                                    maxshape=(images_ds.shape[0], None),
+                                    dtype=np.float32,
+                                    exact=True,
+                                    fillvalue=np.nan)
 
         for frame_idx in range(images_ds.shape[0]):
             sys.stdout.write(f'\rSegmenting image {int(frame_idx)+1} / {f["Images"].attrs["Number of frames"]}')
@@ -142,9 +140,12 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
 
             mask = torch.zeros_like(detectron_outputs["instances"].pred_masks[0], dtype=torch.int16,
                                     device=device)
-            
-            if len(detectron_outputs['instances']) > cells_ds.shape[1]:
-                cells_ds.resize(len(detectron_outputs['instances'])+1)
+            # resize dataset if necassary
+            num_instances = len(detectron_outputs['instances'].pred_classes)
+            for category in categories:
+                current_max_instances = cells_group[category].shape[1]-1
+                if num_instances > current_max_instances:
+                    cells_group[category].resize(num_instances+1, axis=1)
 
             for i, pred_class in enumerate(detectron_outputs["instances"].pred_classes):
                 class_name = train_metadata['thing_classes'][pred_class]
@@ -156,9 +157,11 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
                         continue
                 
                 mask = torch.where(instance_mask, i+1, mask)
-                cells_ds[frame_idx, i+1, class_name] = 1
+                cells_group[class_name][frame_idx, i+1] = 1
+                # print(torch.unique(mask))
+                # cells_ds[frame_idx, i+1, class_name] = 1
 
-        segmentations_ds[frame_idx] = mask.cpu().numpy()
+            segmentations_ds[frame_idx] = mask.cpu().numpy()
         
 def main():
     seg_dataset()
