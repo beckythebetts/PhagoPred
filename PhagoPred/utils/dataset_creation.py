@@ -227,7 +227,7 @@ if __name__ == '__main__':
     #                 epi_channel=2,
     #                 )
     make_short_test_copy(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05.h5"),
-                         Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_short.h5"))
+                         Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_short_ims.h5"))
     # Create dummy data similar to your sliced data
     # data = np.random.randint(0, 256, size=(50, 2048, 2048), dtype=np.uint8)
 

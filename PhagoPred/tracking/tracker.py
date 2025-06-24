@@ -1,3 +1,5 @@
+import sys
+
 from typing import Optional
 import torch
 from pathlib import Path
@@ -30,25 +32,36 @@ class Tracker:
         self.feature_extractor.extract_features()
 
     def get_tracklets(self, min_dist: int = SETTINGS.MINIMUM_DISTANCE_THRESHOLD) -> None:
+        """Between each pair of consecutive frames, reassign the cell indexes of the second frame to minimise the total distance gap between all cells centroids.
+        To join two cells, their distance gap must be less than min_dist
+        """
+        print('\nGetting tracklets...')
         with h5py.File(self.file, 'r+') as f:
-            # self.masks_ds = f['Segmentations'][self.channel]
-            # self.cells_group = f['Cells'][self.channel]
+            f[self.cells_group].attrs['minimum distance'] = min_dist
             
-            self.cells_ds.attrs['minimum distance'] = min_dist
-
-            all_cells_xr = self.cell_type.get_features_xr(f, ['X', 'Y'])
+            coords_list = ['X', 'Y']
+            all_cells_xr = self.cell_type.get_features_xr(f, coords_list)
             old_cells = None
-            for frame in range(f[self.masks_ds].shape[0]):
-                current_cells = all_cells_xr.isel(Frame=frame).sel(Feature=('X', 'Y'))
-                # Add 'idx' feature and drop np.nan cells
-                current_cells = current_cells.assign_coords(
-                    idx=('Feature', np.arange(current_cells.size['Cell Index'])))
-                current_cells = current_cells.dropna(dim='Cell Index', how='all')
 
-                lut, old_cells = self.frame_to_frame_matching(old_cells, current_cells, min_dist)
-                self.apply_lut(frame, lut, f)
-                old_cells = current_cells
-                # Apply lut to segmentation mask and reorder Cells dataset
+            for frame in range(f[self.masks_ds].shape[0]):
+                sys.stdout.write(f'\rFrame {frame + 1}/{f[self.masks_ds].shape[0]}')
+                sys.stdout.flush()
+                current_cells = all_cells_xr.isel(Frame=frame).load()
+                current_cells = xr.concat([current_cells[dim] for dim in coords_list], dim='Feature')
+                # Add features and cell index coordinates
+                current_cells = current_cells.assign_coords({'Feature': ('Feature', coords_list),
+                                                             'Cell Index': ('Cell Index', np.arange(current_cells.sizes['Cell Index']))
+                                                             })
+                
+                # Drop nan cells (initial idx preserved in coord). Allows distances between all cells to be calculated.
+                current_cells = current_cells.dropna(dim='Cell Index', how='all')
+                
+                if old_cells is not None:
+                    lut, old_cells = self.frame_to_frame_matching(old_cells, current_cells, min_dist)
+                    self.apply_lut(frame, lut, f)
+                else:
+                    old_cells = current_cells
+
                 
     def frame_to_frame_matching(self, old_cells: Optional[xr.DataArray], current_cells: xr.DataArray, min_dist: int) -> tuple[np.array, xr.DataArray]:
         """
@@ -62,56 +75,59 @@ class Tracker:
             LUT for reindexing cells
             Reindexed current cells to be used as old_cells in next frame.
         """
-        # need no np.nan values in reindexed current cells (need to add idx column to xr.DataArray)
-        if old_cells is not None:
+        current_idxs = current_cells.coords['Cell Index']
+        old_idxs = old_cells.coords['Cell Index']
 
-            current_idxs = current_cells.sel(Feature='idx').values.astype(int)
-            old_idxs = old_cells.sel(Feature='idx').values.astype(int)
+        distances = np.linalg.norm(
+                    np.expand_dims(old_cells.sel(Feature=['X', 'Y']).values, 2) -
+                    np.expand_dims(current_cells.sel(Feature=['X', 'Y']).values, 1),
+                    axis=0
+                )
 
-            distances = np.linalg.norm(
-                        np.expand_dims(old_cells.sel(Feature=['x', 'y']).values, 1) -
-                        np.expand_dims(current_cells.sel(Feature=['x', 'y']).values, 0),
-                        axis=2
-                    )
+        old_pos, current_pos = linear_sum_assignment(distances)
+        valid_pairs = distances[old_pos, current_pos] < min_dist
+        # get actual cell idxs (not position idxs)
+        matched_old_idxs = old_idxs[old_pos[valid_pairs]]
+        matched_current_idxs = current_idxs[current_pos[valid_pairs]]
+        
+        unmatched_current_idxs = current_idxs[~np.isin(current_idxs, matched_current_idxs)]
+        
+        current_idxs = np.append(matched_current_idxs, unmatched_current_idxs)
+        old_idxs = np.append(matched_old_idxs, 
+                                np.arange(
+                                    np.max(old_idxs)+1, 
+                                    np.max(old_idxs)+len(unmatched_current_idxs)+1)
+                            ).astype(int)
+        
+        assert len(old_idxs) == len(current_idxs), "Old idxs and new idxs different lengths" 
+        lut = np.full(np.max(current_idxs)+2, -1)
+        lut[current_idxs] = old_idxs
 
-            old_pos, current_pos = linear_sum_assignment(distances)
-            valid_pairs = distances[old_pos, current_pos] < min_dist
-            # get actual cell idxs (not position idxs)
-            matched_old_idxs = old_cells.sel(Feature='idx').values[old_pos[valid_pairs]]
-            matched_current_idxs = current_cells.sel(Feature='idx').values[current_pos[valid_pairs]]
-            
-            # if len(current_cells) > len(current_idxs):
-                # add missing current_idxs to end of current_idxs, and add idxs to old_idxs. Current_idxs will be transformed to old_idxs.
-                
-            # unmatched_current_idxs = current_idxs[~current_idxs.isin(matched_current_idxs)]
-            unmatched_current_idxs = current_idxs[~np.isin(current_idxs, matched_current_idxs)]
-            
-            current_idxs = np.append(matched_current_idxs, unmatched_current_idxs)
-            old_idxs = np.append(matched_old_idxs, 
-                                    np.arange(
-                                        np.max(old_cells.sel(Feature='idx').values)+1, 
-                                        np.max(old_cells.sel(Feature='idx'))+len(unmatched_current_idxs)+1)
-                                ).astype(int)
-            
-            assert len(old_idxs) == len(current_idxs), "Old idxs and new idxs different lengths" 
-            #update mask
-            lut = np.zeros(np.max(current_idxs)+1)
-            lut[current_idxs] = old_idxs
-
-            current_cells.loc[dict(Feature='idx')] = lut[current_cells.sel(Feature='idx')]
-
-            return lut, current_cells
+        new_current_idxs = lut[current_cells.coords['Cell Index']]
+        current_cells = current_cells.assign_coords({'Cell Index': ('Cell Index', new_current_idxs)})
+        return lut.astype(int), current_cells
         
     def apply_lut(self, frame: int, lut: np.ndarray, h5py_file: h5py.File) -> None:
         """
         In the given frame, apply the LUT to reindex cells in the segmentation mask and Cells group.
         """
-        h5py_file[self.masks_ds][frame] = lut[self.masks_ds[frame][:]]
+        # Apply to mask
+        mask = h5py_file[self.masks_ds][frame][:]
+        new_mask = np.where(mask==-1, -1, lut[mask])
+        h5py_file[self.masks_ds][frame] = new_mask
+
+        valid_mask = np.nonzero(lut>=0)[0]
+        valid_lut = lut[valid_mask]
+        # Apply to all cell features
         for feature_name, feature_data in h5py_file[self.cells_group].items():
-            reindexed_feature_data = np.full(np.max(lut)+1, np.nan)
-            reindexed_feature_data[lut] = feature_data[()]
-            h5py_file[self.cells_group][feature_name] = reindexed_feature_data
-            # h5py_file[self.cells_group][feature_name] = h5py_file[self.cells_group][feature_name][lut]
+            feature_data = feature_data[frame][valid_mask]
+            reindexed_feature_data = np.full(np.max(valid_lut.astype(int))+1, np.nan)
+            print(valid_lut, feature_data)
+            reindexed_feature_data[valid_lut] = feature_data
+            # Resize dataset if necassary
+            if len(reindexed_feature_data) > h5py_file[self.cells_group][feature_name].shape[1]:
+                h5py_file[self.cells_group][feature_name].resize(len(reindexed_feature_data), axis=1)
+            h5py_file[self.cells_group][feature_name][frame, 0:len(reindexed_feature_data)] = reindexed_feature_data
 
 def main():
     my_tracker = Tracker()

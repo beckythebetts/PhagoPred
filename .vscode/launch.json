@@ -15,7 +15,8 @@
             // "module": "PhagoPred.detectron_segmentation.train",
             // "module": "PhagoPred.utils.dataset_creation",
             // "module": "PhagoPred.display.save",
-            "module": "PhagoPred.tracking.tracker",
+            // "module": "PhagoPred.tracking.tracker",
+            "module": "PhagoPred.run_all",
             "justMyCode": false
         }
     ]
