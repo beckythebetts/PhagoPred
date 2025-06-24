@@ -5,11 +5,13 @@ import sys
 import os
 import matplotlib.pyplot as plt
 from pathlib import Path
+import os
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import tools, mask_funcs
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
 def save_masks(dir, first_frame=0, last_frame=50):
     hdf5_file = SETTINGS.DATASET
@@ -23,6 +25,7 @@ def save_masks(dir, first_frame=0, last_frame=50):
 def save_tracked_images(dir, first_frame=0, last_frame=50):
     """Save the specified frames as .jpegs, with each cell assigned a random colour for visual check of tracking
     """
+    os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
     print('\nPREPARING TRACKED IMAGES\n')
     os.makedirs(dir, exist_ok=True)
     hdf5_file = SETTINGS.DATASET
@@ -30,26 +33,25 @@ def save_tracked_images(dir, first_frame=0, last_frame=50):
         phase_data = f['Images']['Phase'][first_frame:last_frame]
         segmentation_data = f['Segmentations']['Phase'][first_frame:last_frame]
     max_cell_index = np.max(segmentation_data)
-    LUT = torch.randint(low=10, high=255, size=(max_cell_index+1, 3)).to(device)
-    LUT[0] = torch.tensor([0, 0, 0]).to(device)
+    LUT = torch.randint(low=10, high=255, size=(max_cell_index+1, 3), dtype=torch.uint8).to(device)
+
+    lut_for_neg1 = torch.tensor([[0, 0, 0]], device=device, dtype=torch.uint8)
+    LUT = torch.cat([lut_for_neg1, LUT], dim=0)
+    # LUT[0] = torch.tensor([0, 0, 0]).to(device)
     rgb_phase = np.stack((phase_data, phase_data, phase_data), axis=-1)
-    tracked = np.zeros(rgb_phase.shape)
+    # tracked = np.zeros(rgb_phase.shape)
     for i, (phase_image, segmentation) in enumerate(
             zip(rgb_phase, segmentation_data)):
         segmentation = torch.tensor(segmentation).to(device)
-        phase_image = torch.tensor(phase_image).to(device).int()
+        phase_image = torch.tensor(phase_image, dtype=torch.uint8).to(device)
         sys.stdout.write(
             f'\rFrame {i + 1}')
         sys.stdout.flush()
-        outlines = mask_funcs.mask_outlines(segmentation, thickness=3).int()
-        outlines = LUT[outlines]
-        phase_image =  (torch.where(outlines>0, outlines, phase_image))
-        phase_image = phase_image.cpu().numpy().astype(np.uint8)
-        tracked[i] = phase_image
-    for i, im in enumerate(tracked):
-        # cv2.putText(im, text=f'frame: {i+first_frame} | time: {(i+first_frame)*SETTINGS.TIME_STEP}/s', org=(20, SETTINGS.IMAGE_SIZE[1]-20), fontFace=cv2.FONT_HERSHEY_COMPLEX, 
-                    # fontScale=3, color=(255, 255, 255), thickness=3)
-        plt.imsave(dir / f'{i}.jpeg', im/256)
+        outlines = mask_funcs.mask_outlines(segmentation, thickness=3).type(torch.int64)
+        colour_outlines = (LUT[outlines]).type(torch.uint8)
+        outlined_phase_image =  (torch.where(outlines.unsqueeze(-1).expand_as(colour_outlines)>0, colour_outlines, phase_image))
+        outlined_phase_image = outlined_phase_image.cpu().numpy() / 256
+        plt.imsave(dir / f'{i}.jpeg', outlined_phase_image)
 
 
 def save_cell_images(dir, cell_idx, first_frame=0, last_frame=50, frame_size=150):
@@ -88,8 +90,9 @@ def save_cell_images(dir, cell_idx, first_frame=0, last_frame=50, frame_size=150
     for i, im in enumerate(merged_im):
         plt.imsave(dir / (f'{i}.png'), np.transpose(im/255, (1, 2, 0)))
 
-
-if __name__ == '__main__':
+def main():
     save_tracked_images(Path('temp/view'), 0, 50)
     # save_cell_images(Path(r'C:\Users\php23rjb\Downloads\temp') / 'test_track', cell_idx=347, first_frame=0, last_frame=50)
     # save_masks(Path('secondwithlight_masks'), 0, SETTINGS.NUM_FRAMES)
+if __name__ == '__main__':
+    main()

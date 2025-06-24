@@ -138,26 +138,28 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
 
             detectron_outputs = predictor(np.stack([np.array(image)]*3, axis=-1))
 
-            mask = torch.zeros_like(detectron_outputs["instances"].pred_masks[0], dtype=torch.int16,
-                                    device=device)
+            # mask = torch.zeros_like(detectron_outputs["instances"].pred_masks[0], dtype=torch.int16,
+            #                         device=device)
+            mask = torch.full_like(detectron_outputs["instances"].pred_masks[0], -1, dtype=torch.int16,
+                                   device=device)
             # resize dataset if necassary
             num_instances = len(detectron_outputs['instances'].pred_classes)
             for category in categories:
                 current_max_instances = cells_group[category].shape[1]-1
                 if num_instances > current_max_instances:
-                    cells_group[category].resize(num_instances+1, axis=1)
+                    cells_group[category].resize(num_instances, axis=1)
 
             for i, pred_class in enumerate(detectron_outputs["instances"].pred_classes):
                 class_name = train_metadata['thing_classes'][pred_class]
                 instance_mask = detectron_outputs["instances"].pred_masks[i].to(device=device)
 
-                # ******* ADJUST FOR NON SQUARE IMAGES!!!*********
-                if SETTINGS.REMOVE_EDGE_CELLS:
-                    if torch.any(torch.nonzero(instance_mask)==1) or torch.any(torch.nonzero(instance_mask)==SETTINGS.IMAGE_SIZE[0]-1):
-                        continue
+                # if SETTINGS.REMOVE_EDGE_CELLS:
+                #     if instance_mask[0, :].any() or instance_mask[-1, :].any() or instance_mask[:, 0].any() or instance_mask[:, -1].any():
+                #         continue
+
                 
-                mask = torch.where(instance_mask, i+1, mask)
-                cells_group[class_name][frame_idx, i+1] = 1
+                mask = torch.where(instance_mask, i, mask)
+                cells_group[class_name][frame_idx, i] = 1
                 # print(torch.unique(mask))
                 # cells_ds[frame_idx, i+1, class_name] = 1
 

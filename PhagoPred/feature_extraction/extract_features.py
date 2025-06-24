@@ -110,35 +110,28 @@ class CellType:
         """
         Create hdf5 datset for each feature
         """
-        num_frames = h5py.file[self.images].shape(self.FRAME_DIM)
+        num_frames = h5py_file[self.images].shape[self.FRAME_DIM]
 
         self.primary_feature_datasets = []
         self.derived_feature_datsets = []
         for feature_name in self.primary_feature_names:
-            dataset = h5py_file.require_dataset(f'{self.features_group}/{feature_name}', shape=(num_frames, 0), maxshape=(num_frames, None))
+            dataset = h5py_file.require_dataset(f'{self.features_group}/{feature_name}', 
+                                                shape=(num_frames, 0), 
+                                                maxshape=(num_frames, None), 
+                                                dtype=np.float32,
+                                                fillvalue=np.nan, 
+                                                exact=True)
             dataset.attrs['dimensions'] = self.DIMS
             self.primary_feature_datasets.append(dataset)
         for feature_name in self.derived_feature_names:
-            dataset = h5py_file.require_dataset(f'{self.features_group}/{feature_name}', shape=(num_frames, 0), maxshape=(num_frames, None))
+            dataset = h5py_file.require_dataset(f'{self.features_group}/{feature_name}', 
+                                                shape=(num_frames, 0), 
+                                                maxshape=(num_frames, None), 
+                                                dtype=np.float32,
+                                                fillvalue=np.nan,
+                                                exact=True)
             dataset.attrs['dimensions'] = self.DIMS
             self.derived_feature_datasets.append(dataset)
-        # dataset = h5py_file[self.features_ds]
-        # dataset.attrs['dimensions'] = self.DIMS
-
-        # self.set_initial_num_features(dataset.shape[self.DIMS.index("Feature")])
-    
-        # features_list = self.get_feature_names()
-        # if len(features_list) > 0:
-        #     # for feature_name in features_list:
-        #     #     if feature_name not in dataset.attrs['features']:
-        #     #         dataset.attrs['features'] = np.append(dataset.attrs['features'], feature_name)
-        #     dataset.attrs['features'] = np.concatenate((dataset.attrs['features'], np.array(features_list)))
-
-        # dataset.attrs['dimensions'] = ['frames', 'cells', 'features']
-
-        # dataset.resize(self.initial_num_features + len(features_list), axis=2)
-
-        # self.set_num_cells(dataset.shape[self.DIMS.index("Cell Index")])
 
     def get_features_xr(self, h5py_file: h5py.File, features: list = None) -> xr.Dataset:
         """
@@ -151,7 +144,7 @@ class CellType:
                     continue
             # read as dask array, preserving chunks
             data = da.from_array(feature_data, chunks=feature_data.chunks)
-            data_dict[feature_name] = ((self.DIMS[0], self.DIMS[1]), data)
+            data_dict[feature_name] = (self.DIMS, data)
 
         return xr.Dataset(data_dict)
 
@@ -211,6 +204,8 @@ class FeaturesExtraction:
 
                 # cell_type.set_initial_num_features(cell_type.initial_num_features-1)
                 cell_type.get_feature_names()
+                cell_type.set_up_features_group(f)
+                
 
     def extract_features(self) -> None:
         with h5py.File(self.h5py_file, 'r+') as f:
@@ -245,17 +240,17 @@ class FeaturesExtraction:
 
                     expanded_mask = torch.tensor(mask).to(self.DEVICE).unsqueeze(0) == cell_idxs.unsqueeze(1).unsqueeze(2)
 
-                    if first_cell == 0:
-                        expanded_mask[0] = torch.zeros_like(expanded_mask[0])
+                    # if first_cell == 0:
+                    #     expanded_mask[0] = torch.zeros_like(expanded_mask[0])
                     for feature in cell_type.primary_features:
-
-                        # if num_cells>f[cell_type.features_ds].shape(cell_type.CELL_DIM):
-                        #     f[cell_type.features_ds].resize(num_cells, num_cells)
-
                         result = feature.compute(mask=expanded_mask, image=image)
                         if result.ndim == 1:
                             result = result[:, np.newaxis]
                         for i, feature_name in enumerate(feature.get_names()):
+                        #resize dataset if too many cells
+                            if num_cells>f[cell_type.features_group][feature_name].shape[cell_type.CELL_DIM]:
+                                f[cell_type.features_group][feature_name].resize(num_cells, cell_type.CELL_DIM)
+
                             f[cell_type.features_group][feature_name][frame_idx, first_cell:last_cell] = result[:, i]
                 #         frame_results[first_cell:last_cell, feature.index_positions[0]:feature.index_positions[1]] = result
 

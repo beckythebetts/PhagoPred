@@ -42,21 +42,26 @@ class Coords(BaseFeature):
         return ['X', 'Y', 'Area']
     
     def compute(self, mask: torch.tensor, image: torch.tensor) -> np.array:
-        print(device)
         if self.x_grid is None or self.y_grid is None:
             self.x_grid, self.y_grid = torch.meshgrid(
                 torch.arange(mask.shape[1]).to(device),
                 torch.arange(mask.shape[2]).to(device),
                 indexing='ij')
-            for grid in (self.x_grid, self.y_grid): grid.unsqueeze(2) 
+            self.x_grid = self.x_grid.unsqueeze(0)
+            self.y_grid = self.y_grid.unsqueeze(0)
+            # for grid in (self.x_grid, self.y_grid): grid = grid.unsqueeze(0) 
 
         areas = torch.sum(mask, dim=(1, 2))
-        xs = torch.sum(self.x_grid * mask, dim=(1, 2)) / areas.unsqueeze(-1).unsqueeze(-1)
+        xs = torch.sum(self.x_grid * mask, dim=(1, 2)) / areas
         ys = torch.sum(self.y_grid * mask, dim=(1, 2)) / areas
 
-        return np.stack((xs.cpu().numpy(), 
-                         ys.cpu().numpy(),
-                         areas.cpu().numpy()), axis=-1)
+        # Set values for cells with area 0 to nan
+        results = torch.stack((xs, ys, areas), dim=-1)
+        nan_mask = results[:, -1] == 0.0
+        nan_mask = nan_mask.unsqueeze(-1).expand_as(results)
+        results[nan_mask] = float('nan')
+        
+        return results.cpu().numpy()
     
 class MorphologyModes(BaseFeature):
 
