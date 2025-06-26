@@ -3,7 +3,7 @@ import h5py
 
 # ******* GENERAL *******
 # DATASET = Path('PhagoPred')/'Datasets'/'secondwithlight - Copy.h5'
-DATASET = Path('PhagoPred')/'Datasets'/'27_05_short.h5'
+DATASET = Path('PhagoPred')/'Datasets'/'27_05_short_tracks.h5'
 # DATASET = Path('PhagoPred')/'Datasets'/'mac_07_03_short.h5'
 # DATASET = Path('PhagoPred')/'Datasets'/'mac_short_seg.h5'
 # MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'mac_20x'
@@ -23,10 +23,10 @@ with h5py.File(DATASET, 'r') as f:
 THRESHOLD = 250
 
 # ******* TRACKING *******
-MINIMUM_DISTANCE_THRESHOLD = 20
+MAXIMUM_DISTANCE_THRESHOLD = 20
 FRAME_MEMORY = 10
 CLEAN_TRACKS = True
-MINIMUM_TRACK_LENGTH = 50
+MINIMUM_TRACK_LENGTH = 20
 
 
 VIEW_TRACKS = True # Save labelled tracked images
