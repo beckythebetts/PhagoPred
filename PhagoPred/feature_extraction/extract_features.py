@@ -102,7 +102,7 @@ class CellType:
         """
         num_frames = h5py_file[self.images].shape[self.FRAME_DIM]
 
-        num_cells = None
+        num_cells = 1
 
         if 'X' in h5py_file[self.features_group].keys():
             num_cells = h5py_file[self.features_group]['X'].shape[1]
