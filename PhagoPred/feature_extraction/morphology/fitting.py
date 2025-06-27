@@ -41,12 +41,12 @@ class MorphologyFit(PCAKmeansFit):
 
     def feature_func(self, frame_idx):
         with h5py.File(self.h5py_file, 'r') as f:
-            mask = f['Segmentations']['Phase'][f'{frame_idx:04}'][:]
-            num_cells = f['Cells']['Phase'].shape[1]
+            mask = f['Segmentations']['Phase'][frame_idx][:]
+            num_cells = f['Cells']['Phase']['X'].shape[1]
 
         expanded_mask = (np.expand_dims(mask, 0) == np.expand_dims(np.arange(num_cells), (1,2)))
 
-        return self.feature_func_expanded_mask(expanded_mask, num_cells)
+        return self.feature_func_expanded_mask(expanded_mask)
     
     def feature_func_expanded_mask(self, expanded_mask):
         """

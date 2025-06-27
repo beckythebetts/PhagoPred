@@ -54,44 +54,82 @@ def save_tracked_images(dir, first_frame=0, last_frame=50):
         plt.imsave(dir / f'{i}.jpeg', outlined_phase_image)
 
 
-def save_cell_images(dir, cell_idx, first_frame=0, last_frame=50, frame_size=150):
+def overlay_red_on_gray(gray: np.ndarray, red_overlay: np.ndarray,
+                                   red_scale: float = 1, normalize: bool = True) -> np.ndarray:
+    """
+    Overlay a red channel onto a grayscale time series image (3D input).
+
+    Parameters:
+        gray (np.ndarray): Grayscale image stack (T, H, W)
+        red_overlay (np.ndarray): Red overlay mask (T, H, W), same shape as gray
+        red_scale (float): Multiplier for red overlay intensity
+        normalize (bool): Whether to normalize both arrays to [0, 1]
+
+    Returns:
+        np.ndarray: RGB stack (T, H, W, 3)
+    """
+    assert gray.shape == red_overlay.shape, "gray and red_overlay must have same shape (T, H, W)"
+    
+    gray = gray.astype(np.float32)
+    red_overlay = red_overlay.astype(np.float32)
+
+    if normalize:
+        gray = (gray - np.nanmin(gray)) / (np.nanmax(gray) - np.nanmin(gray) + 1e-8)
+        red_overlay = (red_overlay - np.nanmin(red_overlay)) / (np.nanmax(red_overlay) - np.nanmin(red_overlay) + 1e-8)
+
+    # Create empty RGB output
+    T, H, W = gray.shape
+    rgb = np.zeros((T, H, W, 3), dtype=np.float32)
+    # Red channel: base gray + red overlay
+    rgb[..., 0] = np.clip(gray + red_overlay * red_scale, 0, 255)  # Red
+    rgb[..., 1] = gray  # Green
+    rgb[..., 2] = gray  # Blue
+
+    return rgb
+
+def save_cell_images(dir, cell_idx, first_frame=0, last_frame=10, frame_size=150):
     """For a specified cell index, save {frame_size} x {frame_size} pixel images centred on the cell centre for the specified frames.
     Cell will be outlined in yellow, with fluorescence overlayed in red.
     """
     hdf5_file = SETTINGS.DATASET
-    print(f'\nSHOWING CELL: {cell_idx}, FRAMES: {first_frame} to {last_frame}')
     phase_data = np.empty((last_frame-first_frame, frame_size, frame_size))
-    epi_mask = np.empty((last_frame-first_frame, frame_size, frame_size), dtype=bool)
-    mask_data = np.empty((last_frame-first_frame, frame_size, frame_size))
+    epi_data = np.empty((last_frame-first_frame, frame_size, frame_size))
+    mask = np.empty((last_frame-first_frame, frame_size, frame_size))
 
     
     with h5py.File(hdf5_file, 'r') as f:
-        x_centres, y_centres = tools.get_features_ds(f['Cells']['Phase'], 'x')[first_frame:last_frame, cell_idx], tools.get_features_ds(f['Cells']['Phase'], 'y')[first_frame:last_frame, cell_idx]
-        # fill np.nan values with closest non np.values
+        x_centres, y_centres = f['Cells']['Phase']['X'][first_frame:last_frame, cell_idx], f['Cells']['Phase']['Y'][first_frame:last_frame, cell_idx]
         x_centres, y_centres = tools.fill_nans(x_centres), tools.fill_nans(y_centres)
 
         for idx, frame in enumerate(range(first_frame, last_frame)):
-            ymin, ymax, xmin, xmax = mask_funcs.get_crop_indices((x_centres[idx], y_centres[idx]), frame_size, SETTINGS.IMAGE_SIZE)
+            ymin, ymax, xmin, xmax = mask_funcs.get_crop_indices((y_centres[idx], x_centres[idx]), frame_size, SETTINGS.IMAGE_SIZE)
             phase_data[idx] = np.array(f['Images']['Phase'][frame])[xmin:xmax, ymin:ymax]
-            epi_mask[idx] = (f['Segmentations']['Epi'][frame][xmin:xmax, ymin:ymax] > 0).astype(bool)
-            mask_data[idx] = f['Segmentations']['Phase'][frame][xmin:xmax, ymin:ymax]
-            cell_mask = (mask_data == cell_idx)
+            epi_data[idx] = (f['Images']['Epi'][frame][xmin:xmax, ymin:ymax])
+            mask[idx] = f['Segmentations']['Phase'][frame][xmin:xmax, ymin:ymax]
+            cell_mask = (mask == cell_idx)
+
     if not cell_mask.any():
         raise Exception(f'Cell of index {cell_idx} not found')
-    cell_outline = mask_funcs.mask_outline(torch.tensor(cell_mask).byte().to(device), thickness=1).cpu().numpy()
-    merged_im = np.stack((phase_data, phase_data, phase_data), axis=1)
-    #merged_im[:, 0][epi_data > SETTINGS.THRESHOLD] = epi_data[epi_data > SETTINGS.THRESHOLD]
-    merged_im[:, 0][epi_mask] = 255
-    merged_im[:, 1][epi_mask] = 0
-    merged_im[:, 2][epi_mask] = 0
-    #merged_im[:, :][epi_data > SETTINGS.THRESHOLD] = 255
-    merged_im[:, 0][cell_outline] = 255
-    merged_im[:, 1][cell_outline] = 255
+    
+    epi_data = tools.threshold_image(epi_data)
+    cell_outline = mask_funcs.mask_outline(torch.tensor(cell_mask).byte().to(device), thickness=2).cpu().numpy()
+
+    merged_im = overlay_red_on_gray(phase_data, epi_data, normalize=False)
+    merged_im[...,0][cell_outline] = 255
+    merged_im[..., 1][cell_outline] = 255
+
+
     for i, im in enumerate(merged_im):
-        plt.imsave(dir / (f'{i}.png'), np.transpose(im/255, (1, 2, 0)))
+        # plt.imsave(dir / (f'{i}.jpeg'), np.transpose(im/255, (1, 2, 0)))
+        plt.imsave(dir / (f'{i}.jpeg'), im/255)
+
+# def save_cell_feature_plot(cell_idx: int, first_fame: int = 0, last_frame: int = 0) -> None:
+#     plt.rcParams["font.family"] = 'serif'
+#     with h5py.File(SETTINGS.DATASET, 'r') as f
 
 def main():
     save_tracked_images(Path('temp/view'), 0, 50)
+    # save_cell_images(Path('temp/view'), 50, 0, 50)
     # save_cell_images(Path(r'C:\Users\php23rjb\Downloads\temp') / 'test_track', cell_idx=347, first_frame=0, last_frame=50)
     # save_masks(Path('secondwithlight_masks'), 0, SETTINGS.NUM_FRAMES)
 if __name__ == '__main__':
