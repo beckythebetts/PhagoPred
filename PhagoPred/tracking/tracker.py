@@ -190,7 +190,7 @@ class Tracker:
                 for frame in range(start_frames[cell_1], end_frames[cell_1]+1):
                     mask = f[self.masks_ds][frame][:]
                     mask[mask==cell_1] = cell_0
-                    f[self.masks_ds][frame][...] = mask
+                    f[self.masks_ds][frame] = mask
 
                 # Update queue
                 queue[:, 0][queue[:, 0]==cell_1] = cell_0
@@ -222,12 +222,16 @@ class Tracker:
             # Get coords to determine np.nan cells
             coords = self.cell_type.get_features_xr(f, ['X', 'Y'])
             coords = np.stack([coord_array.values for coord_array in coords.data_vars.values()], axis=2)
-
+            
             old_cell_idxs = np.nonzero(np.any(~np.isnan(coords), axis=(0,2)))[0]
             new_cell_idxs = np.arange(len(old_cell_idxs))
+
+            # unique_mask_idxs = np.unique(f[self.masks_ds][:])
+            # assert np.array_equal(np.sort(old_cell_idxs), np.sort(unique_mask_idxs[unique_mask_idxs != -1]))
             # lut = np.zeros(coords.shape[1])
             lut = np.full(coords.shape[1], -1)
             lut[old_cell_idxs] = new_cell_idxs
+            # print(lut)
             for frame in range(coords.shape[0]):
                 sys.stdout.write(f'\rDeleting np.nan cells: Frame {frame+1} / {coords.shape[0]}')
                 sys.stdout.flush()
@@ -241,10 +245,10 @@ class Tracker:
 
 def main():
     my_tracker = Tracker()
-    # my_tracker.get_cell_info()
-    # my_tracker.get_tracklets()
-    # my_tracker.join_tracklets()
-    # my_tracker.remove_short_tracks()
+    my_tracker.get_cell_info()
+    my_tracker.get_tracklets()
+    my_tracker.join_tracklets()
+    my_tracker.remove_short_tracks()
     my_tracker.delete_nan_cells()
     
 if __name__ == '__main__':

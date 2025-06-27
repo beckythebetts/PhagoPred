@@ -527,6 +527,18 @@ def fill_nans(array):
     filled_s = s.fillna(method='ffill').fillna(method='bfill')
     return filled_s.to_numpy()
 
+def threshold_image(frames: np.ndarray, lower_percentile: float = 99, upper_percentile: float = 99.9) -> np.ndarray:
+    """Calculate percentiles for given frames and threshold image.
+
+    Arguments
+    ---------
+    frames: [N, X, Y] np.ndarray
+    """
+    lower_threshold = np.percentile(frames.flatten(), lower_percentile)
+    upper_threshold = np.percentile(frames.flatten(), upper_percentile)
+
+    return np.where((frames>=lower_threshold) & (frames<=upper_threshold), frames, 0)
+
 
 def plot_tracks(save_as):
     tracks_plot = torch.zeros((*SETTINGS.IMAGE_SIZE, 3), dtype=torch.uint8).to(device)

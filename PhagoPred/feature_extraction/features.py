@@ -95,7 +95,8 @@ class Speed(BaseFeature):
     derived_feature = True
     
     def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
-        positions = phase_xr.sel(Feature=['x', 'y'])
+        # positions = phase_xr.sel(Feature=['x', 'y'])
+        positions = xr.concat([phase_xr[feat] for feat in ['X', 'Y']], dim='Feature')
 
         speeds = positions.diff(dim='Frame')
 
@@ -113,6 +114,7 @@ class Speed(BaseFeature):
         valid_positions_prev = valid_positions.shift(Frame=1).fillna(False)
         speeds = speeds.where(valid_positions & valid_positions_prev)
 
+        speeds = speeds.transpose('Frame', 'Cell Index', 'Feature')
         return speeds.values
     
 class Displacement(BaseFeature):
@@ -120,18 +122,27 @@ class Displacement(BaseFeature):
     derived_feature = True
 
     def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
-        positions = phase_xr.sel(Feature=['x', 'y'])
+        positions = xr.concat([phase_xr[feat] for feat in ['X', 'Y']], dim='Feature')
 
-        positions_0 = positions.isel(Frame=0).expand_dims({'Frame': positions.sizes['Frame']})
+        not_nan = positions.notnull().all(dim='Feature')
+        first_valid_frame = not_nan.argmax(dim='Frame').compute()
+
+        positions_0 = positions.isel(Frame=first_valid_frame).expand_dims({'Frame': positions.sizes['Frame']})
+
+        # positions = phase_xr.sel(Feature=['x', 'y'])
+
+        # positions_0 = positions.isel(Frame=0).expand_dims({'Frame': positions.sizes['Frame']})
 
         displacements = ((positions-positions_0)**2).sum(dim='Feature')**0.5
 
-        mask = positions.sel(Feature='x').notnull()
+        # mask = positions.sel(Feature='x').notnull()
+        mask = phase_xr['X'].notnull()
 
         displacements = displacements.where(mask)
 
         displacements = displacements.expand_dims({'Feature':1}, axis=-1)
 
+        displacements = displacements.transpose('Frame', 'Cell Index', 'Feature')
         return displacements.values
 
     
@@ -146,25 +157,37 @@ class DensityPhase(BaseFeature):
 
     def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
 
-        positions = phase_xr.sel(Feature=['x', 'y'])
+        positions = xr.concat([phase_xr[feat] for feat in ['X', 'Y']], dim='Feature')
+
+        positions = positions.transpose('Frame', 'Cell Index', 'Feature')
+        print(positions.sizes)
 
         positions_1 = positions.expand_dims(dim={'Cell Index 1': positions.sizes['Cell Index']}, axis=1)
+        print(positions_1.sizes)
 
         positions_2 = positions_1.swap_dims({'Cell Index': 'Cell Index 1', 'Cell Index 1': 'Cell Index'})
+        print(positions_2.sizes)
 
         distances = positions_1 - positions_2
         
         distances = (distances**2).sum(dim='Feature')**0.5
-        # distances = distances.where(distances!=0, np.nan)
 
+       
+        distances = distances.where(distances!=0, np.nan)
+        print(distances.sizes)
+        print(distances.values)
         # create xarray to store results, using full_like copies chunking
-        results = xr.full_like(phase_xr, np.nan).isel(Feature=slice(0, len(self.radii)))
+        # results = xr.full_like(phase_xr, np.nan).isel(Feature=slice(0, len(self.radii)))
+        results = xr.DataArray(np.full((positions.sizes['Frame'], positions.sizes['Cell Index'], len(self.radii)), np.nan),
+                               dims=positions.dims)
         results.coords['Feature'] = self.radii
         for radius in self.radii:
             results.loc[dict(Feature=radius)] = (distances < radius).sum(dim='Cell Index 1') - 1
     
-        results = results.where(positions.sel(Feature='x').notnull())
+        results = results.where(phase_xr['X'].notnull())
 
+        results = results.transpose('Frame', 'Cell Index', 'Feature')
+        print(results.sizes)
         return results.values
     
 class Perimeter(BaseFeature):
@@ -182,7 +205,7 @@ class Perimeter(BaseFeature):
         conv_result = torch.nn.functional.conv2d(padded_masks.unsqueeze(1).float(), kernel.unsqueeze(0).unsqueeze(0).float(),
                                                 padding=0).squeeze()
         
-        result = np.array(torch.sum((conv_result >= 10) & (conv_result <=16), dim=(1, 2)).float())
+        result = torch.sum((conv_result >= 10) & (conv_result <=16), dim=(1, 2)).float().cpu().numpy()
         result[result==0] = np.nan
 
         return result
@@ -194,8 +217,10 @@ class Circularity(BaseFeature):
 
     derived_feature = True
 
-    def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
-        circularity = phase_xr.sel(Feature=['area']) * 4 * np.pi / phase_xr.sel(Feature='Perimeter')**2
+    def compute(self, phase_xr: xr.Dataset, epi_xr: xr.Dataset) -> np.array:
+        areas = phase_xr['Area']
+        perimeters = phase_xr['Perimeter']
+        circularity = areas * 4 * np.pi / (perimeters**2)
         return circularity.values
     
 class GaborScale(BaseFeature):
