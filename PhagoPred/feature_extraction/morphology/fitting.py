@@ -84,12 +84,13 @@ class MorphologyFit(PCAKmeansFit):
             plt.plot(original_contour[:, 0], original_contour[:, 1], color=colours[i])
             # plt.set_aspect('equal')
             # axs[i].set_title(str(i))
-
+        plt.savefig('temp/shape_modes.png')
         plt.show()
         
-
-if __name__ == '__main__':
+def main():
     test = MorphologyFit()
+    test.view_shape_modes()
+    test.view_clusters()
     # test.fit()
     # test.load_pca()
     # test.load_kmeans()
@@ -99,4 +100,9 @@ if __name__ == '__main__':
     # view_clusters()
     # apply_pca_kmeans(40)
     # test.pc_heatmap()
-    test.rank_input_features()
+    # test.rank_input_features()
+
+
+if __name__ == '__main__':
+    main()
+   

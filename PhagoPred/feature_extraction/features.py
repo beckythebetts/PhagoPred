@@ -160,13 +160,10 @@ class DensityPhase(BaseFeature):
         positions = xr.concat([phase_xr[feat] for feat in ['X', 'Y']], dim='Feature')
 
         positions = positions.transpose('Frame', 'Cell Index', 'Feature')
-        print(positions.sizes)
 
         positions_1 = positions.expand_dims(dim={'Cell Index 1': positions.sizes['Cell Index']}, axis=1)
-        print(positions_1.sizes)
 
         positions_2 = positions_1.swap_dims({'Cell Index': 'Cell Index 1', 'Cell Index 1': 'Cell Index'})
-        print(positions_2.sizes)
 
         distances = positions_1 - positions_2
         
@@ -174,20 +171,17 @@ class DensityPhase(BaseFeature):
 
        
         distances = distances.where(distances!=0, np.nan)
-        print(distances.sizes)
-        print(distances.values)
+
         # create xarray to store results, using full_like copies chunking
-        # results = xr.full_like(phase_xr, np.nan).isel(Feature=slice(0, len(self.radii)))
         results = xr.DataArray(np.full((positions.sizes['Frame'], positions.sizes['Cell Index'], len(self.radii)), np.nan),
                                dims=positions.dims)
         results.coords['Feature'] = self.radii
         for radius in self.radii:
-            results.loc[dict(Feature=radius)] = (distances < radius).sum(dim='Cell Index 1') - 1
+            results.loc[dict(Feature=radius)] = (distances < radius).sum(dim='Cell Index 1')
     
         results = results.where(phase_xr['X'].notnull())
 
         results = results.transpose('Frame', 'Cell Index', 'Feature')
-        print(results.sizes)
         return results.values
     
 class Perimeter(BaseFeature):
