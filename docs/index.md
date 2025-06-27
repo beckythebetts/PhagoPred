@@ -1,4 +1,6 @@
-# Overview
+# Phagocytosis Outcome Prediction
+
+## Overview
 Phagocytosis, the engulfment and elimination of particles by cells, is a fundamental component of the innate immune response. Bacteria have evolved various strategies to survive and escape phagocytosis, some of which are well understood, while others remain unidentified.
 
 **Aim**: Identify patterns in phagocyte morphology and dynamics that indicate successful or failed phagocytosis.
@@ -10,3 +12,5 @@ We extract multivariate time series features describing the morphology, movement
 To classify phagocytosis events as successful or failed, we plan to evaluate several machine learning approaches, balancing accuracy and interpretability. 
 
 ![Phagocytosis](images/phago_11_3.gif)
+
+1. [Imaging](Imaging/)

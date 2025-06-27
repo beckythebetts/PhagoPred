@@ -1,3 +1,5 @@
+# Imaging
+
 ## Phase-contrast
 Intensity describes optical path length (dependent on thickness and refractive index of sample)
 Allows high contrast imaging with low light intensity, minimising photo damage to cells
