@@ -5,7 +5,7 @@ Phagocytosis, the engulfment and elimination of particles by cells, is a fundame
 
 Using time-lapse, two-channel microscopy, we image macrophages (professional phagocytes) and Staphylococcus aureus bacteria to capture phagocytosis events.
 Segmentation via Mask R-CNN provides cell outlines.
-Tracking is performed with a linear sum assignment problem approach 
+Tracking is performed with a linear sum assignment problem approach.
 We extract multivariate time series features describing the morphology, movement, and interactions of cells involved in each phagocytosis event. 
 To classify phagocytosis events as successful or failed, we plan to evaluate several machine learning approaches, balancing accuracy and interpretability. 
-![Phagocytosis](docs/images/phago_11_3.gif)
+![Phagocytosis](images/phago_11_3.gif)
