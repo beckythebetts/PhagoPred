@@ -13,5 +13,9 @@ Allows bacteria to be localised during and after engulfment.
 
 ---
 
+
 Images taken at intervals of one minute over three days.
+
 ![Imaging Example](images/imaging_example.gif)
+
+Next: (Segmentation)[Segmentation/]
