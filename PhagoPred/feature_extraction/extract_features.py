@@ -224,6 +224,8 @@ class FeaturesExtraction:
                                 f[cell_type.features_group][feature_name].resize(num_cells, cell_type.CELL_DIM)
 
                             f[cell_type.features_group][feature_name][frame_idx, first_cell:last_cell] = result[:, i]
+        
+        torch.cuda.empty_cache()
  
 
     def extract_derived_features(self, f: h5py.File, cell_type: CellType) -> None:

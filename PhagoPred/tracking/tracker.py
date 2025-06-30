@@ -1,4 +1,5 @@
 import sys
+import gc
 
 from typing import Optional, Tuple
 import torch
@@ -62,8 +63,12 @@ class Tracker:
                 else:
                     old_cells = current_cells
 
+
+                if frame % 100 == 0:
+                    gc.collect()
+
                 
-    def frame_to_frame_matching(self, old_cells: Optional[xr.DataArray], current_cells: xr.DataArray, max_dist: int) -> tuple[np.array, xr.DataArray]:
+    def frame_to_frame_matching(self, old_cells: Optional[xr.DataArray], current_cells: xr.DataArray, max_dist: int) -> tuple[dict, xr.DataArray]:
         """
         Reindex current cells to match with old_cells using linear sum assignemnt to minimise total distance between cells.
         Update mask and cells_ds with new indices.
@@ -101,33 +106,68 @@ class Tracker:
                             ).astype(int)
         
         assert len(old_idxs) == len(current_idxs), "Old idxs and new idxs different lengths" 
-        lut = np.full(np.max(current_idxs)+2, -1)
-        lut[current_idxs] = old_idxs
+        # lut = np.full(np.max(current_idxs)+2, -1)
+        # lut[current_idxs] = old_idxs
 
-        new_current_idxs = lut[current_cells.coords['Cell Index']]
-        current_cells = current_cells.assign_coords({'Cell Index': ('Cell Index', new_current_idxs)})
-        return lut.astype(int), current_cells
+        lut = {int(curr): int(old) for curr, old in zip(current_idxs, old_idxs)}
+
+        # new_current_idxs = lut[current_cells.coords['Cell Index']]
+
+        def map_index(idx):
+            return lut.get(idx)
         
-    def apply_lut(self, frame: int, lut: np.ndarray, h5py_file: h5py.File) -> None:
+        new_current_idxs = xr.apply_ufunc(
+            np.vectorize(map_index),
+            current_cells.coords['Cell Index'],
+            vectorize=True,
+            dask='parallelized',
+            output_dtypes=[int],
+        ).values
+        current_cells = current_cells.assign_coords({'Cell Index': ('Cell Index', new_current_idxs)})
+        return lut, current_cells
+        
+    def apply_lut(self, frame: int, lut: dict, h5py_file: h5py.File) -> None:
         """
         In the given frame, apply the LUT to reindex cells in the segmentation mask and Cells group.
         """
         # Apply to mask
         mask = h5py_file[self.masks_ds][frame][:]
-        new_mask = np.where(mask==-1, -1, lut[mask])
+        # new_mask = np.where(mask==-1, -1, lut[mask])
+        new_mask = np.vectorize(lambda idx: lut.get(idx, -1))(mask)
         h5py_file[self.masks_ds][frame] = new_mask
 
-        valid_mask = np.nonzero(lut>=0)[0]
-        valid_lut = lut[valid_mask]
-        # Apply to all cell features
+        valid_current_idxs = np.array(list(lut.keys()), dtype=int)   # cell indices in current frame
+        valid_new_idxs = np.array(list(lut.values()), dtype=int)     # global new indices to assign
+
         for feature_name, feature_data in h5py_file[self.cells_group].items():
-            feature_data = feature_data[frame][valid_mask]
-            reindexed_feature_data = np.full(np.max(valid_lut.astype(int))+1, np.nan)
-            reindexed_feature_data[valid_lut] = feature_data
-            # Resize dataset if necassary
-            if len(reindexed_feature_data) > h5py_file[self.cells_group][feature_name].shape[1]:
-                h5py_file[self.cells_group][feature_name].resize(len(reindexed_feature_data), axis=1)
-            h5py_file[self.cells_group][feature_name][frame, 0:len(reindexed_feature_data)] = reindexed_feature_data
+            # Get original feature data for the current frame, for mapped cell indices
+            frame_data = feature_data[frame]
+            feature_values = frame_data[valid_current_idxs]  # shape: (num_mapped_cells,)
+
+            # Create reindexed array with NaNs for unmapped cells
+            max_idx = int(valid_new_idxs.max()) + 1
+            reindexed_feature_data = np.full(max_idx, np.nan)
+            reindexed_feature_data[valid_new_idxs] = feature_values
+
+            # Resize dataset if necessary (grow in chunks to avoid frequent resizing)
+            current_shape = h5py_file[self.cells_group][feature_name].shape[1]
+            if max_idx > current_shape:
+                h5py_file[self.cells_group][feature_name].resize(max_idx + 100, axis=1)
+
+            # Assign reindexed data
+            h5py_file[self.cells_group][feature_name][frame, 0:max_idx] = reindexed_feature_data
+
+        # valid_mask = np.nonzero(lut>=0)[0]
+        # valid_lut = lut[valid_mask]
+        # Apply to all cell features
+        # for feature_name, feature_data in h5py_file[self.cells_group].items():
+        #     feature_data = feature_data[frame][valid_mask]
+        #     reindexed_feature_data = np.full(np.max(valid_lut.astype(int))+1, np.nan)
+        #     reindexed_feature_data[valid_lut] = feature_data
+        #     # Resize dataset if necassary (Resize for many cells, to avoid repeated resizing)
+        #     if len(reindexed_feature_data) > h5py_file[self.cells_group][feature_name].shape[1]:
+        #         h5py_file[self.cells_group][feature_name].resize(len(reindexed_feature_data)+100, axis=1)
+        #     h5py_file[self.cells_group][feature_name][frame, 0:len(reindexed_feature_data)] = reindexed_feature_data
 
 
     def get_tracklet_endpoints(self, h5py_file: h5py.File) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -229,16 +269,18 @@ class Tracker:
             # unique_mask_idxs = np.unique(f[self.masks_ds][:])
             # assert np.array_equal(np.sort(old_cell_idxs), np.sort(unique_mask_idxs[unique_mask_idxs != -1]))
             # lut = np.zeros(coords.shape[1])
-            lut = np.full(coords.shape[1], -1)
-            lut[old_cell_idxs] = new_cell_idxs
+            # lut = np.full(coords.shape[1], -1)
+            # lut[old_cell_idxs] = new_cell_idxs
+            lut = {int(old): int(new) for old, new in zip(old_cell_idxs, new_cell_idxs)}
             # print(lut)
-            for frame in range(coords.shape[0]):
-                sys.stdout.write(f'\rDeleting np.nan cells: Frame {frame+1} / {coords.shape[0]}')
-                sys.stdout.flush()
-                self.apply_lut(frame, lut.astype(int), f)
+            if len(lut) > 0:
+                for frame in range(coords.shape[0]):
+                    sys.stdout.write(f'\rDeleting np.nan cells: Frame {frame+1} / {coords.shape[0]}')
+                    sys.stdout.flush()
+                    self.apply_lut(frame, lut, f)
 
-            for feature_name in f[self.cells_group].keys():
-                f[self.cells_group][feature_name].resize(len(new_cell_idxs), axis=1)
+                for feature_name in f[self.cells_group].keys():
+                    f[self.cells_group][feature_name].resize(len(new_cell_idxs), axis=1)
 
         # # Repack to clear unused storage
         # tools.repack_hdf5(self.file)
