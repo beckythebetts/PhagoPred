@@ -1,5 +1,6 @@
 ---
 title: Phagocytosis Outcome Prediction
+sidebar: true
 layout: default
 ---
 ## Overview

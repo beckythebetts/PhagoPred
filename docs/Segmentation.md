@@ -1,6 +1,6 @@
 ---
 title: Segmentation
-layout: page
+layout: default
 sidebar: true
 ---
 
