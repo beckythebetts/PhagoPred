@@ -1,5 +1,7 @@
 ---
 title: Imaging
+layout: page
+sidebar: true
 ---
 
 ## Phase-contrast
