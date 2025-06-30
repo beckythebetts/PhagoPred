@@ -1,5 +1,5 @@
 - title: Overview
-  url: /index/
+  url: /
   children:
     - title: 1. Imaging
       url: /Imaging/
