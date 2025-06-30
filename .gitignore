@@ -8,7 +8,6 @@ venv/
 src/
 detectron2/
 
-*.png
 
 PhagoPred/cellpose_segmentation/Models
 PhagoPred/Datasets
