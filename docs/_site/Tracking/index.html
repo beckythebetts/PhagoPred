@@ -1,0 +1,323 @@
+<!doctype html>
+<!--
+  Minimal Mistakes Jekyll Theme 4.27.1 by Michael Rose
+  Copyright 2013-2025 Michael Rose - mademistakes.com | @mmistakes
+  Free for personal and commercial use under the MIT license
+  https://github.com/mmistakes/minimal-mistakes/blob/master/LICENSE
+-->
+
+<html lang="en" class="no-js">
+  <head>
+    <meta charset="utf-8">
+
+<!-- begin _includes/seo.html --><title>Tracking - Phagocytosis Outcome Prediction</title>
+<meta name="description" content="">
+
+
+
+<meta property="og:type" content="website">
+<meta property="og:locale" content="en_US">
+<meta property="og:site_name" content="Phagocytosis Outcome Prediction">
+<meta property="og:title" content="Tracking">
+<meta property="og:url" content="http://localhost:4000/Tracking/">
+
+
+
+
+
+
+
+
+
+
+
+
+
+<link rel="canonical" href="http://localhost:4000/Tracking/">
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- end _includes/seo.html -->
+
+
+
+  <link href="/feed.xml" type="application/atom+xml" rel="alternate" title="Phagocytosis Outcome Prediction Feed">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script>
+  document.documentElement.className = document.documentElement.className.replace(/\bno-js\b/g, '') + ' js ';
+  
+</script>
+
+<!-- For all browsers -->
+<link rel="stylesheet" href="/assets/css/main.css">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@latest/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@latest/css/all.min.css"></noscript>
+
+
+
+    <!-- start custom head snippets -->
+
+<!-- insert favicons. use https://realfavicongenerator.net/ -->
+
+<!-- end custom head snippets -->
+
+  </head>
+
+  <body class="layout--single" dir="ltr">
+    <nav class="skip-links">
+  <ul>
+    <li><a href="#site-nav" class="screen-reader-shortcut">Skip to primary navigation</a></li>
+    <li><a href="#main" class="screen-reader-shortcut">Skip to content</a></li>
+    <li><a href="#footer" class="screen-reader-shortcut">Skip to footer</a></li>
+  </ul>
+</nav>
+
+    
+
+<div class="masthead">
+  <div class="masthead__inner-wrap">
+    <div class="masthead__menu">
+      <nav id="site-nav" class="greedy-nav">
+        
+        <a class="site-title" href="/">
+          Phagocytosis Outcome Prediction
+          
+        </a>
+        <ul class="visible-links"></ul>
+        
+        <button class="greedy-nav__toggle hidden" type="button">
+          <span class="visually-hidden">Toggle menu</span>
+          <div class="navicon"></div>
+        </button>
+        <ul class="hidden-links hidden"></ul>
+      </nav>
+    </div>
+  </div>
+</div>
+
+
+    <div class="initial-content">
+      
+
+
+
+
+
+<div id="main" role="main">
+  
+  <div class="sidebar sticky">
+  
+  
+    
+      
+      
+      
+      
+    
+    
+      <nav class="nav__list">
+  
+  <input id="ac-toc" name="accordion-toc" type="checkbox" />
+  <label for="ac-toc">Toggle Menu</label>
+  <ul class="nav__items">
+    
+      
+      
+        <li>
+          
+            <a href="/"><span class="nav__sub-title">Overview</span></a>
+          
+
+          
+        </li>
+      
+        <li>
+          
+            <a href="/Imaging/"><span class="nav__sub-title">1. Imaging</span></a>
+          
+
+          
+        </li>
+      
+        <li>
+          
+            <a href="/Segmentation/"><span class="nav__sub-title">2. Segmentation</span></a>
+          
+
+          
+        </li>
+      
+        <li>
+          
+            <a href="/Tracking/"><span class="nav__sub-title">3. Tracking</span></a>
+          
+
+          
+        </li>
+      
+        <li>
+          
+            <a href="/FeatureExtraction/"><span class="nav__sub-title">4. Feature Extraction</span></a>
+          
+
+          
+        </li>
+      
+        <li>
+          
+            <a href="/DatasetStructure/"><span class="nav__sub-title">Dataset Structure</span></a>
+          
+
+          
+        </li>
+      
+    
+  </ul>
+</nav>
+
+    
+  
+  </div>
+
+
+
+  <article class="page" itemscope itemtype="https://schema.org/CreativeWork">
+    <meta itemprop="headline" content="Tracking">
+    
+    
+    
+
+    <div class="page__inner-wrap">
+      
+        <header>
+          <h1 id="page-title" class="page__title" itemprop="headline">
+            <a href="http://localhost:4000/Tracking/" itemprop="url">Tracking
+</a>
+          </h1>
+          
+
+
+        </header>
+      
+
+      <section class="page__content" itemprop="text">
+        
+          <aside class="sidebar__right ">
+            <nav class="toc">
+              <header><h4 class="nav__title"><i class="fas fa-file-alt"></i> On this page</h4></header>
+              <ul class="toc__menu"><li><a href="#find-tracklets">Find Tracklets</a></li><li><a href="#join-tracklets">Join Tracklets</a></li></ul>
+            </nav>
+          </aside>
+        
+        <p><code class="language-plaintext highlighter-rouge">PhagoPred.tracking.tracker.Tracker()</code>
+Match cells between each frame to form tracks.</p>
+<h1 id="find-tracklets">Find Tracklets</h1>
+<p>Between each pair of consecutive frames, pair cells in order to minimise the total distance between all cell pairs.
+For each time step:</p>
+<ol>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">Tracker().get_cell_info()</code>
+ Find centroids (average x, and y coordinates) of each cell, see <a href="/FeatureExtraction/">Feature Extraction</a>.</p>
+  </li>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">Tracker().frame_to_frame_matching()</code>
+ Create ‘cost matrix’ of distances between each possible cell pairing. Apply Jonker-Volgenant algorithm to match cells in order to minimise sum of distances between all cells. (Discard matching if distance is below <code class="language-plaintext highlighter-rouge">SETTINGS.MAXIMUM_DISTANCE_THRESHOLD</code>)</p>
+  </li>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">Tracker().apply_lut()</code>
+ Update the stored segmentation masks and cell datasets to assign matched cells the same cell index, see <a href="/DatasetStructure/">Dataset Structure</a>.</p>
+  </li>
+</ol>
+
+<h1 id="join-tracklets">Join Tracklets</h1>
+<p><code class="language-plaintext highlighter-rouge">Tracker().join_tracklets()</code></p>
+
+<p>Cell segmentations may be missing/wrong in some frames, so the tracklets formed above are matched up again using the Jonker-Volgenant algorithm to minimise distances. The distances between the start and end of each tracklet are used to form the cost matrix, provided that the <code class="language-plaintext highlighter-rouge">start_frame</code> - <code class="language-plaintext highlighter-rouge">end_frame</code> is between 0 and <code class="language-plaintext highlighter-rouge">SETTINGS.FRAME_MEMORY</code>.</p>
+
+<p>Again the segmentation masks and cell datsets are updated using <code class="language-plaintext highlighter-rouge">Tracker().apply_lut()</code>.</p>
+
+<p>Next: <a href="/FeatureExtraction/">Feature Extraction</a></p>
+
+        
+      </section>
+
+      <footer class="page__meta">
+        
+        
+
+
+        
+
+      </footer>
+
+      
+
+      
+
+    </div>
+
+    
+  </article>
+
+  
+  
+</div>
+
+      
+    </div>
+
+    
+
+    <div id="footer" class="page__footer">
+      <footer>
+        <!-- start custom footer snippets -->
+
+<!-- end custom footer snippets -->
+        <div class="page__footer-follow">
+  <ul class="social-icons">
+    
+
+    
+
+    
+      <li><a href="/feed.xml"><i class="fas fa-fw fa-rss-square" aria-hidden="true"></i> Feed</a></li>
+    
+  </ul>
+</div>
+
+<div class="page__footer-copyright">&copy; 2025 <a href="http://localhost:4000">Phagocytosis Outcome Prediction</a>. Powered by <a href="https://jekyllrb.com" rel="nofollow">Jekyll</a> &amp; <a href="https://mademistakes.com/work/jekyll-themes/minimal-mistakes/" rel="nofollow">Minimal Mistakes</a>.</div>
+
+      </footer>
+    </div>
+
+     <script type="text/javascript" async
+   src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.6/MathJax.js?config=TeX-MML-AM_CHTML">
+ </script>
+
+ <script type="text/x-mathjax-config">
+    MathJax.Hub.Config({
+      extensions: ["tex2jax.js"],
+      jax: ["input/TeX", "output/HTML-CSS"],
+      tex2jax: {
+        inlineMath: [ ['$','$'], ["\\(","\\)"] ],
+        displayMath: [ ['$$','$$'], ["\\[","\\]"] ],
+        processEscapes: true
+      },
+      "HTML-CSS": {
+        availableFonts: ["TeX"],
+        scale: 120
+      }
+    });
+ </script>
+  </body>
+</html>

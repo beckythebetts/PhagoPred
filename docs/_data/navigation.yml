@@ -1,7 +1,13 @@
-- title: Overview
-  url: /
-  children:
-    - title: 1. Imaging
-      url: /Imaging/
-    - title: 2. Segmentation
-      url: /Segmentation/
+navigation:
+  - title: Overview
+    url: /
+  - title: 1. Imaging
+    url: /Imaging/
+  - title: 2. Segmentation
+    url: /Segmentation/
+  - title: 3. Tracking
+    url: /Tracking/
+  - title: 4. Feature Extraction
+    url: /FeatureExtraction/
+  - title: Dataset Structure
+    url: /DatasetStructure/
