@@ -1,5 +1,7 @@
 ---
 title: Segmentation
+layout: page
+sidebar: true
 ---
 
 # Mask R-CNN
