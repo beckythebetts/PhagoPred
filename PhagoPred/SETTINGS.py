@@ -3,7 +3,7 @@ import h5py
 
 # ******* GENERAL *******
 # DATASET = Path('PhagoPred')/'Datasets'/'secondwithlight - Copy.h5'
-DATASET = Path('PhagoPred')/'Datasets'/'27_05_short_ims_test.h5'
+DATASET = Path('PhagoPred')/'Datasets'/'27_05_short.h5'
 # DATASET = Path('PhagoPred')/'Datasets'/'mac_07_03_short.h5'
 # DATASET = Path('PhagoPred')/'Datasets'/'mac_short_seg.h5'
 # MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'mac_20x'

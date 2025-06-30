@@ -2,8 +2,14 @@ plugins:
   - jekyll-include-cache
 
 remote_theme: "mmistakes/minimal-mistakes@4.27.1"
+theme: null
+minimal_mistakes_skin: "contrast"
+
+title: "Phagocytosis Outcome Prediction"
+
 
 markdown: kramdown
 permalink: pretty
+mathjax: true
 sidebar:
   nav: "navigation"

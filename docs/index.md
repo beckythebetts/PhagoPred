@@ -1,7 +1,8 @@
 ---
 title: Phagocytosis Outcome Prediction
-sidebar: true
-layout: default
+sidebar: 
+    nav: "navigation"
+layout: single
 ---
 ## Overview
 Phagocytosis, the engulfment and elimination of particles by cells, is a fundamental component of the innate immune response. Bacteria have evolved various strategies to survive and escape phagocytosis, some of which are well understood, while others remain unidentified.
@@ -18,3 +19,4 @@ To classify phagocytosis events as successful or failed, we plan to evaluate sev
 
 1. [Imaging](Imaging/)
 2. [Segmentation](Segmentation/)
+3. [Tracking](Tracking/)

@@ -1,7 +1,9 @@
 ---
 title: Imaging
-layout: default
-sidebar: true
+layout: single
+sidebar: 
+    nav: "navigation"
+toc: true
 ---
 
 ## Phase-contrast
@@ -20,4 +22,4 @@ Images taken at intervals of one minute over three days.
 
 ![Imaging Example](images/imaging_example.gif)
 
-Next: [Segmentation](Segmentation/)
+Next: [Segmentation](/Segmentation/)

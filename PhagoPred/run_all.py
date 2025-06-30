@@ -6,9 +6,9 @@ from PhagoPred.feature_extraction import extract_features
 from PhagoPred.feature_extraction.morphology import fitting
 
 if __name__ == '__main__':
-    segment.main()
-    tracker.main()
+    # segment.main()
+    # tracker.main()
     # save.main()
-    extract_features.main()
-    # plots.main()
+    # extract_features.main()
+    plots.main()
     # fitting.main()

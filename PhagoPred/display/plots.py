@@ -8,7 +8,7 @@ import numpy as np
 
 from PhagoPred import SETTINGS
 
-def plot_cell_features(cell_idx: int, first_frame: int, last_frame: int, save_as: Path, feature_nmaes: Optional[list] = None) -> 'matplotlib.figure.Figure':
+def plot_cell_features(cell_idx: int, first_frame: int, last_frame: int, save_as: Path, feature_names: Optional[list] = None) -> 'matplotlib.figure.Figure':
     """Plot time series of features for given cell index. If list of features is not given, plot all features."""
     plt.rcParams["font.family"] = 'serif'
 
@@ -158,9 +158,7 @@ def corr_coefficient(array1, array2):
     return np.corrcoef(filtered_x, filtered_y)[0, 1]
 
 def main():
-    # plot_cell_features(50, 0, 50, Path('temp') / 'plot.png')
-    # plot_average_cell_features(0, 50, Path('temp') / 'plot.png')
-    plot_feature_correlations(Path('temp') / 'plot.png', feature_names=[
+    feature_names=[
         'Area',
         'Circularity',
         'Perimeter',
@@ -170,7 +168,25 @@ def main():
         'Mode 2',
         'Mode 3',
         'Speed'
-    ])
+        # 'Phagocytes within 100 pixels',
+        # 'Phagocytes within 250 pixels',
+        # 'Phagocytes within 500 ',
+        'X',
+        'Y',
+    ]
+    plot_cell_features(1, 0, 50, Path('temp') / 'plot.png', feature_names=feature_names)
+    # plot_average_cell_features(0, 50, Path('temp') / 'plot.png')
+    # plot_feature_correlations(Path('temp') / 'plot.png', feature_names=[
+    #     'Area',
+    #     'Circularity',
+    #     'Perimeter',
+    #     'Displacement',
+    #     'Mode 0',
+    #     'Mode 1',
+    #     'Mode 2',
+    #     'Mode 3',
+    #     'Speed'
+    # ])
 
 if __name__ == '__main__':
     main()
