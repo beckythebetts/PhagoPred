@@ -6,6 +6,7 @@ import os
 import matplotlib.pyplot as plt
 from pathlib import Path
 import os
+from PIL import Image
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import tools, mask_funcs
@@ -87,7 +88,7 @@ def overlay_red_on_gray(gray: np.ndarray, red_overlay: np.ndarray,
 
     return rgb
 
-def save_cell_images(dir, cell_idx, first_frame=0, last_frame=10, frame_size=150):
+def save_cell_images(dir, cell_idx, first_frame=0, last_frame=10, frame_size=150, as_gif=False):
     """For a specified cell index, save {frame_size} x {frame_size} pixel images centred on the cell centre for the specified frames.
     Cell will be outlined in yellow, with fluorescence overlayed in red.
     """
@@ -96,7 +97,6 @@ def save_cell_images(dir, cell_idx, first_frame=0, last_frame=10, frame_size=150
     epi_data = np.empty((last_frame-first_frame, frame_size, frame_size))
     mask = np.empty((last_frame-first_frame, frame_size, frame_size))
 
-    
     with h5py.File(hdf5_file, 'r') as f:
         x_centres, y_centres = f['Cells']['Phase']['X'][first_frame:last_frame, cell_idx], f['Cells']['Phase']['Y'][first_frame:last_frame, cell_idx]
         x_centres, y_centres = tools.fill_nans(x_centres), tools.fill_nans(y_centres)
@@ -118,18 +118,21 @@ def save_cell_images(dir, cell_idx, first_frame=0, last_frame=10, frame_size=150
     merged_im[...,0][cell_outline] = 255
     merged_im[..., 1][cell_outline] = 255
 
-
-    for i, im in enumerate(merged_im):
-        # plt.imsave(dir / (f'{i}.jpeg'), np.transpose(im/255, (1, 2, 0)))
-        plt.imsave(dir / (f'{i}.jpeg'), im/255)
+    if as_gif:
+        ims = [Image.fromarray(img) for img in merged_im.astype(np.uint8)]
+        ims[0].save(dir / f"cell{cell_idx}.gif", save_all=True, append_images=ims[1:], duration=200, loop=0)
+    else:
+        for i, im in enumerate(merged_im):
+            # plt.imsave(dir / (f'{i}.jpeg'), np.transpose(im/255, (1, 2, 0)))
+            plt.imsave(dir / (f'{i}.jpeg'), im/255)
 
 # def save_cell_feature_plot(cell_idx: int, first_fame: int = 0, last_frame: int = 0) -> None:
 #     plt.rcParams["font.family"] = 'serif'
 #     with h5py.File(SETTINGS.DATASET, 'r') as f
 
 def main():
-    save_tracked_images(Path('temp/view'), 0, 50)
-    # save_cell_images(Path('temp/view'), 50, 0, 50)
+    # save_tracked_images(Path('temp/view'), 0, 50)
+    save_cell_images(Path('temp/view'), 1, 0, 50, as_gif=True)
     # save_cell_images(Path(r'C:\Users\php23rjb\Downloads\temp') / 'test_track', cell_idx=347, first_frame=0, last_frame=50)
     # save_masks(Path('secondwithlight_masks'), 0, SETTINGS.NUM_FRAMES)
 if __name__ == '__main__':

@@ -8,7 +8,7 @@ from PhagoPred.feature_extraction.morphology import fitting
 if __name__ == '__main__':
     # segment.main()
     # tracker.main()
-    # save.main()
+    save.main()
     # extract_features.main()
-    plots.main()
+    # plots.main()
     # fitting.main()
