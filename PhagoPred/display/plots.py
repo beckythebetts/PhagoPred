@@ -167,7 +167,7 @@ def main():
         'Mode 1',
         'Mode 2',
         'Mode 3',
-        'Speed'
+        'Speed',
         # 'Phagocytes within 100 pixels',
         # 'Phagocytes within 250 pixels',
         # 'Phagocytes within 500 ',
