@@ -27,6 +27,10 @@ These are calculated from other features. They take the datasets of all other fe
 - Surrounding cell density
 
 # Examples
+## Individual Cell
+
+| ![Features](images/cell_feature_plot.png) | ![Cell](images/cell1.gif) |
+
 ## Correlation Plot
 `PhagoPred.display.plots.plot_feature_correlations()`
 Correlation plot of a subset of the features. *R* gives the correlation coefficient between each pair of features and histograms of each feature are shown on the diagonal.
