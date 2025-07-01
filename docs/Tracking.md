@@ -26,4 +26,4 @@ Cell segmentations may be missing/wrong in some frames, so the tracklets formed 
 
 Again the segmentation masks and cell datsets are updated using `Tracker().apply_lut()`.
 
-Next: [Feature Extraction](/FeatureExtraction/)
+Next: [Feature Extraction](../FeatureExtraction/)
