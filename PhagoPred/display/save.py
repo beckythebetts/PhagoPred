@@ -131,8 +131,8 @@ def save_cell_images(dir, cell_idx, first_frame=0, last_frame=10, frame_size=150
 #     with h5py.File(SETTINGS.DATASET, 'r') as f
 
 def main():
-    # save_tracked_images(Path('temp/view'), 0, 50)
-    save_cell_images(Path('temp/view'), 1, 0, 50, as_gif=True)
+    save_tracked_images(Path('temp/view'), 0, 50)
+    # save_cell_images(Path('temp/view'), 1, 0, 50, as_gif=True)
     # save_cell_images(Path(r'C:\Users\php23rjb\Downloads\temp') / 'test_track', cell_idx=347, first_frame=0, last_frame=50)
     # save_masks(Path('secondwithlight_masks'), 0, SETTINGS.NUM_FRAMES)
 if __name__ == '__main__':

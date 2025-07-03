@@ -139,7 +139,11 @@ class CellType:
             data = da.from_array(feature_data, chunks=feature_data.chunks)
             data_dict[feature_name] = (self.DIMS, data)
 
-        return xr.Dataset(data_dict)
+        ds = xr.Dataset(data_dict)
+
+        # ds = ds.assign_coords(Frame=np.arange(ds.sizes['Frame']))
+
+        return ds
 
     
 class FeaturesExtraction:
