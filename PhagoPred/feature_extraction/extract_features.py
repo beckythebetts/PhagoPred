@@ -256,12 +256,12 @@ def main():
     feature_extractor = FeaturesExtraction()
 
     phase_features = [
-        features.MorphologyModes(), 
-        features.Speed(),
-        features.DensityPhase(),
-        features.Displacement(),
-        features.Perimeter(),
-        features.Circularity(),
+        # features.MorphologyModes(), 
+        # features.Speed(),
+        # features.DensityPhase(),
+        # features.Displacement(),
+        # features.Perimeter(),
+        # features.Circularity(),
         # features.GaborScale(),
         features.CellDeath()
         ]
