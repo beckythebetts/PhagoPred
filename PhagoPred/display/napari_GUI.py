@@ -89,20 +89,21 @@ class CellViewer(QMainWindow):
 
         self.feature_names=[
                 'Area',
-                # 'Circularity',
-                # 'Perimeter',
-                # 'Displacement',
-                # 'Mode 0',
-                # 'Mode 1',
-                # 'Mode 2',
-                # 'Mode 3',
-                # 'Speed',
+                'Circularity',
+                'Perimeter',
+                'Displacement',
+                'Speed',
+                'Mode 0',
+                'Mode 1',
+                'Mode 2',
+                'Mode 3',
+                'Speed',
                 # 'Phagocytes within 100 pixels',
                 # 'Phagocytes within 250 pixels',
-                # 'Phagocytes within 500 ',
-                'X',
-                'Y',
-                # 'CellDeath'
+                # 'Phagocytes within 500 pixels',
+                # 'X',
+                # 'Y',
+                'CellDeath'
         ]
         
         # Central widget
@@ -141,6 +142,7 @@ class CellViewer(QMainWindow):
         self.viewer.add_image(self.epi_data, name='Epi', blending='additive', colormap='red', opacity=0.5)
 
         self.viewer.add_image((self.cell_outline*255).astype(np.uint8), name='Outline', colormap='yellow', opacity=0.8, blending='additive')
+        self.viewer.dims.set_current_step(0, 0)
 
 
         self.setWindowTitle(f"Cell Viewer - Cell {self.cell_idx}")
@@ -212,7 +214,7 @@ class CellViewer(QMainWindow):
             plot_widget.setBackground('w')
             plot_widget.showGrid(x=True, y=True)
             plot_widget.setLabel('left', feature_name)
-            plot_widget.setLabel('bottom', 'Frames')
+            # plot_widget.setLabel('bottom', 'Frames')
 
             layout.addWidget(plot_widget)
             self.plot_widgets.append(plot_widget)
