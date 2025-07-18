@@ -15,7 +15,7 @@ class BaseFeature:
 
     def __init__(self):
         self.name = [self.__class__.__name__]
-        self.index_positions = None
+        # self.index_positions = None
 
     def get_names(self):
         return self.name
@@ -23,12 +23,32 @@ class BaseFeature:
     def compute(self):
         raise NotImplementedError(f"{self.get_name()} has no compute method implemented")
     
-    def set_index_positions(self, start: int, end: int = None) -> None:
-        self.index_positions = (start, end)
+    # def set_index_positions(self, start: int, end: int = None) -> None:
+    #     self.index_positions = (start, end)
     
-    def get_index_positions(self) -> list[int]:
-        return self.index_positions
+    # def get_index_positions(self) -> list[int]:
+    #     return self.index_positions
     
+class CellDeath(BaseFeature):
+    """
+    Determine frame at which cell dies, or np.nan if no cell death.
+    Note: unlike all other cell features, this returns a single value for each cell (not each frame of each cell).
+    """
+    derived_feature = True
+
+    def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
+        dead = phase_xr['Dead Macrophage']
+        alive = phase_xr['Macrophage']
+        
+        cell_state = xr.full_like(alive, np.nan, dtype=float)
+
+        cell_state = cell_state.where(alive != 1, 1)
+        cell_state = cell_state.where(dead != 1, 0)
+
+        # smooth
+        cell_state = cell_state.rolling(Frame=5, center=True).reduce(np.nanmean)
+        return cell_state.values
+
 class Coords(BaseFeature):
     """
     Centroid x, y coordinates and area
@@ -197,7 +217,7 @@ class Perimeter(BaseFeature):
         
         padded_masks = torch.nn.functional.pad(mask, (1, 1, 1, 1), mode='constant', value=0)
         conv_result = torch.nn.functional.conv2d(padded_masks.unsqueeze(1).float(), kernel.unsqueeze(0).unsqueeze(0).float(),
-                                                padding=0).squeeze()
+                                                padding=0).squeeze(1)
         
         result = torch.sum((conv_result >= 10) & (conv_result <=16), dim=(1, 2)).float().cpu().numpy()
         result[result==0] = np.nan

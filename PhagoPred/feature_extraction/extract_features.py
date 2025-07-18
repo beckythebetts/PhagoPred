@@ -263,6 +263,7 @@ def main():
         features.Perimeter(),
         features.Circularity(),
         # features.GaborScale(),
+        features.CellDeath()
         ]
     
     for feature in phase_features:
