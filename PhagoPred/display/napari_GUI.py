@@ -145,6 +145,8 @@ class CellViewer(QMainWindow):
 
         self.setWindowTitle(f"Cell Viewer - Cell {self.cell_idx}")
 
+        self.loading_dialog.close()
+
     def get_cell_images(self, f: h5py.File):
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -156,8 +158,8 @@ class CellViewer(QMainWindow):
         mask = np.empty((n_frames, self.frame_size, self.frame_size), dtype=np.int32)
 
         # Start progress dialog
-        loading_dialog = LoadingBarDialog(n_frames, message="Loading cell images...")
-        loading_dialog.show()
+        self.loading_dialog = LoadingBarDialog(n_frames, message="Loading cell images...")
+        self.loading_dialog.show()
 
         x_centres = f['Cells']['Phase']['X'][self.first_frame:self.last_frame, self.cell_idx]
         y_centres = f['Cells']['Phase']['Y'][self.first_frame:self.last_frame, self.cell_idx]
@@ -175,7 +177,7 @@ class CellViewer(QMainWindow):
             epi_data[idx] = epi_stack[idx][ymin:ymax, xmin:xmax]
             mask[idx] = mask_stack[idx][ymin:ymax, xmin:xmax]
 
-            loading_dialog.update_progress(idx+1)
+            self.loading_dialog.update_progress(idx+1)
 
         cell_mask = (mask == self.cell_idx)
 
@@ -193,7 +195,7 @@ class CellViewer(QMainWindow):
         self.epi_data = epi_data
         self.cell_outline = cell_outline
 
-        loading_dialog.close()
+        
 
 
     def get_feature_plot_widget(self) -> None:
