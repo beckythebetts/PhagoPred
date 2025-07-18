@@ -22,6 +22,46 @@ from PhagoPred.utils import mask_funcs
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def get_cell_end_frames(cell_idx: int, h5py_file: h5py.File) -> tuple[int, int]:
+    """Use 'X' coord datset to get frame of first and last non nan"""
+    not_nan_mask = ~np.isnan(h5py_file['Cells']['Phase']['X'][:, cell_idx])
+    first_frame = np.argmax(not_nan_mask)
+    last_frame = len(not_nan_mask) - 1 - np.argmax(not_nan_mask[::-1])
+    return first_frame, last_frame
+
+def overlay_red_on_gray(gray: np.ndarray, red_overlay: np.ndarray,
+                                   red_scale: float = 1, normalize: bool = True) -> np.ndarray:
+    """
+    Overlay a red channel onto a grayscale time series image (3D input).
+
+    Parameters:
+        gray (np.ndarray): Grayscale image stack (T, H, W)
+        red_overlay (np.ndarray): Red overlay mask (T, H, W), same shape as gray
+        red_scale (float): Multiplier for red overlay intensity
+        normalize (bool): Whether to normalize both arrays to [0, 1]
+
+    Returns:
+        np.ndarray: RGB stack (T, H, W, 3)
+    """
+    assert gray.shape == red_overlay.shape, "gray and red_overlay must have same shape (T, H, W)"
+    
+    gray = gray.astype(np.float32)
+    red_overlay = red_overlay.astype(np.float32)
+
+    if normalize:
+        gray = (gray - np.nanmin(gray)) / (np.nanmax(gray) - np.nanmin(gray) + 1e-8)
+        red_overlay = (red_overlay - np.nanmin(red_overlay)) / (np.nanmax(red_overlay) - np.nanmin(red_overlay) + 1e-8)
+
+    # Create empty RGB output
+    T, H, W = gray.shape
+    rgb = np.zeros((T, H, W, 3), dtype=np.float32)
+    # Red channel: base gray + red overlay
+    rgb[..., 0] = np.clip(gray + red_overlay * red_scale, 0, 255)  # Red
+    rgb[..., 1] = gray  # Green
+    rgb[..., 2] = gray  # Blue
+
+    return rgb
+
 def hdf5_from_nd2(nd2_file: Path, hdf5_file: Path, phase_channel: int=1, epi_channel: int=0, start_frame: int=0, end_frame: Optional[int] = None) -> None:
     if os.path.exists(hdf5_file):
         os.remove(hdf5_file)
@@ -524,7 +564,8 @@ def get_features_ds(f, feature):
     
 def fill_nans(array):
     s = pd.Series(array)
-    filled_s = s.fillna(method='ffill').fillna(method='bfill')
+    # filled_s = s.fillna(method='ffill').fillna(method='bfill')
+    filled_s = s.ffill().bfill()
     return filled_s.to_numpy()
 
 def threshold_image(frames: np.ndarray, lower_percentile: float = 99, upper_percentile: float = 99.9) -> np.ndarray:

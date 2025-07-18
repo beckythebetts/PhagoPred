@@ -55,38 +55,7 @@ def save_tracked_images(dir, first_frame=0, last_frame=50):
         plt.imsave(dir / f'{i}.jpeg', outlined_phase_image)
 
 
-def overlay_red_on_gray(gray: np.ndarray, red_overlay: np.ndarray,
-                                   red_scale: float = 1, normalize: bool = True) -> np.ndarray:
-    """
-    Overlay a red channel onto a grayscale time series image (3D input).
 
-    Parameters:
-        gray (np.ndarray): Grayscale image stack (T, H, W)
-        red_overlay (np.ndarray): Red overlay mask (T, H, W), same shape as gray
-        red_scale (float): Multiplier for red overlay intensity
-        normalize (bool): Whether to normalize both arrays to [0, 1]
-
-    Returns:
-        np.ndarray: RGB stack (T, H, W, 3)
-    """
-    assert gray.shape == red_overlay.shape, "gray and red_overlay must have same shape (T, H, W)"
-    
-    gray = gray.astype(np.float32)
-    red_overlay = red_overlay.astype(np.float32)
-
-    if normalize:
-        gray = (gray - np.nanmin(gray)) / (np.nanmax(gray) - np.nanmin(gray) + 1e-8)
-        red_overlay = (red_overlay - np.nanmin(red_overlay)) / (np.nanmax(red_overlay) - np.nanmin(red_overlay) + 1e-8)
-
-    # Create empty RGB output
-    T, H, W = gray.shape
-    rgb = np.zeros((T, H, W, 3), dtype=np.float32)
-    # Red channel: base gray + red overlay
-    rgb[..., 0] = np.clip(gray + red_overlay * red_scale, 0, 255)  # Red
-    rgb[..., 1] = gray  # Green
-    rgb[..., 2] = gray  # Blue
-
-    return rgb
 
 def save_cell_images(dir, cell_idx, first_frame=0, last_frame=10, frame_size=150, as_gif=False):
     """For a specified cell index, save {frame_size} x {frame_size} pixel images centred on the cell centre for the specified frames.
@@ -114,7 +83,7 @@ def save_cell_images(dir, cell_idx, first_frame=0, last_frame=10, frame_size=150
     epi_data = tools.threshold_image(epi_data)
     cell_outline = mask_funcs.mask_outline(torch.tensor(cell_mask).byte().to(device), thickness=2).cpu().numpy()
 
-    merged_im = overlay_red_on_gray(phase_data, epi_data, normalize=False)
+    merged_im = tools.overlay_red_on_gray(phase_data, epi_data, normalize=False)
     merged_im[...,0][cell_outline] = 255
     merged_im[..., 1][cell_outline] = 255
 
@@ -131,8 +100,8 @@ def save_cell_images(dir, cell_idx, first_frame=0, last_frame=10, frame_size=150
 #     with h5py.File(SETTINGS.DATASET, 'r') as f
 
 def main():
-    save_tracked_images(Path('temp/view'), 0, 50)
-    # save_cell_images(Path('temp/view'), 1, 0, 50, as_gif=True)
+    save_tracked_images(Path('temp/view'), 3000, 3100)
+    save_cell_images(Path('temp'), 0, 1, 1000, as_gif=True)
     # save_cell_images(Path(r'C:\Users\php23rjb\Downloads\temp') / 'test_track', cell_idx=347, first_frame=0, last_frame=50)
     # save_masks(Path('secondwithlight_masks'), 0, SETTINGS.NUM_FRAMES)
 if __name__ == '__main__':
