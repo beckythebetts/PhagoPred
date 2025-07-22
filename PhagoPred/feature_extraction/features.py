@@ -1,251 +1,282 @@
-import xarray as xr
-import torch
+import sys
+
+import h5py
 import numpy as np
+import torch
+import pandas as pd
+import xarray as xr
+import dask.array as da
+from tqdm import tqdm
 
-from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
-from PhagoPred.feature_extraction.texture.gabor import Gabor
 from PhagoPred import SETTINGS
+from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
+from PhagoPred.feature_extraction import features
+from PhagoPred.utils import tools
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-class BaseFeature:
+class CellType:
+    FRAME_DIM = 0
+    CELL_DIM = 1
 
-    primary_feature = False
-    derived_feature = False
+    DIMS = ["Frame", "Cell Index"]
 
-    def __init__(self):
-        self.name = [self.__class__.__name__]
-        # self.index_positions = None
+    def __init__(self, name: str) -> None:
 
-    def get_names(self):
-        return self.name
-    
-    def compute(self):
-        raise NotImplementedError(f"{self.get_name()} has no compute method implemented")
-    
-    # def set_index_positions(self, start: int, end: int = None) -> None:
-    #     self.index_positions = (start, end)
-    
-    # def get_index_positions(self) -> list[int]:
-    #     return self.index_positions
-    
-class CellDeath(BaseFeature):
-    """
-    Determine frame at which cell dies, or np.nan if no cell death.
-    Note: unlike all other cell features, this returns a single value for each cell (not each frame of each cell).
-    """
-    derived_feature = True
+        self.name = name
 
-    def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
-        dead = phase_xr['Dead Macrophage']
-        alive = phase_xr['Macrophage']
+        self.features_group = f'Cells/{name}'
+        self.images = f'Images/{name}'
+        self.masks = f'Segmentations/{name}'
+
+        self.primary_features = []
+        self.derived_features = []
         
-        cell_state = xr.full_like(alive, np.nan, dtype=float)
+        self.feature_names = []
+        self.primary_feature_names = []
+        self.derived_feature_names = []
 
-        cell_state = cell_state.where(alive != 1, 1)
-        cell_state = cell_state.where(dead != 1, 0)
+        self.primary_feature_datasets = []
+        self.derived_feature_datasets = []
 
-        # smooth
-        cell_state = cell_state.rolling(Frame=5, center=True).reduce(np.nanmean)
-        return cell_state.values
+        self.num_cells = None
 
-class Coords(BaseFeature):
-    """
-    Centroid x, y coordinates and area
-    """
-    primary_feature = True
 
-    def __init__(self):
-        self.x_grid, self.y_grid = None, None
+    def add_feature(self, feature):
+        if feature.primary_feature:
+            self.primary_features.append(feature)
 
-    def get_names(self):
-        return ['X', 'Y', 'Area']
+        if feature.derived_feature:
+            self.derived_features.append(feature)
+
+    def get_feature_names(self):
+
+        for feature in self.primary_features:
+            for name in feature.get_names():
+                self.primary_feature_names.append(name)
+
+        for feature in self.derived_features:
+            for name in feature.get_names():
+                self.derived_feature_names.append(name)
+
+        self.feature_names = self.primary_feature_names + self.derived_feature_names
+        return self.feature_names
     
-    def compute(self, mask: torch.tensor, image: torch.tensor) -> np.array:
-        if self.x_grid is None or self.y_grid is None:
-            self.x_grid, self.y_grid = torch.meshgrid(
-                torch.arange(mask.shape[1]).to(device),
-                torch.arange(mask.shape[2]).to(device),
-                indexing='ij')
-            self.x_grid = self.x_grid.unsqueeze(0)
-            self.y_grid = self.y_grid.unsqueeze(0)
-            # for grid in (self.x_grid, self.y_grid): grid = grid.unsqueeze(0) 
 
-        areas = torch.sum(mask, dim=(1, 2))
-        xs = torch.sum(self.x_grid * mask, dim=(1, 2)) / areas
-        ys = torch.sum(self.y_grid * mask, dim=(1, 2)) / areas
-
-        # Set values for cells with area 0 to nan
-        results = torch.stack((xs, ys, areas), dim=-1)
-        nan_mask = results[:, -1] == 0.0
-        nan_mask = nan_mask.unsqueeze(-1).expand_as(results)
-        results[nan_mask] = float('nan')
-        
-        return results.cpu().numpy()
-    
-class MorphologyModes(BaseFeature):
-
-    primary_feature = True
-
-    def __init__(self):
-        super().__init__()
-        self.morphology_model = MorphologyFit(SETTINGS.DATASET)
-
-        try:
-            self.morphology_model.load_model()
-
-        except:
-            print('Fitting Morpgology Model')
-            self.morphology_model.fit()
-
-
-    def get_names(self):
-        return [f'Mode {i}' for i in range(self.morphology_model.num_kmeans_clusters)]
-    
-    def compute(self, mask: torch.tensor, image: torch.tensor) -> np.array:
+    def get_masks(self, h5py_file: h5py.File, first_frame: int, last_frame: int = None) -> np.array:
         """
-        Results are of dims [num_cells, num_clusters]
+        Gets masks between the first and last frame, assuming h5py file is open and readable.
+        masks dims = [num_frames, x, y]
         """
-        expanded_frame_mask = mask.cpu().numpy()
-        results = self.morphology_model.apply_expanded_mask(expanded_frame_mask)
-        return results
+        if last_frame is None:
+            last_frame = first_frame + 1
+
+        masks = h5py_file[self.masks][first_frame:last_frame]
+        if len(masks) == 1:
+            return masks[0]
+        else:
+            return masks
     
-class Speed(BaseFeature):
 
-    derived_feature = True
-    
-    def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
-        # positions = phase_xr.sel(Feature=['x', 'y'])
-        positions = xr.concat([phase_xr[feat] for feat in ['X', 'Y']], dim='Feature')
+    def get_images(self, h5py_file: h5py.File, first_frame: int, last_frame: int = None) -> np.array:
+        """
+        Gets images between the first and last frame, assuming h5py file is open and readable.
+        dims = [num_frames, x, y]
+        """
+        if last_frame is None:
+            last_frame = first_frame + 1
 
-        speeds = positions.diff(dim='Frame')
+        images = h5py_file[self.images][first_frame:last_frame]
 
-        speeds = (speeds**2).sum(dim='Feature', keepdims=True)**0.5
-
-        # speeds = speeds.expand_dims(dim={'Feature':1}, axis=-1)
-
-        #insert np.nan at beginning
-        nan_insert = xr.DataArray([0], dims='Frame')
-        nan_insert = xr.full_like(speeds.isel(Frame=0), np.nan).expand_dims(Frame=1)
-        speeds = xr.concat([nan_insert, speeds], dim='Frame')
-
-        #insert nan if current or peviosu position unknown
-        valid_positions = positions.notnull().all(dim='Feature')
-        valid_positions_prev = valid_positions.shift(Frame=1).fillna(False)
-        speeds = speeds.where(valid_positions & valid_positions_prev)
-
-        speeds = speeds.transpose('Frame', 'Cell Index', 'Feature')
-        return speeds.values
-    
-class Displacement(BaseFeature):
-
-    derived_feature = True
-
-    def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
-        positions = xr.concat([phase_xr[feat] for feat in ['X', 'Y']], dim='Feature')
-
-        not_nan = positions.notnull().all(dim='Feature')
-        first_valid_frame = not_nan.argmax(dim='Frame').compute()
-
-        positions_0 = positions.isel(Frame=first_valid_frame).expand_dims({'Frame': positions.sizes['Frame']})
-
-        # positions = phase_xr.sel(Feature=['x', 'y'])
-
-        # positions_0 = positions.isel(Frame=0).expand_dims({'Frame': positions.sizes['Frame']})
-
-        displacements = ((positions-positions_0)**2).sum(dim='Feature')**0.5
-
-        # mask = positions.sel(Feature='x').notnull()
-        mask = phase_xr['X'].notnull()
-
-        displacements = displacements.where(mask)
-
-        displacements = displacements.expand_dims({'Feature':1}, axis=-1)
-
-        displacements = displacements.transpose('Frame', 'Cell Index', 'Feature')
-        return displacements.values
-
-    
-class DensityPhase(BaseFeature):
-
-    derived_feature = True
-
-    radii = [100, 250, 500]
-
-    def get_names(self):
-        return [f'Phagocytes within {radius} pixels' for radius in self.radii]
-
-    def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
-
-        positions = xr.concat([phase_xr[feat] for feat in ['X', 'Y']], dim='Feature')
-
-        positions = positions.transpose('Frame', 'Cell Index', 'Feature')
-
-        positions_1 = positions.expand_dims(dim={'Cell Index 1': positions.sizes['Cell Index']}, axis=1)
-
-        positions_2 = positions_1.swap_dims({'Cell Index': 'Cell Index 1', 'Cell Index 1': 'Cell Index'})
-
-        distances = positions_1 - positions_2
+        if len(images) == 1:
+            return images[0]
         
-        distances = (distances**2).sum(dim='Feature')**0.5
+        else:
+            return images
 
-       
-        distances = distances.where(distances!=0, np.nan)
+    def set_num_cells(self, num_cells):
+        self.num_cells = num_cells
 
-        # create xarray to store results, using full_like copies chunking
-        results = xr.DataArray(np.full((positions.sizes['Frame'], positions.sizes['Cell Index'], len(self.radii)), np.nan),
-                               dims=positions.dims)
-        results.coords['Feature'] = self.radii
-        for radius in self.radii:
-            results.loc[dict(Feature=radius)] = (distances < radius).sum(dim='Cell Index 1')
+
+    def set_up_features_group(self, h5py_file: h5py.File):
+        """
+        Create hdf5 datset for each feature
+        """
+        num_frames = h5py_file[self.images].shape[self.FRAME_DIM]
+
+        num_cells = 1
+
+        if 'X' in h5py_file[self.features_group].keys():
+            num_cells = h5py_file[self.features_group]['X'].shape[1]
+        for feature_name in self.primary_feature_names:
+            dataset = h5py_file.require_dataset(f'{self.features_group}/{feature_name}', 
+                                                shape=(num_frames, num_cells), 
+                                                maxshape=(num_frames, None), 
+                                                chunks=(1, num_cells),
+                                                dtype=np.float32,
+                                                fillvalue=np.nan, 
+                                                exact=True)
+            dataset.attrs['dimensions'] = self.DIMS
+            self.primary_feature_datasets.append(dataset)
+        for feature_name in self.derived_feature_names:
+            dataset = h5py_file.require_dataset(f'{self.features_group}/{feature_name}', 
+                                                shape=(num_frames, num_cells), 
+                                                maxshape=(num_frames, None), 
+                                                chunks=(1, num_cells),
+                                                dtype=np.float32,
+                                                fillvalue=np.nan,
+                                                exact=True)
+            dataset.attrs['dimensions'] = self.DIMS
+            self.derived_feature_datasets.append(dataset)
+
+
+    def get_features_xr(self, h5py_file: h5py.File, features: list = None) -> xr.Dataset:
+        """
+        h5py file is open file, returns x_array (chunked like h5py). If features no tspecified, reads all features.
+        """
+        data_dict = {}
+        for feature_name, feature_data in h5py_file[self.features_group].items():
+            if features:
+                if feature_name not in features:
+                    continue
+            # read as dask array, preserving chunks
+            data = da.from_array(feature_data, chunks=feature_data.chunks)
+            data_dict[feature_name] = (self.DIMS, data)
+
+        ds = xr.Dataset(data_dict)
+
+        # ds = ds.assign_coords(Frame=np.arange(ds.sizes['Frame']))
+
+        return ds
+
     
-        results = results.where(phase_xr['X'].notnull())
+class FeaturesExtraction:
+ 
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        results = results.transpose('Frame', 'Cell Index', 'Feature')
-        return results.values
+    def __init__(
+            self, 
+            h5py_file=SETTINGS.DATASET, 
+            frame_batchsize=10,
+            cell_batch_size=100
+            ) -> None:
+        
+        self.num_frames = None
+        
+        self.h5py_file = h5py_file
+        self.frame_batchsize = frame_batchsize
+        self.cell_batch_size = cell_batch_size
+
+        self.cell_types = [CellType('Phase')]
+        self.cell_type_names = [cell_type.name for cell_type in self.cell_types]
+
+        self.set_up()
+
+
+    def get_cell_type(self, cell_type_name: str):
+        return self.cell_types[self.cell_type_names.index(cell_type_name)]
     
-class Perimeter(BaseFeature):
 
-    primary_feature = True
+    def add_feature(self, feature, cell_type: str) -> None:
+        """
+        Add feature to specified cell type
+        """
+        self.cell_types[self.cell_type_names.index(cell_type)].add_feature(feature)
 
-    def compute(self, mask: torch.tensor, image: torch.tensor) -> np.array:
-        kernel = torch.tensor(
-            [[1, 1, 1],
-             [1, 9, 1],
-             [1, 1, 1]]
-             ).to(device)
+
+    def set_up(self):
+        """
+        Prepare hdf5 file
+        """
+        with h5py.File(self.h5py_file, 'r+') as f:
+            self.num_frames = SETTINGS.NUM_FRAMES
+            for cell_type in self.cell_types:
+                cell_type.get_feature_names()
+                cell_type.set_up_features_group(f)
+                
+
+    def extract_features(self) -> None:
+        with h5py.File(self.h5py_file, 'r+') as f:
+            for cell_type in self.cell_types:
+                self.extract_primary_features(f, cell_type)
+                self.extract_derived_features(f, cell_type)
+
+    def extract_primary_features(self, f: h5py.File, cell_type: CellType) -> None:
+        if len(cell_type.primary_features) > 0:
+            print(f'\r===Calculating Primary Features ({cell_type.name})===')
+            for frame_idx in tqdm(range(self.num_frames)):
+
+                # sys.stdout.write(f'\r===Calculating Primary Features ({cell_type.name}): Frame {frame_idx+1} / {self.num_frames}===')
+                # sys.stdout.flush()
+
+                mask = cell_type.get_masks(f, frame_idx)
+                image = cell_type.get_images(f, frame_idx)
+
+                num_cells = np.max(mask) + 1
+
+                for first_cell in range(0, num_cells, self.cell_batch_size):
+
+                    last_cell = min(first_cell + self.cell_batch_size, num_cells)
+
+                    cell_idxs = torch.arange(first_cell, last_cell).to(self.DEVICE)
+
+                    expanded_mask = torch.tensor(mask).to(self.DEVICE).unsqueeze(0) == cell_idxs.unsqueeze(1).unsqueeze(2)
+
+                    for feature in cell_type.primary_features:
+                        result = feature.compute(mask=expanded_mask, image=image)
+                        if result.ndim == 1:
+                            result = result[:, np.newaxis]
+                        for i, feature_name in enumerate(feature.get_names()):
+
+                            #resize dataset if too many cells
+                            if num_cells>f[cell_type.features_group][feature_name].shape[cell_type.CELL_DIM]:
+                                f[cell_type.features_group][feature_name].resize(num_cells, cell_type.CELL_DIM)
+
+                            f[cell_type.features_group][feature_name][frame_idx, first_cell:last_cell] = result[:, i]
         
-        padded_masks = torch.nn.functional.pad(mask, (1, 1, 1, 1), mode='constant', value=0)
-        conv_result = torch.nn.functional.conv2d(padded_masks.unsqueeze(1).float(), kernel.unsqueeze(0).unsqueeze(0).float(),
-                                                padding=0).squeeze(1)
-        
-        result = torch.sum((conv_result >= 10) & (conv_result <=16), dim=(1, 2)).float().cpu().numpy()
-        result[result==0] = np.nan
+                torch.cuda.empty_cache()
+ 
 
-        return result
-        
-class Circularity(BaseFeature):
-    """
-    C = 4*pi*(Area) / (Perimeter)**2
-    """
+    def extract_derived_features(self, f: h5py.File, cell_type: CellType) -> None:
+        if len(cell_type.derived_features) > 0:
+            print(f'\n===Calculating derived features for {cell_type.name}===\n')
 
-    derived_feature = True
+            phase_features_xr = self.cell_types[self.cell_type_names.index('Phase')].get_features_xr(f)
 
-    def compute(self, phase_xr: xr.Dataset, epi_xr: xr.Dataset) -> np.array:
-        areas = phase_xr['Area']
-        perimeters = phase_xr['Perimeter']
-        circularity = areas * 4 * np.pi / (perimeters**2)
-        return circularity.values
+            epi_features_xr = None
+            if 'Epi' in self.cell_type_names:
+                epi_features_xr = self.cell_types[np.argwhere(self.cell_type_names == 'Epi')].get_features_xr(f)
+
+            for feature in cell_type.derived_features:
+                print(f'Calculating {[feature_name+", " for feature_name in feature.get_names()]}')
+                result = feature.compute(phase_xr=phase_features_xr, epi_xr=epi_features_xr)
+
+                if result.ndim == 2:
+                    result = result[:, :, np.newaxis]
+
+                for i, feature_name in enumerate(feature.get_names()):
+                    
+                    f[cell_type.features_group][feature_name][:] = result[:, :, i]
+
+
+def main():
+    feature_extractor = FeaturesExtraction()
+
+    phase_features = [
+        # features.MorphologyModes(), 
+        # features.Speed(),
+        features.DensityPhase(),
+        # features.Displacement(),
+        # features.Perimeter(),
+        # features.Circularity(),
+        # # features.GaborScale(),
+        # features.CellDeath()
+        ]
     
-class GaborScale(BaseFeature):
+    for feature in phase_features:
+        feature_extractor.add_feature(feature, 'Phase')
 
-    primary_feature = True
+    feature_extractor.set_up()
+    feature_extractor.extract_features()
 
-    def __init__(self):
-        super().__init__()
-        self.gabor = Gabor()
-
-    def compute(self, mask: torch.tensor, image: torch.tensor) -> np.array:
-        dominant_scales = self.gabor.get_dominant_scales(image, mask)
-        return np.array(dominant_scales)
-
+if __name__ == '__main__':
+    main()

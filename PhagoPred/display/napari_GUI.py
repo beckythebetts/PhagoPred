@@ -98,11 +98,11 @@ class CellViewer(QMainWindow):
                 'Mode 2',
                 'Mode 3',
                 'Speed',
-                # 'Phagocytes within 100 pixels',
-                # 'Phagocytes within 250 pixels',
-                # 'Phagocytes within 500 pixels',
-                # 'X',
-                # 'Y',
+                'Phagocytes within 100 pixels',
+                'Phagocytes within 250 pixels',
+                'Phagocytes within 500 pixels',
+                'X',
+                'Y',
                 'CellDeath'
         ]
         
@@ -269,3 +269,6 @@ def main():
     window = CellViewer()
     window.show()
     sys.exit(app.exec_())
+
+if __name__ == "__main__":
+    main()
