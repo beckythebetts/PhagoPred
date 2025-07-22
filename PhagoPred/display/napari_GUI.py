@@ -77,6 +77,9 @@ class ToolBar(QToolBar):
 class CellViewer(QMainWindow):
     def __init__(self):
         super().__init__()
+        
+        self.setMinimumSize(300, 300)
+        self.resize(1000, 300)
 
         self.cell_idx = 0
         self.first_frame = None
@@ -98,9 +101,9 @@ class CellViewer(QMainWindow):
                 'Mode 2',
                 'Mode 3',
                 'Speed',
-                'Phagocytes within 100 pixels',
-                'Phagocytes within 250 pixels',
-                'Phagocytes within 500 pixels',
+                # 'Phagocytes within 100 pixels',
+                # 'Phagocytes within 250 pixels',
+                # 'Phagocytes within 500 pixels',
                 'X',
                 'Y',
                 'CellDeath'
@@ -130,8 +133,12 @@ class CellViewer(QMainWindow):
 
     def load_cell(self):
         hdf5_file = SETTINGS.DATASET
+        
         with h5py.File(hdf5_file, 'r') as f:
+            self.loading_dialog = LoadingBarDialog(0, 'Reading dataset...')
             self.first_frame, self.last_frame = tools.get_cell_end_frames(self.cell_idx, f)
+            self.loading_dialog.close()
+
             self.get_cell_images(f)
             self.update_feature_plots(f)
         
@@ -147,7 +154,7 @@ class CellViewer(QMainWindow):
 
         self.setWindowTitle(f"Cell Viewer - Cell {self.cell_idx}")
 
-        self.loading_dialog.close()
+        # self.loading_dialog.close()
 
     def get_cell_images(self, f: h5py.File):
 
@@ -197,9 +204,9 @@ class CellViewer(QMainWindow):
         self.epi_data = epi_data
         self.cell_outline = cell_outline
 
-        
+        self.loading_dialog.close()
 
-
+    
     def get_feature_plot_widget(self) -> None:
 
         # Create QWidget to hold all plots
@@ -222,6 +229,7 @@ class CellViewer(QMainWindow):
         self.plot_widget = widget 
 
     def update_feature_plots(self, f: h5py.File):
+        self.loading_dialog = LoadingBarDialog(max_value=len(self.feature_names), message='Updating plots...')
         for i, feature_name in enumerate(self.feature_names):
             y_data = f['Cells']['Phase'][feature_name][self.first_frame:self.last_frame, self.cell_idx]
             x_data = np.arange(self.first_frame, self.last_frame)
@@ -229,6 +237,8 @@ class CellViewer(QMainWindow):
             plot_item = self.plot_widgets[i].getPlotItem()
             plot_item.clear()
             plot_item.plot(x_data, y_data, pen=pg.mkPen(color='k'))
+            self.loading_dialog.update_progress(i+1)
+        self.loading_dialog.close()
     
     def next_cell(self):
         self.cell_idx += 1
@@ -263,11 +273,20 @@ class CellViewer(QMainWindow):
         # Move each vertical line to current_rel_frame position
         for vline in self.vlines:
             vline.setPos(actual_frame)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_F11:
+            if self.isMaximized():
+                self.showNormal()
+            else:
+                self.showMaximized()
+        super().keyPressEvent(event)
     
 def main():
     app = QApplication(sys.argv)
     window = CellViewer()
-    window.show()
+    # window.show()
+    window.showMaximized()
     sys.exit(app.exec_())
 
 if __name__ == "__main__":
