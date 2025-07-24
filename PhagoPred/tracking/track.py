@@ -12,7 +12,7 @@ from sklearn.cluster import KMeans
 import xarray as xr
 from pathlib import Path
 import pandas as pd
-import tqdm
+from tqdm import tqdm
 
 from PhagoPred import SETTINGS
 from PhagoPred.feature_extraction import extract_features, features

@@ -6,7 +6,7 @@ import torch
 import pandas as pd
 import xarray as xr
 import dask.array as da
-import tqdm
+from tqdm import tqdm
 
 from PhagoPred import SETTINGS
 from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
@@ -200,17 +200,18 @@ class FeaturesExtraction:
 
     def extract_primary_features(self, f: h5py.File, cell_type: CellType) -> None:
         if len(cell_type.primary_features) > 0:
-            for frame_idx in range(self.num_frames):
+            print(f'\n=== Calculating Primary Features ({cell_type.name}) ===\n')
+            for frame_idx in tqdm(range(self.num_frames)):
 
-                sys.stdout.write(f'\r===Calculating Primary Features ({cell_type.name})===')
-                sys.stdout.flush()
+                # sys.stdout.write(f'\r=== Calculating Primary Features ({cell_type.name}) ===')
+                # sys.stdout.flush()
 
                 mask = cell_type.get_masks(f, frame_idx)
                 image = cell_type.get_images(f, frame_idx)
 
                 num_cells = np.max(mask) + 1
 
-                for first_cell in tqdm(range(0, num_cells, self.cell_batch_size)):
+                for first_cell in range(0, num_cells, self.cell_batch_size):
 
                     last_cell = min(first_cell + self.cell_batch_size, num_cells)
 
@@ -230,12 +231,12 @@ class FeaturesExtraction:
 
                             f[cell_type.features_group][feature_name][frame_idx, first_cell:last_cell] = result[:, i]
         
-        torch.cuda.empty_cache()
+                    torch.cuda.empty_cache()
  
 
     def extract_derived_features(self, f: h5py.File, cell_type: CellType) -> None:
         if len(cell_type.derived_features) > 0:
-            print(f'\n===Calculating derived features for {cell_type.name}===\n')
+            print(f'\n=== Calculating derived features ({cell_type.name}) ===\n')
 
             phase_features_xr = self.cell_types[self.cell_type_names.index('Phase')].get_features_xr(f)
 
@@ -244,7 +245,7 @@ class FeaturesExtraction:
                 epi_features_xr = self.cell_types[np.argwhere(self.cell_type_names == 'Epi')].get_features_xr(f)
 
             for feature in cell_type.derived_features:
-                print(f'Calculating {feature.__class__.__name__}...')
+                print(f'Calculating {", ".join(feature.get_names())}...')
                 result = feature.compute(phase_xr=phase_features_xr, epi_xr=epi_features_xr)
 
                 if result.ndim == 2:
@@ -258,9 +259,9 @@ def main():
     feature_extractor = FeaturesExtraction()
 
     phase_features = [
-        # features.MorphologyModes(), 
+        features.MorphologyModes(), 
         # features.Speed(),
-        # features.DensityPhase(),
+        features.DensityPhase(),
         # features.Displacement(),
         # features.Perimeter(),
         # features.Circularity(),
