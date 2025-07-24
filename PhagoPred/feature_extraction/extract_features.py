@@ -6,6 +6,7 @@ import torch
 import pandas as pd
 import xarray as xr
 import dask.array as da
+import tqdm
 
 from PhagoPred import SETTINGS
 from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
@@ -201,7 +202,7 @@ class FeaturesExtraction:
         if len(cell_type.primary_features) > 0:
             for frame_idx in range(self.num_frames):
 
-                sys.stdout.write(f'\rCalculating Primary Features ({cell_type.name}): Frame {frame_idx+1} / {self.num_frames}')
+                sys.stdout.write(f'\r===Calculating Primary Features ({cell_type.name})===')
                 sys.stdout.flush()
 
                 mask = cell_type.get_masks(f, frame_idx)
@@ -209,7 +210,7 @@ class FeaturesExtraction:
 
                 num_cells = np.max(mask) + 1
 
-                for first_cell in range(0, num_cells, self.cell_batch_size):
+                for first_cell in tqdm(range(0, num_cells, self.cell_batch_size)):
 
                     last_cell = min(first_cell + self.cell_batch_size, num_cells)
 
@@ -234,7 +235,7 @@ class FeaturesExtraction:
 
     def extract_derived_features(self, f: h5py.File, cell_type: CellType) -> None:
         if len(cell_type.derived_features) > 0:
-            print(f'\nCalculating derived features for {cell_type.name}\n')
+            print(f'\n===Calculating derived features for {cell_type.name}===\n')
 
             phase_features_xr = self.cell_types[self.cell_type_names.index('Phase')].get_features_xr(f)
 
@@ -243,6 +244,7 @@ class FeaturesExtraction:
                 epi_features_xr = self.cell_types[np.argwhere(self.cell_type_names == 'Epi')].get_features_xr(f)
 
             for feature in cell_type.derived_features:
+                print(f'Calculating {feature.__class__.__name__}...')
                 result = feature.compute(phase_xr=phase_features_xr, epi_xr=epi_features_xr)
 
                 if result.ndim == 2:

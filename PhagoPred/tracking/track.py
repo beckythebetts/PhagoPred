@@ -12,6 +12,7 @@ from sklearn.cluster import KMeans
 import xarray as xr
 from pathlib import Path
 import pandas as pd
+import tqdm
 
 from PhagoPred import SETTINGS
 from PhagoPred.feature_extraction import extract_features, features
@@ -63,9 +64,9 @@ class Tracker:
             self.max_num_cells = len(all_cells_xr.coords['Cell Index'])
             self.old_cells = None
 
-            for frame in all_cells_xr.coords['Frame'].values:
-                sys.stdout.write(f'\rFrame {frame + 1}/{f[self.masks_ds].shape[0]}')
-                sys.stdout.flush()
+            for frame in tqdm(all_cells_xr.coords['Frame'].values):
+                # sys.stdout.write(f'\rFrame {frame + 1}/{f[self.masks_ds].shape[0]}')
+                # sys.stdout.flush()
                 current_cells = all_cells_xr.sel(Frame=frame).load()
                 current_cells = xr.concat([current_cells[dim] for dim in coords_list], dim='Feature')
                 # Add features and cell index coordinates
@@ -153,9 +154,9 @@ class Tracker:
                 if self.max_track_id+1 > feature_data.shape[1]:
                     feature_data.resize(self.max_track_id+1, axis=1)
 
-            for frame, track_id_map in enumerate(self.track_id_map):
-                sys.stdout.write(f'\rFrame {frame + 1}/{f[self.masks_ds].shape[0]}')
-                sys.stdout.flush()
+            for frame, track_id_map in enumerate(tqdm(self.track_id_map)):
+                # sys.stdout.write(f'\rFrame {frame + 1}/{f[self.masks_ds].shape[0]}')
+                # sys.stdout.flush()
                 mask = f[self.masks_ds][frame][:]
                 f[self.masks_ds][frame] = np.where(mask==-1, -1, track_id_map[mask])
 
@@ -179,9 +180,9 @@ class Tracker:
             coords_ds = self.cell_type.get_features_xr(f, ['X', 'Y'])
 
             
-            for track_id in range(self.max_track_id+1):
-                sys.stdout.write(f'\rTracklet {track_id + 1}/{self.max_track_id+1}')
-                sys.stdout.flush()
+            for track_id in tqdm(range(self.max_track_id+1)):
+                # sys.stdout.write(f'\rTracklet {track_id + 1}/{self.max_track_id+1}')
+                # sys.stdout.flush()
                 frames, cell_ids = np.nonzero(self.track_id_map==track_id)
 
                 start_frame, end_frame = frames[0], frames[-1]
@@ -232,9 +233,9 @@ class Tracker:
 
         queue = np.column_stack((tracks_0, tracks_1))
 
-        for i, (track_0, track_1) in enumerate(queue):
-            sys.stdout.write(f'\rTracklet {i + 1}/{len(queue)}')
-            sys.stdout.flush()
+        for i, (track_0, track_1) in enumerate(tqdm(queue)):
+            # sys.stdout.write(f'\rTracklet {i + 1}/{len(queue)}')
+            # sys.stdout.flush()
             # update track_id_map
             self.track_id_map[self.track_id_map == track_1] = track_0
             # update queue
@@ -331,9 +332,9 @@ class Tracker:
         print('\nJoining tracklets in batches...\n')
 
         # === Step 3: Process each cluster ===
-        for i, (cluster_id, tids) in enumerate(grid_to_track_ids.items()):
-            sys.stdout.write(f'\rBatch {i + 1}/{len(grid_to_track_ids)}')
-            sys.stdout.flush()
+        for i, (cluster_id, tids) in enumerate(tqdm(grid_to_track_ids.items())):
+            # sys.stdout.write(f'\rBatch {i + 1}/{len(grid_to_track_ids)}')
+            # sys.stdout.flush()
             join_subset(tids)
 
         # === Step 3: Final global join on reduced set ===
