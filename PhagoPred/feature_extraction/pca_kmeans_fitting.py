@@ -200,7 +200,10 @@ class PCAKmeansFit:
 
             fig = plt.figure()
             ax = fig.add_subplot(111, projection='3d')
-            colours = ['blue', 'orange', 'green', 'red']
+            # colours = ['blue', 'orange', 'green', 'red']
+            cmap = plt.get_cmap('rainbow')
+            num_clusters = len(self.kmeans.cluster_centers_)
+            colours = [cmap(i / (num_clusters - 1)) for i in range(num_clusters)]
             for cluster in range(self.num_kmeans_clusters):
                 idxs = np.nonzero(clusters==cluster)
                 ax.scatter(pcs[idxs, 0], pcs[idxs, 1], pcs[idxs, 2], label=str(cluster), color=colours[cluster])
