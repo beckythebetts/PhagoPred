@@ -76,7 +76,10 @@ class MorphologyFit(PCAKmeansFit):
             self.load_kmeans()
 
         plt.rcParams["font.family"] = 'serif'
-        colours = ['blue', 'orange', 'green', 'red']
+        # colours = ['blue', 'orange', 'green', 'red']
+        cmap = plt.get_cmap('rainbow')
+        num_clusters = len(self.kmeans.cluster_centers_)
+        colours = [cmap(i / (num_clusters - 1)) for i in range(num_clusters)]
         for i, cluster in enumerate(self.kmeans.cluster_centers_):
             original_contour = self.pca.inverse_transform(cluster.reshape(1, -1))
             original_contour = np.reshape(original_contour, (-1, 2))

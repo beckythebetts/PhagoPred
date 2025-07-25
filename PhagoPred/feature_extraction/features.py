@@ -238,9 +238,6 @@ class DensityPhase(BaseFeature):
                 corrected = counts / fraction_in
                 results[first_frame:last_frame, :, radius_idx] = corrected
 
-                # results.values[first_frame:last_frame, :, radius_idx] = (distances < radius).sum(dim=2).cpu().numpy()
-        # results = results.where(phase_xr['X'].notnull())
-        # results = results.transpose('Frame', 'Cell Index', 'Feature')
         results = np.where(np.isnan(phase_xr['X'].values)[:, :, np.newaxis], np.nan, results)
 
         return results
@@ -296,3 +293,103 @@ class GaborScale(BaseFeature):
     def compute(self, mask: torch.tensor, image: torch.tensor) -> np.array:
         dominant_scales = self.gabor.get_dominant_scales(image, mask)
         return np.array(dominant_scales)
+    
+class Fluorescence(BaseFeature):
+    """Fluorescence intensity of cells in the image.
+    Use radial moments to describe distribution from centre.
+    $M_n = \sum_{i} I_i * r_i^n$
+    where $I_i$ is the intensity at pixel $i$ and $r_i$ is the distance from the cell centroid.
+    Total fluorescence is $M_0$, mean fluorescence distance is $M_1 / M_0$, and variance is $M_2 / M_0 - (M_1 / M_0)^2$.
+    """
+    primary_feature = True
+    derived_feature = True
+    requires = ['X', 'Y']
+
+    def __init__(self):
+        super().__init__()
+        self.crop_size = 300
+        self.pad = self.crop_size // 2
+        self.distance_map = None  # Placeholder for distance map, if needed
+
+    def get_distance_grid(self, device):
+
+        # Create coordinate grids
+        y = torch.arange(self.crop_size, device=device)
+        x = torch.arange(self.crop_size, device=device)
+        yy, xx = torch.meshgrid(y, x, indexing='ij')
+        # Compute distances from center
+        dist = torch.sqrt((yy - self.pad)**2 + (xx - self.pad)**2)
+        return dist  # shape: (crop_size, crop_size)
+
+    def get_names(self):
+        return [
+            'Total Fluorescence', 
+            'Fluorescence Distance Mean', 
+            'Fluorescence Distance Variance'
+            ]
+    
+    def crop_centered_batch(self, array_padded, x_centres_padded, y_centres_padded):
+        
+        N = x_centres_padded.shape[0]
+        pad = self.crop_size // 2
+
+        rel = torch.arange(-pad, pad, device=array_padded.device)
+        grid_y = rel.view(1, self.crop_size).expand(N, self.crop_size) + y_centres_padded.view(N, 1)
+        grid_x = rel.view(1, self.crop_size).expand(N, self.crop_size) + x_centres_padded.view(N, 1)
+
+        H_pad, W_pad = array_padded.shape[1:]
+        grid_y = grid_y.clamp(0, H_pad - 1)
+        grid_x = grid_x.clamp(0, W_pad - 1)
+
+        assert torch.all(torch.isfinite(grid_y)), "grid_y contains NaN or Inf"
+        assert torch.all(torch.isfinite(grid_x)), "grid_x contains NaN or Inf"
+        assert torch.all(grid_y >= 0), "grid_y contains negative indices"
+        assert torch.all(grid_x >= 0), "grid_x contains negative indices"
+        assert array_padded.device == grid_y.device == grid_x.device, "Device mismatch"
+
+        crops = array_padded[
+            torch.arange(N, device=array_padded.device).view(N, 1, 1).int(),
+            grid_x.unsqueeze(1).expand(N, self.crop_size, self.crop_size).int(),
+            grid_y.unsqueeze(2).expand(N, self.crop_size, self.crop_size).int(),
+        ]
+        return crops
+
+    def compute(self, mask: torch.tensor = None, image: torch.tensor = None, epi_image: torch.tensor = None, phase_xr: xr.Dataset = None, epi_xr: xr.Dataset = None) -> np.array:
+        if self.distance_map is None:
+            self.distance_map = self.get_distance_grid(mask.device)
+        
+        epi_image = torch.from_numpy(epi_image).to(mask.device)
+        
+        if mask.ndim == 2:
+            mask = mask.unsqueeze(0)
+
+        if epi_image.ndim == 2:
+            epi_image = epi_image.unsqueeze(0)
+
+        self.pad = self.crop_size // 2
+
+        x_centres = torch.from_numpy(phase_xr['X'].values).to(mask.device)
+        y_centres = torch.from_numpy(phase_xr['Y'].values).to(mask.device)
+
+        valid = (~torch.isnan(x_centres)) & (~torch.isnan(y_centres))
+        
+        x_centres_padded = (x_centres + self.pad)[valid]
+        y_centres_padded = (y_centres + self.pad)[valid]
+
+        self.mask_padded = torch.nn.functional.pad(mask, (self.pad, self.pad, self.pad, self.pad), mode='constant', value=0)[valid]
+        self.epi_image_padded = torch.nn.functional.pad(epi_image, (self.pad, self.pad, self.pad, self.pad), mode='constant', value=0)
+        self.epi_image_padded = self.epi_image_padded.expand(len(x_centres_padded), -1, -1)
+
+        cropped_masks = self.crop_centered_batch(self.mask_padded, x_centres_padded, y_centres_padded)
+        cropped_epi_image = self.crop_centered_batch(self.epi_image_padded, x_centres_padded, y_centres_padded)
+
+        total_fluorescence = torch.sum(cropped_epi_image * cropped_masks, dim=(1, 2))
+        dist_mean = torch.sum(cropped_epi_image * cropped_masks * self.distance_map, dim=(1, 2)) / total_fluorescence
+        dist_variance = torch.sum(cropped_epi_image * cropped_masks * self.distance_map**2, dim=(1, 2)) / total_fluorescence - dist_mean**2
+
+        results = np.full((mask.shape[0], 3), np.nan)
+        results[valid.cpu().numpy(), 0] = total_fluorescence.cpu().numpy()
+        results[valid.cpu().numpy(), 1] = dist_mean.cpu().numpy()
+        results[valid.cpu().numpy(), 2] = dist_variance.cpu().numpy()
+
+        return results

@@ -91,7 +91,10 @@ class CellViewer(QMainWindow):
         self.cell_outline = None
 
         self.feature_names=[
-                'Area',
+                'Total Fluorescence', 
+                'Fluorescence Distance Mean', 
+                'Fluorescence Distance Variance'
+                # 'Area',
                 # 'Circularity',
                 # 'Perimeter',
                 # 'Displacement',
@@ -101,12 +104,12 @@ class CellViewer(QMainWindow):
                 # 'Mode 2',
                 # 'Mode 3',
                 # 'Speed',
-                'Phagocytes within 100 pixels',
-                'Phagocytes within 250 pixels',
-                'Phagocytes within 500 pixels',
+                # 'Phagocytes within 100 pixels',
+                # 'Phagocytes within 250 pixels',
+                # 'Phagocytes within 500 pixels',
                 # 'X',
                 # 'Y',
-                'CellDeath'
+                # 'CellDeath'
         ]
         
         # Central widget
