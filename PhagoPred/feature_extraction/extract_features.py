@@ -336,7 +336,7 @@ def main():
     feature_extractor = FeaturesExtraction()
 
     phase_features = [
-        features.Fluorescence(),
+        # features.Fluorescence(),
         # features.MorphologyModes(), 
         # features.Speed(),
         # features.DensityPhase(),
@@ -344,7 +344,7 @@ def main():
         # features.Perimeter(),
         # features.Circularity(),
         # features.GaborScale(),
-        # features.CellDeath()
+        features.CellDeath()
         ]
     
     for feature in phase_features:
