@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from shapely.geometry import Point, box
+from scipy.signal import convolve
 
 from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
 from PhagoPred.feature_extraction.texture.gabor import Gabor
@@ -38,6 +39,9 @@ class CellDeath(BaseFeature):
     """
     derived_feature = True
 
+    threshold = 0.5
+    min_frames_dead = 10
+
     def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
         dead = phase_xr['Dead Macrophage']
         alive = phase_xr['Macrophage']
@@ -48,8 +52,26 @@ class CellDeath(BaseFeature):
         cell_state = cell_state.where(dead != 1, 0)
 
         # smooth
-        cell_state = cell_state.rolling(Frame=5, center=True).reduce(np.nanmean)
-        return cell_state.values
+        smoothed_cell_state = cell_state.rolling(Frame=5, center=True).reduce(np.nanmean).values
+
+        below_threshold = smoothed_cell_state < self.threshold
+
+        kernel = np.ones(self.min_frames_dead, dtype=int)
+        conv_result = np.apply_along_axis(
+            lambda x: convolve(x.astype(int), kernel, mode='valid'),
+            axis=0, arr=below_threshold
+        )
+
+        death_possible = conv_result == self.min_frames_dead  # shape: (frames - N + 1, cells)
+        first_death_idx = np.argmax(death_possible, axis=0)  # (n_cells,)
+        has_death = np.any(death_possible, axis=0)
+
+        # Output array
+        n_cells = smoothed_cell_state.shape[1]
+        death_frames = np.full(smoothed_cell_state.shape, np.nan)
+        death_frames[0, has_death] = first_death_idx[has_death]
+
+        return death_frames
 
 class Coords(BaseFeature):
     """
