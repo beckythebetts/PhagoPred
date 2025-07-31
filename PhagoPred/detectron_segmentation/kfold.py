@@ -88,6 +88,7 @@ class KFold:
 
     def train(self):
         for file in self.directory.glob('*model_*'):
+            # if 'model_3' not in file.name:
             train(directory=file)
             unregister_coco_instances('my_dataset_train')
             unregister_coco_instances('my_dataset_val')
@@ -356,10 +357,12 @@ class KFold:
         plt.legend(title=feature_name)
         plt.savefig(self.directory / f'{feature_name}_results.png')
 
-    def plot_category(self, category: dict, axs: plt.Axes, colour) -> None:
+    def plot_category(self, category: str, axs: plt.Axes, colour, label: 'str' = None) -> None:
         """
         Plot precision-recall curves for given category on axs.
         """
+        if label is None:
+            label = category
         results = []
         for dir in self.directory.glob('*model*'):
             for file in (dir).glob(f"*{category}_results.txt"):
@@ -370,7 +373,7 @@ class KFold:
         thresholds = means.index.values
         
         for ax, metric in zip(axs, metrics):
-            ax.plot(thresholds, means[metric], color=colour, label=category)
+            ax.plot(thresholds, means[metric], color=colour, label=label)
             ax.fill_between(thresholds, means[metric]-stds[metric], means[metric]+stds[metric], color=colour, alpha=0.5, edgecolor='none')
             ax.set_xlabel('IOU Threshold')
             ax.set_ylabel(metric)
@@ -387,6 +390,56 @@ class KFold:
         except ValueError as e:
             print("Error:", e)
 
+
+    def plot_av_loss(self, output_path: Path) -> None:
+        list_of_paths = [file / 'Model' / 'metrics.json' for file in self.directory.glob('*model*') if file.is_dir()]
+        def load_json_arr(file_path):
+            with open(file_path, 'r') as f:
+                return [json.loads(line) for line in f]
+
+        training_losses = {}
+        validation_losses = {}
+
+        for path in list_of_paths:
+
+            experiment_metrics = load_json_arr(path)
+
+            for x in experiment_metrics:
+                iter = x.get('iteration')
+                if iter is None:
+                    continue
+
+                if 'total_loss' in x:
+                    training_losses.setdefault(iter, []).append(x['total_loss'])
+                if 'validation_loss' in x:
+                    validation_losses.setdefault(iter, []).append(x['validation_loss'])
+
+        def compute_stats(loss_dict):
+            iterations = sorted(loss_dict.keys())
+            means = [np.mean(loss_dict[it]) for it in iterations]
+            stds = [np.std(loss_dict[it]) for it in iterations]
+            return iterations, means, stds
+
+        train_iters, train_mean, train_std = compute_stats(training_losses)
+        val_iters, val_mean, val_std = compute_stats(validation_losses)
+
+        plt.rcParams["font.family"] = 'serif'
+        plt.plot(train_iters, train_mean, color='navy', label='Train Loss (mean)')
+        plt.fill_between(train_iters, 
+                        np.array(train_mean) - np.array(train_std),
+                        np.array(train_mean) + np.array(train_std),
+                        color='navy', alpha=0.2)
+        plt.plot(val_iters, val_mean, color='orange', label='Validation Loss (mean)')
+        plt.fill_between(val_iters,
+                        np.array(val_mean) - np.array(val_std),
+                        np.array(val_mean) + np.array(val_std),
+                        color='orange', alpha=0.2)
+        plt.xlabel('Iteration')
+        plt.ylabel('Loss')
+        plt.grid(True)
+        plt.legend()
+        plt.savefig(output_path)
+
 def unregister_coco_instances(name):
     if name in DatasetCatalog.list():
         DatasetCatalog.pop(name)
@@ -400,13 +453,23 @@ def merge_jsons(directory):
         call(['python', '-m', 'COCO_merger.merge', '--src', json_0, all_jsons[i], '--out', directory / 'labels.json'])
         json_0 = directory / 'labels.json'
 
-def plot_comparison(kfold_dict, save_as):
+# def plot_comparison(kfold_dict, save_as):
+#     colours = ['red', 'navy']
+#     plt.rcParams["font.family"] = 'serif'
+#     fig, axs = plt.subplots(1, 3, figsize=(12, 4))
+#     for (name, kfold), colour in zip(kfold_dict.items(), colours):
+#         kfold.plot_multiple(name, axs, colour)
+#     plt.legend()
+#     plt.savefig(save_as)
+
+def plot_comparison(kfols_dict, save_as, category):
     colours = ['red', 'navy']
     plt.rcParams["font.family"] = 'serif'
     fig, axs = plt.subplots(1, 3, figsize=(12, 4))
-    for (name, kfold), colour in zip(kfold_dict.items(), colours):
-        kfold.plot_multiple(name, axs, colour)
+    for (name, kfold), colour in zip(kfols_dict.items(), colours):
+        kfold.plot_category(category, axs, colour, label=name)
     plt.legend()
+    plt.suptitle(f'Comparison of {category} category')
     plt.savefig(save_as)
 
 def split_masks_by_area(true_masks, pred_masks, n_groups=4):
@@ -433,16 +496,24 @@ def split_masks_by_area(true_masks, pred_masks, n_groups=4):
 def main():
     faulthandler.enable()
     # merge_jsons(Path('PhagoPred')/ 'detectron_segmentation' / 'models' / 'toumai_01_05' / 'labels')
-    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac')
-    # my_kfold.split_all()
-    # my_kfold.train_and_eval()
-    # my_kfold.train()
-    # my_kfold.eval()
-    # my_kfold.plot()
+    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_custom_loss_smoothing_0_1')
+    my_kfold.split_all()
+    # # # my_kfold.train_and_eval()
+    my_kfold.train()
+    my_kfold.eval()
+    my_kfold.plot()
     # my_kfold.plot_results()
-    my_kfold.eval_feature(feature_func=mask_funcs.get_perimeters_over_areas, feature_name='perim_over_area', n_groups=3)
+    # my_kfold.eval_feature(feature_func=mask_funcs.get_perimeters_over_areas, feature_name='perim_over_area', n_groups=3)
     # my_kfold.features_scatter_plot(feature_func=mask_funcs.get_perimeters_over_areas, feature_name='perimeter/area')
 
+    # plot_comparison(
+    #     {'L2: 1e-3': KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_custom_loss_l2_1e_3'),
+    #      'L2: 1e-4': KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_custom_loss')},
+    #      save_as=Path('temp') / 'comparison.png',
+    #      category='all')
+
+    # my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold')
+    # my_kfold.plot_av_loss(output_path=Path('temp') / 'av_loss_plot.png')
 
 if __name__=='__main__':
     main()

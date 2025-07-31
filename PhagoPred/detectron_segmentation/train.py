@@ -13,6 +13,7 @@ from detectron2.data import build_detection_test_loader, build_detection_train_l
 from detectron2.utils.visualizer import ColorMode
 from detectron2.structures import Instances
 import torch, detectron2
+import torch.nn.functional as F
 from detectron2.utils.logger import setup_logger
 from detectron2 import model_zoo
 
@@ -26,6 +27,9 @@ import time
 import datetime
 from detectron2.data import transforms as T
 from detectron2.data import build_detection_train_loader
+from detectron2.modeling.roi_heads.mask_head import MaskRCNNConvUpsampleHead
+from detectron2.structures import Instances
+from detectron2.modeling.roi_heads.mask_head import ROI_MASK_HEAD_REGISTRY
 
 import numpy as np
 import os, json, cv2, random, shutil
@@ -141,9 +145,59 @@ class MyTrainer(DefaultTrainer):
             output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
         return COCOEvaluator(dataset_name, cfg, True, output_folder, max_dets_per_image=1000)
 
+def soft_dice_loss(pred_logits, target_masks, eps=1e-6):
+    """
+    pred_logits: raw logits (B, H, W)
+    target_masks: binary masks (B, H, W)
+    """
+    pred_probs = torch.sigmoid(pred_logits)
+    intersection = (pred_probs * target_masks).sum(dim=(1, 2))
+    union = pred_probs.sum(dim=(1, 2)) + target_masks.sum(dim=(1, 2))
+    dice_score = (2. * intersection + eps) / (union + eps)
+    return 1 - dice_score.mean()
+
+def label_smoothing_bce_loss(pred_logits, target_masks, smoothing=0.1):
+    """
+    Apply label smoothing to target_masks before BCE.
+    """
+    target_smoothed = target_masks * (1 - smoothing) + 0.5 * smoothing
+    return F.binary_cross_entropy_with_logits(pred_logits, target_smoothed)
+
+
+class DiceLSMaskHead(MaskRCNNConvUpsampleHead):
+    def loss(self, pred_mask_logits, instances: list[Instances]):
+        """
+        pred_mask_logits: (N, num_classes, H, W)
+        """
+        gt_classes = []
+        gt_masks = []
+
+        for inst in instances:
+            gt_classes.append(inst.gt_classes)
+            # Crop and resize GT masks to match pred size
+            resized = inst.gt_masks.crop_and_resize(inst.proposal_boxes.tensor, pred_mask_logits.shape[-2:])
+            gt_masks.append(resized)
+
+        gt_masks = torch.cat(gt_masks, dim=0)  # (N, 1, H, W)
+        gt_classes = torch.cat(gt_classes, dim=0)  # (N,)
+
+        # Select predicted masks corresponding to GT classes
+        pred_masks = pred_mask_logits[torch.arange(len(gt_classes)), gt_classes]  # (N, H, W)
+
+        gt_masks = gt_masks.squeeze(1)  # (N, H, W)
+
+        # Compute combined loss
+        dice = soft_dice_loss(pred_masks, gt_masks)
+        ls_bce = label_smoothing_bce_loss(pred_masks, gt_masks)
+        loss = 0.5 * dice + 0.5 * ls_bce
+
+        return {"loss_mask": loss}
     
 
 def train(directory=SETTINGS.MASK_RCNN_MODEL):
+
+    if "DiceLSMaskHead" not in ROI_MASK_HEAD_REGISTRY._obj_map:
+        ROI_MASK_HEAD_REGISTRY.register(DiceLSMaskHead)
     setup_logger()
 
     dataset_dir = directory / 'Training_Data'
@@ -161,7 +215,15 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
     with open(str(config_directory / "train_metadata.json"), 'w') as json_file:
         json.dump(train_metadata.as_dict(), json_file)
 
+
+
+
     cfg = get_cfg()
+
+    #custom loss function
+
+    cfg.MODEL.ROI_MASK_HEAD.NAME = "DiceLSMaskHead"
+
     cfg.MODEL.DEVICE = "cuda"
     cfg.OUTPUT_DIR = str(config_directory)
     cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_DC5_3x.yaml")) # pretrained model to use, doesn't make much difference which you pick
@@ -171,10 +233,12 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
     cfg.DATALOADER.NUM_WORKERS = 1
     cfg.SOLVER.IMS_PER_BATCH = 4  
     cfg.SOLVER.BASE_LR = 0.00025 
-    cfg.SOLVER.MAX_ITER = 500 
+    cfg.SOLVER.MAX_ITER = 1000 
     cfg.SOLVER.STEPS = []  
+    cfg.SOLVER.WEIGHT_DECAY = 1e-4
     cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 32  
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = 2
+    # cfg.MODEL.BACKBONE.FREEZE_AT = 5
     cfg.TEST.DETECTIONS_PER_IMAGE = 500 
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
 
