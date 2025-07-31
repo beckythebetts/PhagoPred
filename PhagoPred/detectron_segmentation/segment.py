@@ -77,9 +77,9 @@ def seg_image(cfg_dir: Path,
         instance_mask = detectron_outputs["instances"].pred_masks[i].to(device=device)
 
         # ******* ADJUST FOR NON SQUARE IMAGES*********
-        if SETTINGS.REMOVE_EDGE_CELLS:
-            if torch.any(torch.nonzero(instance_mask)==1) or torch.any(torch.nonzero(instance_mask)==SETTINGS.IMAGE_SIZE[0]-1):
-                continue
+        # if SETTINGS.REMOVE_EDGE_CELLS:
+        #     if torch.any(torch.nonzero(instance_mask)==1) or torch.any(torch.nonzero(instance_mask)==SETTINGS.IMAGE_SIZE[0]-1):
+        #         continue
 
         for category in categories:
             if class_name == category:

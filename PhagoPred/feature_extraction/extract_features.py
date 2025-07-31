@@ -150,7 +150,7 @@ class CellType:
 
     def get_features_xr(self, h5py_file: h5py.File, features: list = None) -> xr.Dataset:
         """
-        h5py file is open file, returns x_array (chunked like h5py). If features no tspecified, reads all features.
+        h5py file is open file, returns x_array (chunked like h5py). If features not specified, reads all features.
         """
         data_dict = {}
         for feature_name, feature_data in h5py_file[self.features_group].items():
@@ -164,7 +164,7 @@ class CellType:
         ds = xr.Dataset(data_dict)
 
         # ds = ds.assign_coords(Frame=np.arange(ds.sizes['Frame']))
-
+        
         return ds
 
     
