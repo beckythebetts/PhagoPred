@@ -264,7 +264,7 @@ class FeaturesExtraction:
         """
         Extracts primary and derived features for a given cell type.
         """
-        self.extract_primary_features(f, cell_type)
+        # self.extract_primary_features(f, cell_type)
         
         if len(cell_type.primary_derived_features) > 0:
             print(f'\n=== Calculating Primary/Derived Features ({cell_type.name}) ===\n')

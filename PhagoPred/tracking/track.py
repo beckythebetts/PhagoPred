@@ -338,7 +338,7 @@ class Tracker:
             join_subset(tids)
 
         # === Step 3: Final global join on reduced set ===
-        print('\nFinal global join...\n')
+        print('\n== Final global join ==\n')
         self.remove_short_tracks(min_track_length=3)
         self.remap_track_id_map()
         tracks_ids = np.unique(self.track_id_map[self.track_id_map >= 0])

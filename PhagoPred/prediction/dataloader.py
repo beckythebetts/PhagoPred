@@ -16,6 +16,7 @@ class CellDataset(torch.utils.data.Dataset):
             include_alive: bool = True,
             num_alive_samples: int = 1,
             mode: str = 'train',
+            nan_threshold: float = 0.2
     ):
         """
         Initialize the CellDataset.
@@ -29,7 +30,7 @@ class CellDataset(torch.utils.data.Dataset):
             num_alive_samples (int, optional): Number of alive samples to include. Defaults to 1.
             mode (str, optional): Mode of the dataset ('train' or 'test'). Defaults to 'train'.
         """
-        self.hdf5_path = hdf5_paths
+        self.hdf5_paths = hdf5_paths
         self.fixed_length = fixed_length
         self.pre_death_frames = pre_death_frames
         self.include_alive = include_alive
@@ -55,7 +56,9 @@ class CellDataset(torch.utils.data.Dataset):
             'Fluorescence Distance Variance',
             ]
         
+        self.file_idxs, self.local_cell_idxs, self.death_frames = [], [], []
         self.file_idxs, self.local_cell_idxs, self.death_frames = self._load_cells() 
+
 
         # self.file_cache = {}
 
@@ -123,8 +126,16 @@ class CellDataset(torch.utils.data.Dataset):
                             continue
                     if start_frame > end_frame:
                         continue
-                    features_data = features_data.isel({'Frame': slice(start_frame, end_frame+1), 'Cell Index': cell_idx})
-                    cells.append((features_data.values, np.isnan(death_frame)))
+                    cell_features_data = cell_features.isel({'Frame': slice(start_frame, end_frame+1)})
+
+                    features_array = cell_features_data.values  # (Features, Frames)
+
+                    # Compute proportion of NaNs
+                    nan_ratio = np.isnan(features_array).sum() / features_array.size
+                    if nan_ratio > self.nan_threshold:
+                        continue  # Skip this cell
+
+                    cells.append((features_array, np.isnan(death_frame)))
     
         return cells
 
@@ -158,14 +169,12 @@ class SummaryStatsCellDataset(CellDataset):
             'skew': lambda feats, diffs: scipy.stats.skew(feats, axis=0, nan_policy='omit'),
             'total_ascent': lambda feats, diffs: np.nansum(diffs * (diffs > 0), axis=0),
             'total_descent': lambda feats, diffs: np.nansum(diffs * (diffs < 0), axis=0),
+            'average_gradient': lambda feats, diffs: np.nansum(diffs, axis=0) / diffs.shape[0],
+            'max': lambda feats, diffs: np.nanmax(feats, axis=0),
+            'min': lambda feats, diffs: np.nanmin(feats, axis=0)
         }
 
-        self.features = {f"{feature}_{stat_name}" for stat_name in self.stat_functions.keys() for feature in self.features}
-
-    # def differences(self, features):
-    #     differences = np.diff(features, n=1, axis=0)
-    #     differences = np.where(~np.isnan(differences), differences, 0)
-    #     return differences
+        self.feature_names = {f"{feature}_{stat_name}" for stat_name in self.stat_functions.keys() for feature in self.features}
 
     def get_summary_stats(self, features):
         """
