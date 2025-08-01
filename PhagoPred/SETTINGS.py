@@ -5,12 +5,13 @@ try:
 # ******* GENERAL *******
     # DATASET = Path('PhagoPred')/'Datasets'/'secondwithlight - Copy.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_short_seg_test.h5'
-    DATASET = Path('PhagoPred')/'Datasets'/'27_05.h5'
+    DATASET = Path('PhagoPred')/'Datasets'/'27_05_short.h5'
     with h5py.File(DATASET, 'r') as f:
         NUM_FRAMES = f['Images'].attrs['Number of frames']
         IMAGE_SIZE = f['Images'].attrs['Image size / pixels']
         TIME_STEP = f['Images'].attrs['Time interval / s']
 except:
+    print(f"Dataset {DATASET} not found.")
     DATASET = None
     NUM_FRAMES = None
     IMAGE_SIZE = None
@@ -36,14 +37,14 @@ THRESHOLD = 250
 MAXIMUM_DISTANCE_THRESHOLD = 20
 FRAME_MEMORY = 10
 CLEAN_TRACKS = True
-MINIMUM_TRACK_LENGTH = 50
+MINIMUM_TRACK_LENGTH = 20
 
 
 VIEW_TRACKS = True # Save labelled tracked images
 NUM_FRAMES_TO_VIEW = 50 # Set as None to view all (slow)
 
 # ******* FEATURE EXTRACTION *******
-NUM_TRAINING_FRAMES = 100
+NUM_TRAINING_FRAMES = 50
 NUM_CONTOUR_POINTS = 50
 PCA_COMPONENTS = 10
 KMEANS_CLUSTERS = 5

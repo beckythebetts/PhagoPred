@@ -3,6 +3,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import xarray as xr
+import scipy
 
 from PhagoPred.feature_extraction.extract_features import CellType
 
@@ -133,13 +134,69 @@ class CellDataset(torch.utils.data.Dataset):
         Returns a tuple (features, alive) where features is a numpy array
         and alive is a boolean indicating if the cell is alive.
         """
-        original_idx = idx
         while True:
             cell = self.__getitems__([idx])
             if cell:
                 return cell[0]
             else:
+                old_idx = idx
                 idx += 1
                 if idx >= len(self):
                     idx = 0
-                print(f"Warning: Empty sample at index {original_idx}, trying cell at index {idx}")
+                print(f"Warning: Empty sample at index {old_idx}, trying cell at index {idx}")
+
+class SummaryStatsCellDataset(CellDataset):
+    """
+    Dataset that computes summary statistics for each cell.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.stat_functions = {
+            'mean': lambda feats, diffs: np.nanmean(feats, axis=0),
+            'std': lambda feats, diffs: np.nanstd(feats, axis=0),
+            'skew': lambda feats, diffs: scipy.stats.skew(feats, axis=0, nan_policy='omit'),
+            'total_ascent': lambda feats, diffs: np.nansum(diffs * (diffs > 0), axis=0),
+            'total_descent': lambda feats, diffs: np.nansum(diffs * (diffs < 0), axis=0),
+        }
+
+        self.features = {f"{feature}_{stat_name}" for stat_name in self.stat_functions.keys() for feature in self.features}
+
+    # def differences(self, features):
+    #     differences = np.diff(features, n=1, axis=0)
+    #     differences = np.where(~np.isnan(differences), differences, 0)
+    #     return differences
+
+    def get_summary_stats(self, features):
+        """
+        Compute summary statistics for the given features.
+
+        Args:
+            features (numpy.ndarray): Features of the cell.
+
+        Returns:
+            numpy.ndarray: Summary statistics.
+        """
+        stats = []
+        diffs = np.diff(features, n=1, axis=0)
+
+        for func in self.summary_stat_functions.values():
+            stat = func(features, diffs)
+            if isinstance(stat, np.ndarray):
+                stats.append(stat)
+            else:
+                stats.append(np.array([stat]))
+        return np.concatenate(stats, axis=0)
+    
+    def __getitems__(self, idxs):
+        """
+        Get items from the dataset based on the provided indices.
+        Returns a list of tuples [(summary_stats, alive), ...] where summary_stats is a numpy array
+        and alive is a boolean indicating if the cell is alive.
+        """
+        cells = super().__getitems__(idxs)
+        summary_stats = []
+        for features, alive in cells:
+            stats = self.get_summary_stats(features)
+            summary_stats.append((stats.flatten(), alive))
+        return summary_stats

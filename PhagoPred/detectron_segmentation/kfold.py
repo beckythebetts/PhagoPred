@@ -496,23 +496,23 @@ def split_masks_by_area(true_masks, pred_masks, n_groups=4):
 def main():
     faulthandler.enable()
     # merge_jsons(Path('PhagoPred')/ 'detectron_segmentation' / 'models' / 'toumai_01_05' / 'labels')
-    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_custom_loss_smoothing_0_1')
-    my_kfold.split_all()
-    # # # my_kfold.train_and_eval()
-    my_kfold.train()
-    my_kfold.eval()
-    my_kfold.plot()
+
+    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_low_mask_loss')
+    # my_kfold.split_all()
+    # my_kfold.train()
+    # my_kfold.eval()
+    # my_kfold.plot()
+
     # my_kfold.plot_results()
     # my_kfold.eval_feature(feature_func=mask_funcs.get_perimeters_over_areas, feature_name='perim_over_area', n_groups=3)
     # my_kfold.features_scatter_plot(feature_func=mask_funcs.get_perimeters_over_areas, feature_name='perimeter/area')
 
-    # plot_comparison(
-    #     {'L2: 1e-3': KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_custom_loss_l2_1e_3'),
-    #      'L2: 1e-4': KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_custom_loss')},
-    #      save_as=Path('temp') / 'comparison.png',
-    #      category='all')
+    plot_comparison(
+        {'$L_{mask}$ x 0.3': KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_low_mask_loss'),
+         '$L_{mask}$ x 1.0': KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_custom_loss')},
+         save_as=Path('temp') / 'comparison.png',
+         category='all')
 
-    # my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold')
     # my_kfold.plot_av_loss(output_path=Path('temp') / 'av_loss_plot.png')
 
 if __name__=='__main__':

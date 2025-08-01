@@ -4,6 +4,7 @@ import h5py
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 from PhagoPred.utils import mask_funcs
 from PhagoPred import SETTINGS
@@ -47,9 +48,9 @@ class PCAKmeansFit:
         else:
             self.training_frames = np.random.randint(0, SETTINGS.NUM_FRAMES, size=self.num_training_images)
 
-        for i, frame in enumerate(self.training_frames):
-            sys.stdout.write(f'\rProcessing Frame {i+1} / {self.num_training_images}')
-            sys.stdout.flush()
+        for i, frame in enumerate(tqdm(self.training_frames)):
+            # sys.stdout.write(f'\rProcessing Frame {i+1} / {self.num_training_images}')
+            # sys.stdout.flush()
             new_feature = self.feature_func(frame)
             if i==0:
                 features = new_feature
