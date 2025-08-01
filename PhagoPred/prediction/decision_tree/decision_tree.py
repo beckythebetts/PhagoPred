@@ -102,3 +102,11 @@ def save_decision_tree_plot(clf, feature_names=None, save_path=Path(__file__).pa
     plt.close()
     print(f"✅ Decision tree plot saved to {save_path}")
 
+def main():
+    hdf5_files = [Path('PhagoPred') / 'Datasets' / '27_05_500.h5']
+
+    train_eval(hdf5_files)
+
+if __name__ == '__main__':
+
+    main()

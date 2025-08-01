@@ -296,6 +296,11 @@ class CellViewer(QMainWindow):
 
             self.get_cell_images(f)
             self.update_feature_plots(f)
+            self.cell_death = f['Cells']['Phase']['CellDeath'][0, self.cell_idx]
+            if np.isnan(self.cell_death):
+                self.cell_death_str = 'Alive'
+            else:
+                self.cell_death_str = f'Cell Death at frame {int(self.cell_death)}'
         
         self.add_vertical_lines_to_plots()
 
@@ -307,7 +312,7 @@ class CellViewer(QMainWindow):
         self.viewer.dims.set_current_step(0, 0)
 
 
-        self.setWindowTitle(f"Cell Viewer - Cell {self.cell_idx}")
+        self.setWindowTitle(f"Cell Viewer - Cell {self.cell_idx}, {self.cell_death_str}")
 
         # self.loading_dialog.close()
 

@@ -5,7 +5,7 @@ try:
 # ******* GENERAL *******
     # DATASET = Path('PhagoPred')/'Datasets'/'secondwithlight - Copy.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_short_seg_test.h5'
-    DATASET = Path('PhagoPred')/'Datasets'/'27_05_short.h5'
+    DATASET = Path('PhagoPred')/'Datasets'/'27_05_500.h5'
     with h5py.File(DATASET, 'r') as f:
         NUM_FRAMES = f['Images'].attrs['Number of frames']
         IMAGE_SIZE = f['Images'].attrs['Image size / pixels']
@@ -37,7 +37,7 @@ THRESHOLD = 250
 MAXIMUM_DISTANCE_THRESHOLD = 20
 FRAME_MEMORY = 10
 CLEAN_TRACKS = True
-MINIMUM_TRACK_LENGTH = 20
+MINIMUM_TRACK_LENGTH = 50
 
 
 VIEW_TRACKS = True # Save labelled tracked images

@@ -20,6 +20,7 @@ from PIL import Image
 import sys
 import glob
 import h5py
+from tqdm import tqdm
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import tools
@@ -130,9 +131,9 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
                                     exact=True,
                                     fillvalue=np.nan)
 
-        for frame_idx in range(images_ds.shape[0]):
-            sys.stdout.write(f'\rSegmenting image {int(frame_idx)+1} / {f["Images"].attrs["Number of frames"]}')
-            sys.stdout.flush()
+        for frame_idx in tqdm(range(images_ds.shape[0])):
+            # sys.stdout.write(f'\rSegmenting image {int(frame_idx)+1} / {f["Images"].attrs["Number of frames"]}')
+            # sys.stdout.flush()
 
             image = images_ds[frame_idx]
 
