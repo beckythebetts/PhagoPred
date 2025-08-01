@@ -5,9 +5,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: track_all",
+            "name": "Python Debugger: run_all",
             "type": "debugpy",
             "request": "launch",
+            "python": "C:\\Users\\php23rjb\\AppData\\Local\\miniconda3\\envs\\PhagoPred\\python.exe",
             // "module": "PhagoPred.feature_extraction.batch_extract_features_no_epi",
             // "module": "PhagoPred.feature_extraction.extract_features",
             // "module": "PhagoPred.detectron_segmentation.segment",
@@ -17,7 +18,8 @@
             // "module": "PhagoPred.display.save",
             // "module": "PhagoPred.tracking.tracker",
             "module": "PhagoPred.run_all",
-            "justMyCode": false
+            "justMyCode": false,
+            "console": "integratedTerminal"
         }
     ]
 }

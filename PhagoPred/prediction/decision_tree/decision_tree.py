@@ -5,6 +5,7 @@ import joblib
 from pathlib import Path
 import matplotlib.pyplot as plt
 from sklearn.tree import DecisionTreeClassifier, plot_tree
+from tqdm import tqdm
 
 
 
@@ -24,26 +25,31 @@ def get_summary_stats_arrays(dataset: SummaryStatsCellDataset):
     """
     summary_stats = []
     alive = []
-
-    for i in range(len(dataset)):
+    print('\nLoading Dataset...\n')
+    for i in tqdm(range(len(dataset))):
         stats, is_alive = dataset[i]
-        summary_stats.append(stats.flatten())
-        alive.append(is_alive)
+        if stats is not None:
+            summary_stats.append(stats.flatten())
+            alive.append(is_alive)
 
     return np.array(summary_stats), np.array(alive)
 
-def train_eval(hdf5_files: list[Path]):
+def train_eval(
+        # hdf5_files: list[Path],
+        dataset: SummaryStatsCellDataset = None,
+        ):
     """
     Train and evaluate a decision tree model using summary statistics from the dataset.
     """
 
-    dataset = SummaryStatsCellDataset(hdf5_files,
-                                      fixed_length=20,
-                                      pre_death_frames=0,
-                                      include_alive=True,
-                                      num_alive_samples=1,
-                                      mode='train',
-                                      )
+    # dataset = SummaryStatsCellDataset(hdf5_files,
+    #                                   fixed_length=20,
+    #                                   pre_death_frames=0,
+    #                                   include_alive=True,
+    #                                   num_alive_samples=1,
+    #                                   mode='train',
+    #                                   )
+    
     X, y = get_summary_stats_arrays(dataset)
 
     # Split the dataset into training and testing sets
@@ -54,13 +60,14 @@ def train_eval(hdf5_files: list[Path]):
     clf.fit(X_train, y_train)
 
     # Save the model
-    joblib.dump(clf, (__file__).parent / 'decision_tree_model.pkl')
+    joblib.dump(clf, Path(__file__).parent / 'decision_tree_model.pkl')
 
     # Evaluate the model
     accuracy = clf.score(X_test, y_test)
     print(f"Model accuracy: {accuracy:.2f}")
-
-    save_decision_tree_plot(clf, feature_names=dataset.features, max_depth=10)
+    with open(Path(__file__).parent / 'decision_tree_accuracy.txt', 'w') as f:
+        f.write(f"Model accuracy: {accuracy:.2f}\n")
+    save_decision_tree_plot(clf, feature_names=dataset.feature_names)
 
 def inference(hdf5_files: list[Path]):
     """
@@ -79,20 +86,21 @@ def inference(hdf5_files: list[Path]):
     X, _ = get_summary_stats_arrays(dataset)
 
     # Load the trained model
-    clf = joblib.load((__file__).parent / 'decision_tree_model.pkl')
+    clf = joblib.load(Path(__file__).parent / 'decision_tree_model.pkl')
 
     # Perform inference
     predictions = clf.predict(X)
     print(f"Predictions: {predictions}")
 
-def save_decision_tree_plot(clf, feature_names=None, save_path=Path(__file__).parent / 'decision_tree.png', max_depth=10):
+def save_decision_tree_plot(clf=None, feature_names=None, save_path=Path(__file__).parent / 'decision_tree.png', max_depth=3):
+    if clf is None:
+        clf = joblib.load(Path(__file__).parent / 'decision_tree_model.pkl')
     plt.figure(figsize=(20, 10))
     plot_tree(
         clf,
         filled=True,
         feature_names=feature_names,
         class_names=["Alive", "Dead"],
-        rounded=True,
         max_depth=max_depth,
         fontsize=10
     )
@@ -100,12 +108,20 @@ def save_decision_tree_plot(clf, feature_names=None, save_path=Path(__file__).pa
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
-    print(f"✅ Decision tree plot saved to {save_path}")
+    print(f"\n✅ Decision tree plot saved to {save_path}")
 
 def main():
     hdf5_files = [Path('PhagoPred') / 'Datasets' / '27_05_500.h5']
+    dataset = dataset = SummaryStatsCellDataset(hdf5_files,
+                                      fixed_length=20,
+                                      pre_death_frames=0,
+                                      include_alive=True,
+                                      num_alive_samples=1,
+                                      mode='train',
+                                      )
 
-    train_eval(hdf5_files)
+    # train_eval(dataset))
+    save_decision_tree_plot(feature_names=dataset.feature_names)
 
 if __name__ == '__main__':
 

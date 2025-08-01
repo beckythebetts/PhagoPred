@@ -67,7 +67,6 @@ class CellDeath(BaseFeature):
         has_death = np.any(death_possible, axis=0)
 
         # Output array
-        n_cells = smoothed_cell_state.shape[1]
         death_frames = np.full(smoothed_cell_state.shape, np.nan)
         death_frames[0, has_death] = first_death_idx[has_death]
 

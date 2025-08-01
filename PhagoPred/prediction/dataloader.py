@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 from pathlib import Path
 import h5py
@@ -36,6 +38,7 @@ class CellDataset(torch.utils.data.Dataset):
         self.include_alive = include_alive
         self.num_alive_samples = num_alive_samples
         self.mode = mode
+        self.nan_threshold = nan_threshold
 
         self.features = [
             'Area',
@@ -105,7 +108,8 @@ class CellDataset(torch.utils.data.Dataset):
                 features_data = CellType('Phase').get_features_xr(f, features=self.features)
                 for cell_idx, death_frame in zip(file_cell_idxs, file_death_frames):
                     cell_features = features_data.isel({'Cell Index': cell_idx})
-                    cell_features = cell_features.to_array(dim='Feature')
+                    cell_features = cell_features.to_dataarray(dim='Feature').transpose()
+
                     if not np.isnan(death_frame):
                         end_frame = death_frame - self.pre_death_frames
                         if end_frame < 0:
@@ -114,11 +118,11 @@ class CellDataset(torch.utils.data.Dataset):
                         if not self.include_alive:
                             continue
                         # last non-NaN frame is the end frame
-                        end_frame = cell_features.sizes['Frame'] - 1 - (~np.isnan(cell_features)).any(dim='Feature')[::-1].argmax(dim='Frame')
+                        end_frame = cell_features.sizes['Frame'] - 1 - (~np.isnan(cell_features)).any(dim='Feature')[::-1].argmax(dim='Frame').values
 
                     if self.fixed_length is None:
                         # first non-NaN frame is the start frame
-                        start_frame = (~np.isnan(cell_features)).any(dim='Feature').argmax(dim='Frame')
+                        start_frame = (~np.isnan(cell_features)).any(dim='Feature').argmax(dim='Frame').values
                     
                     else:
                         start_frame = end_frame - self.fixed_length + 1
@@ -126,7 +130,7 @@ class CellDataset(torch.utils.data.Dataset):
                             continue
                     if start_frame > end_frame:
                         continue
-                    cell_features_data = cell_features.isel({'Frame': slice(start_frame, end_frame+1)})
+                    cell_features_data = cell_features.isel({'Frame': slice(int(start_frame), int(end_frame+1))})
 
                     features_array = cell_features_data.values  # (Features, Frames)
 
@@ -145,16 +149,21 @@ class CellDataset(torch.utils.data.Dataset):
         Returns a tuple (features, alive) where features is a numpy array
         and alive is a boolean indicating if the cell is alive.
         """
-        while True:
-            cell = self.__getitems__([idx])
-            if cell:
-                return cell[0]
-            else:
-                old_idx = idx
-                idx += 1
-                if idx >= len(self):
-                    idx = 0
-                print(f"Warning: Empty sample at index {old_idx}, trying cell at index {idx}")
+        cell = self.__getitems__([idx])
+        if cell:
+            return cell[0]
+        else:
+            return None, None
+        # while True:
+        #     cell = self.__getitems__([idx])
+        #     if cell:
+        #         return cell[0]
+        #     else:
+        #         old_idx = idx
+        #         idx += 1
+        #         if idx >= len(self):
+        #             idx = 0
+        #         print(f"Warning: Empty sample at index {old_idx}, trying cell at index {idx}")
 
 class SummaryStatsCellDataset(CellDataset):
     """
@@ -174,7 +183,7 @@ class SummaryStatsCellDataset(CellDataset):
             'min': lambda feats, diffs: np.nanmin(feats, axis=0)
         }
 
-        self.feature_names = {f"{feature}_{stat_name}" for stat_name in self.stat_functions.keys() for feature in self.features}
+        self.feature_names = [f"{feature}_{stat_name}" for stat_name in self.stat_functions.keys() for feature in self.features]
 
     def get_summary_stats(self, features):
         """
@@ -188,13 +197,17 @@ class SummaryStatsCellDataset(CellDataset):
         """
         stats = []
         diffs = np.diff(features, n=1, axis=0)
-
-        for func in self.summary_stat_functions.values():
-            stat = func(features, diffs)
-            if isinstance(stat, np.ndarray):
-                stats.append(stat)
-            else:
-                stats.append(np.array([stat]))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            # Ignore warnings about NaN in mean/std/skew calculations
+            # This is because we may have NaN values in the features
+            # and we want to compute stats ignoring those NaNs.
+            for func in self.stat_functions.values():
+                stat = func(features, diffs)
+                if isinstance(stat, np.ndarray):
+                    stats.append(stat)
+                else:
+                    stats.append(np.array([stat]))
         return np.concatenate(stats, axis=0)
     
     def __getitems__(self, idxs):
