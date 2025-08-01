@@ -223,10 +223,10 @@ class FeaturesExtraction:
     def extract_primary_features(self, f: h5py.File, cell_type: CellType) -> None:
         if len(cell_type.primary_features) > 0:
             print(f'\n=== Calculating Primary Features ({cell_type.name}) ===\n')
-            phase_xr = self.cell_types[self.cell_type_names.index('Phase')].get_features_xr(f)
-            epi_xr = None
-            if 'Epi' in self.cell_type_names:   
-                epi_xr = self.cell_types[np.argwhere(self.cell_type_names == 'Epi')].get_features_xr(f)
+            # phase_xr = self.cell_types[self.cell_type_names.index('Phase')].get_features_xr(f)
+            # epi_xr = None
+            # if 'Epi' in self.cell_type_names:   
+            #     epi_xr = self.cell_types[np.argwhere(self.cell_type_names == 'Epi')].get_features_xr(f)
 
             for frame_idx in tqdm(range(self.num_frames)):
 
@@ -336,13 +336,13 @@ def main():
     feature_extractor = FeaturesExtraction()
 
     phase_features = [
-        # features.Fluorescence(),
-        # features.MorphologyModes(), 
-        # features.Speed(),
-        # features.DensityPhase(),
-        # features.Displacement(),
-        # features.Perimeter(),
-        # features.Circularity(),
+        features.Fluorescence(),
+        features.MorphologyModes(), 
+        features.Speed(),
+        features.DensityPhase(),
+        features.Displacement(),
+        features.Perimeter(),
+        features.Circularity(),
         # features.GaborScale(),
         features.CellDeath()
         ]

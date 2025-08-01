@@ -156,7 +156,7 @@ def soft_dice_loss(pred_logits, target_masks, eps=1e-6):
     dice_score = (2. * intersection + eps) / (union + eps)
     return 1 - dice_score.mean()
 
-def label_smoothing_bce_loss(pred_logits, target_masks, smoothing=0.1):
+def label_smoothing_bce_loss(pred_logits, target_masks, smoothing=0.05):
     """
     Apply label smoothing to target_masks before BCE.
     """
@@ -191,7 +191,7 @@ class DiceLSMaskHead(MaskRCNNConvUpsampleHead):
         ls_bce = label_smoothing_bce_loss(pred_masks, gt_masks)
         loss = 0.5 * dice + 0.5 * ls_bce
 
-        return {"loss_mask": loss}
+        return {"loss_mask": 0.3*loss}
     
 
 def train(directory=SETTINGS.MASK_RCNN_MODEL):

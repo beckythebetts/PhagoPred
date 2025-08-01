@@ -36,7 +36,7 @@ class Tracker:
         self.track_id_map = []
 
     def track(self):
-        # self.get_cell_info()
+        self.get_cell_info()
         self.get_tracklets()
         # self.join_tracklets()
         self.join_tracklets_batches()
