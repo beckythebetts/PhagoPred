@@ -226,8 +226,10 @@ if __name__ == '__main__':
     #                 phase_channel=1,
     #                 epi_channel=2,
     #                 )
-    make_short_test_copy(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05.h5"),
-                         Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_short_ims.h5"))
+    make_short_test_copy(Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05.h5"),
+                         Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05_500.h5"),
+                         start_frame=3000,
+                         end_frame=3500)
     # Create dummy data similar to your sliced data
     # data = np.random.randint(0, 256, size=(50, 2048, 2048), dtype=np.uint8)
 
