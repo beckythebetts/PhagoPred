@@ -1,0 +1,20 @@
+# config.yaml
+
+model:
+  input_size: 16
+  hidden_size: 64
+  dropout: 0.3
+  attn_hidden_size: 32
+  bidirectional: true
+
+training:
+  batch_size: 32
+  num_epochs: 20
+  learning_rate: 0.001
+  loss: BCEWithLogitsLoss
+
+paths:
+  train_data: ../../data/train.csv
+  val_data: ../../data/val.csv
+  model_save_path: ./checkpoints/lstm_attention.pt
+  logs: ./logs/
