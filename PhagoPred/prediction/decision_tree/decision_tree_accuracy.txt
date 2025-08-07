@@ -1,9 +1,9 @@
-Model accuracy: 0.88
+Model accuracy: 0.80
               precision    recall  f1-score   support
 
-        Dead       0.18      0.33      0.24         6
-       Alive       0.96      0.91      0.93       100
+        Dead       0.56      0.36      0.43        14
+       Alive       0.84      0.92      0.88        52
 
-    accuracy                           0.88       106
-   macro avg       0.57      0.62      0.58       106
-weighted avg       0.91      0.88      0.89       106
+    accuracy                           0.80        66
+   macro avg       0.70      0.64      0.66        66
+weighted avg       0.78      0.80      0.79        66

@@ -76,155 +76,199 @@ class ToolBar(QToolBar):
             # Handle invalid input gracefully (e.g., ignore or show a message)
             pass
 
-class AllCellsViewer(QMainWindow):
+# class AllCellsViewer(QMainWindow):
 
+#     def __init__(self):
+#         super().__init__()
+
+#         self.setWindowTitle("All Cells Viewer")
+#         self.setMinimumSize(300, 300)
+#         self.setMaximumSize(300, 300)
+#         self.resize(1000, 300)
+
+#         self.phase_images = None
+
+#         self.start_frame = 0
+#         self.end_frame = 200
+
+#         self.interval = 1 # Only show every {self.interval} frames (for speed and memory)
+
+#         self.viewer = napari.Viewer(show=False)
+
+#             # Central widget
+#         central_widget = QWidget()
+#         self.setCentralWidget(central_widget)
+
+#         # Layout
+#         layout = QHBoxLayout(central_widget)
+#         # layout = QHBoxLayout()
+#         layout.addWidget(self.viewer.window._qt_viewer)
+
+#         self.load_images()
+        
+
+
+#     def load_images(self):
+#         hdf5_file = SETTINGS.DATASET
+#         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+#         with h5py.File(hdf5_file, 'r') as f:
+#             num_cells = f['Cells']['Phase']['X'].shape[1]
+
+#             LUT = torch.randint(low=10, high=255, size=(num_cells, 3), dtype=torch.uint8).to(device)
+#             lut_for_neg1 = torch.tensor([[0, 0, 0]], device=device, dtype=torch.uint8)
+#             LUT = torch.cat([lut_for_neg1, LUT], dim=0)
+
+#             phase_data = f['Images']['Phase']
+#             mask_data = f['Segmentations']['Phase']
+
+#             if self.start_frame is None:
+#                 self.start_frame = 0
+#             if self.end_frame is None:
+#                 self.end_frame = phase_data.shape[0]
+
+#             display_frames = np.arange(start=self.start_frame, stop=self.end_frame, step=self.interval)
+
+#             loading_bar = LoadingBarDialog(np.max(display_frames), message="Loading images...")
+#             loading_bar.show()
+
+#             images = []
+
+#             for frame in display_frames:
+#                 phase_im = np.stack([phase_data[frame]]*3, axis=-1)
+#                 mask = mask_data[frame]
+
+#                 phase_im = torch.tensor(phase_im, dtype=torch.uint8).to(device)
+#                 mask = torch.tensor(mask).to(device)
+
+#                 outlines = mask_funcs.mask_outlines(mask, thickness=3).type(torch.int64)
+#                 # print(outlines.shape)
+#                 colour_outlines = (LUT[outlines]).type(torch.uint8)
+#                 # print(colour_outlines.shape)
+#                 # print(phase_im.shape)
+
+#                 outlined_phase_image =  (torch.where(outlines.unsqueeze(-1).expand_as(colour_outlines)>0, colour_outlines, phase_im))
+#                 outlined_phase_image = outlined_phase_image.cpu().numpy() / 256
+
+#                 images.append(outlined_phase_image)
+#                 loading_bar.update_progress(frame)
+#             images = np.stack(images, axis=0)
+#             self.viewer.add_image(images, rgb=True)
+
+class AllCellsViewer(QMainWindow):
     def __init__(self):
         super().__init__()
 
         self.setWindowTitle("All Cells Viewer")
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(300, 300)
+        self.setMaximumSize(300, 300)
         self.resize(1000, 300)
 
         self.phase_images = None
-
-        self.start_frame = None
-        self.end_frame = None
+        self.start_frame = 0
+        self.end_frame = 200
+        self.interval = 1  # Only show every {self.interval} frames (for speed and memory)
 
         self.viewer = napari.Viewer(show=False)
 
-            # Central widget
+        # Central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        # Layout
         layout = QHBoxLayout(central_widget)
-        # layout = QHBoxLayout()
         layout.addWidget(self.viewer.window._qt_viewer)
 
         self.load_images()
-        
-
 
     def load_images(self):
         hdf5_file = SETTINGS.DATASET
-
-        if self.start_frame is None:
-            self.start_frame = 0
-
-        if self.end_frame is None:
-            self.end_frame = SETTINGS.NUM_FRAMES
-
-        n_frames = self.end_frame - self.start_frame
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         with h5py.File(hdf5_file, 'r') as f:
-            phase_ds = f['Images']['Phase']
-            epi_ds = f['Images']['Epi']
-            mask_ds = f['Segmentations']['Phase']
+            num_cells = f['Cells']['Phase']['X'].shape[1]
 
-            chunk_size = phase_ds.chunks[0] if phase_ds.chunks else 32
+            # Keep random colors per session
+            LUT = torch.randint(low=10, high=255, size=(num_cells, 3), dtype=torch.uint8).to(device)
+            lut_for_neg1 = torch.tensor([[0, 0, 0]], device=device, dtype=torch.uint8)
+            LUT = torch.cat([lut_for_neg1, LUT], dim=0)
 
-            # Load phase images
-            phase_loading = LoadingBarDialog(n_frames, message="Loading phase images...")
-            phase_loading.show()
-            phase_images = np.empty((n_frames, SETTINGS.IMAGE_SIZE[0], SETTINGS.IMAGE_SIZE[1]), dtype=phase_ds.dtype)
-            for chunk_start in range(0, n_frames, chunk_size):
-                chunk_end = min(chunk_start + chunk_size, n_frames)
-                phase_images[chunk_start:chunk_end] = phase_ds[self.start_frame + chunk_start : self.start_frame + chunk_end]
-                phase_loading.update_progress(chunk_end)
-            phase_loading.close()
-            self.phase_images = phase_images
-            self.viewer.add_image(self.phase_images, name='Phase', blending='additive')
+            phase_data = f['Images']['Phase']
+            mask_data = f['Segmentations']['Phase']
+            X_centers = f['Cells']['Phase']['X']
+            Y_centers = f['Cells']['Phase']['Y']
 
-            # # Load epi images
-            # epi_loading = LoadingBarDialog(n_frames, message="Loading epi images...")
-            # epi_loading.show()
-            # epi_images = np.empty_like(phase_images)
-            # for chunk_start in range(0, n_frames, chunk_size):
-            #     chunk_end = min(chunk_start + chunk_size, n_frames)
-            #     epi_images[chunk_start:chunk_end] = epi_ds[self.start_frame + chunk_start : self.start_frame + chunk_end]
-            #     epi_loading.update_progress(chunk_end)
-            # epi_loading.close()
-            # epi_images = tools.threshold_image(epi_images)
-            # self.viewer.add_image(epi_images, name='Epi', blending='additive', colormap='red', opacity=0.5)
+            if self.start_frame is None:
+                self.start_frame = 0
+            if self.end_frame is None:
+                self.end_frame = phase_data.shape[0]
 
-            # # Load mask images
-            # mask_loading = LoadingBarDialog(n_frames, message="Loading mask images...")
-            # mask_loading.show()
-            # mask_images = np.empty_like(phase_images, dtype=np.int32)
-            # for chunk_start in range(0, n_frames, chunk_size):
-            #     chunk_end = min(chunk_start + chunk_size, n_frames)
-            #     mask_images[chunk_start:chunk_end] = mask_ds[self.start_frame + chunk_start : self.start_frame + chunk_end]
-            #     mask_loading.update_progress(chunk_end)
-            # mask_loading.close()
+            display_frames = np.arange(start=self.start_frame, stop=self.end_frame, step=self.interval)
 
-            # # Add outlines for each cell index (random color)
-            # outline_loading = LoadingBarDialog(mask_images.max() + 1, message="Drawing cell outlines...")
-            # outline_loading.show()
-            # n_cells = mask_images.max() + 1  # assumes mask labels are 0...N
-            # for cell_idx in range(n_cells):
-            #     cell_mask = (mask_images == cell_idx)
-            #     if not cell_mask.any():
-            #         outline_loading.update_progress(cell_idx + 1)
-            #         continue
-            #     outline = mask_funcs.mask_outline(torch.tensor(cell_mask).byte(), thickness=2).cpu().numpy()
-            #     color = [random.random(), random.random(), random.random(), 1.0]
-            #     self.viewer.add_image(
-            #         (outline * 255).astype(np.uint8),
-            #         name=f'Outline_{cell_idx}',
-            #         blending='additive',
-            #         opacity=0.8,
-            #         colormap='gray',  # napari expects colormap for single-channel images
-            #         rgb=False,
-            #         contrast_limits=(0, 255),
-            #         visible=True,
-            #         color=color
-            #     )
-            #     outline_loading.update_progress(cell_idx + 1)
-            # outline_loading.close()
+            loading_bar = LoadingBarDialog(len(display_frames), message="Loading images...")
+            loading_bar.show()
 
-        self.setWindowTitle("All Cells Viewer - Phase Images")
-        self.viewer.dims.set_current_step(0, 0)
-        
-    # def load_images(self):
-    #     # import math
+            images = []
+            points = []
+            labels = []
 
-    #     hdf5_file = SETTINGS.DATASET
+            text = {
+                'string': '{track_id}',         # match the property name exactly
+                'size': 12,
+                'anchor': 'center',
+                'translation': [0, 0, 0],          # you can keep this or tweak to shift text
+                'color': "yellow",
+            }
 
-    #     if self.start_frame is None:
-    #         self.start_frame = 0
+            for i, frame in enumerate(display_frames):
+                phase_im = np.stack([phase_data[frame]] * 3, axis=-1)
+                mask = mask_data[frame]
 
-    #     if self.end_frame is None:
-    #         self.end_frame = SETTINGS.NUM_FRAMES
+                phase_im = torch.tensor(phase_im, dtype=torch.uint8).to(device)
+                mask = torch.tensor(mask).to(device)
 
-    #     n_frames = self.end_frame - self.start_frame
+                outlines = mask_funcs.mask_outlines(mask, thickness=3).type(torch.int64)
+                colour_outlines = (LUT[outlines]).type(torch.uint8)
 
-    #     # Open HDF5 file and get chunk size
-    #     with h5py.File(hdf5_file, 'r') as f:
-    #         phase_ds = f['Images']['Phase']
-    #         # Use dataset chunk size if available, else default to 32
-    #         chunk_size = phase_ds.chunks[0] if phase_ds.chunks else 32
+                outlined_phase_image = torch.where(
+                    outlines.unsqueeze(-1).expand_as(colour_outlines) > 0,
+                    colour_outlines,
+                    phase_im
+                )
+                outlined_phase_image = outlined_phase_image.cpu().numpy() / 256
+                images.append(outlined_phase_image)
 
-    #         self.loading_dialog = LoadingBarDialog(n_frames, message="Loading phase images...")
-    #         self.loading_dialog.show()
+                # === Use precomputed centers + track ids ===
+                track_ids = np.where(~np.isnan(X_centers[frame]))[0]
 
-    #         # Pre-allocate array
-    #         phase_images = np.empty(
-    #             (n_frames, SETTINGS.IMAGE_SIZE[0], SETTINGS.IMAGE_SIZE[1]), dtype=phase_ds.dtype
-    #         )
+                for cell_idx in track_ids:
+                    x = X_centers[frame, cell_idx]
+                    y = Y_centers[frame, cell_idx]
 
-    #         # Read in chunks
-    #         for chunk_start in range(0, n_frames, chunk_size):
-    #             chunk_end = min(chunk_start + chunk_size, n_frames)
-    #             # Read chunk from HDF5
-    #             phase_images[chunk_start:chunk_end] = phase_ds[self.start_frame + chunk_start : self.start_frame + chunk_end]
-    #             self.loading_dialog.update_progress(chunk_end)
+                    if np.isnan(x) or np.isnan(y):
+                        continue
 
-    #         self.phase_images = phase_images
-    #         self.viewer.add_image(self.phase_images, name='Phase', blending='additive')
+                    points.append([i, x, y])  # Napari: (T, Y, X)
+                    labels.append(str(cell_idx))
+                loading_bar.update_progress(i)
 
-    #     self.setWindowTitle("All Cells Viewer - Phase Images")
-    #     self.viewer.dims.set_current_step(0, 0)
-    #     self.loading_dialog.close()
+            images = np.stack(images, axis=0)
+            self.viewer.add_image(images, rgb=True, name="Cells")
+
+            properties = {
+                "track_id": np.array([int(label) for label in labels]),
+            }
+
+            if points:
+                self.viewer.add_points(
+                    points,
+                    properties=properties,
+                    size=1,
+                    face_color='transparent',
+                    edge_color='transparent',
+                    text=text,
+                    name='Cell IDs',
+                )
+
 
 class CellViewer(QMainWindow):
     def __init__(self):
@@ -243,10 +287,10 @@ class CellViewer(QMainWindow):
         self.cell_outline = None
 
         self.feature_names=[
-                'Total Fluorescence', 
-                'Fluorescence Distance Mean', 
-                'Fluorescence Distance Variance'
-                # 'Area',
+                # 'Total Fluorescence', 
+                # 'Fluorescence Distance Mean', 
+                # 'Fluorescence Distance Variance'
+                'Area',
                 # 'Circularity',
                 # 'Perimeter',
                 # 'Displacement',
@@ -259,8 +303,8 @@ class CellViewer(QMainWindow):
                 # 'Phagocytes within 100 pixels',
                 # 'Phagocytes within 250 pixels',
                 # 'Phagocytes within 500 pixels',
-                # 'X',
-                # 'Y',
+                'X',
+                'Y',
                 # 'CellDeath'
         ]
         
@@ -444,10 +488,11 @@ class CellViewer(QMainWindow):
     
 def main():
     app = QApplication(sys.argv)
-    window = CellViewer()
-    # window = AllCellsViewer()
+    cell_window = CellViewer()
+    all_window = AllCellsViewer()
     # window.show()
-    window.showMaximized()
+    cell_window.showMaximized()
+    all_window.showMaximized()
     sys.exit(app.exec_())
 
 if __name__ == "__main__":

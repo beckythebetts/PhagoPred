@@ -133,7 +133,7 @@ def plot_feature_correlations(save_as: Path, feature_names: Optional[list] = Non
 
     return fig#
 
-def plot_num_dead_cells(save_as: Path, first_frame: Optional[int] = None, last_frame: Optional[int] = None) -> 'matplotlib.figure.Figure':
+def plot_num_dead_cells(save_as: Optional[Path]=None, first_frame: Optional[int] = None, last_frame: Optional[int] = None) -> 'matplotlib.figure.Figure':
     """Plot number of dead cells over time."""
     plt.rcParams["font.family"] = 'serif'
 
@@ -156,8 +156,8 @@ def plot_num_dead_cells(save_as: Path, first_frame: Optional[int] = None, last_f
         ax.set_ylabel('Number of Cells')
         ax.legend()
         ax.grid()
-
-    plt.savefig(save_as)
+    if save_as is not None:
+        plt.savefig(save_as)
 
     return fig
 
