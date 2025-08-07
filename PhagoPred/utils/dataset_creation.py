@@ -186,7 +186,7 @@ def make_short_test_copy(orig_file: Path, short_file: Path, start_frame: int = 0
             short_group.attrs['Number of frames'] = end_frame - start_frame
             short.flush()
 
-def keep_only_group(hdf5_path, keep_groups=['Images', 'Segmentations']):
+def keep_only_group(hdf5_path, keep_groups=['Images']):
     with h5py.File(hdf5_path, 'r+') as f:
         # List all top-level groups
         all_groups = list(f.keys())
@@ -202,7 +202,7 @@ def keep_only_group(hdf5_path, keep_groups=['Images', 'Segmentations']):
     print(f"Only '{keep_groups}' group retained.")
 
 if __name__ == '__main__':
-    keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_500.h5")
+    keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_500_seg.h5")
     # hdf5_from_tiffs(Path("D:/27_05_1"), 
     #                 Path('D:/27_05.h5'),
     #                 phase_channel=1,

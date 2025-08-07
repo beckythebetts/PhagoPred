@@ -105,7 +105,8 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
     
     train_metadata, cfg = get_model(cfg_dir)
 
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5   # set a custom testing threshold
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.7   # set a custom testing threshold
+    cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST = 0.3
     cfg.MODEL.DEVICE = device_str
     predictor = DefaultPredictor(cfg)
 
