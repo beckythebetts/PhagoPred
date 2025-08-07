@@ -488,10 +488,10 @@ class CellViewer(QMainWindow):
     
 def main():
     app = QApplication(sys.argv)
-    cell_window = CellViewer()
+    # cell_window = CellViewer()
     all_window = AllCellsViewer()
     # window.show()
-    cell_window.showMaximized()
+    # cell_window.showMaximized()
     all_window.showMaximized()
     sys.exit(app.exec_())
 
