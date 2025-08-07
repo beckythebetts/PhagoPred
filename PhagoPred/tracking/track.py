@@ -36,10 +36,10 @@ class Tracker:
         self.track_id_map = []
 
     def track(self):
-        self.get_cell_info()
+        # self.get_cell_info()
         self.get_tracklets()
-        # self.join_tracklets()
-        self.join_tracklets_batches()
+        self.join_tracklets()
+        # self.join_tracklets_batches()
         self.remove_short_tracks()
         self.apply_track_id_map()
 
@@ -137,6 +137,9 @@ class Tracker:
 
         
         track_id_map = -np.ones(self.max_num_cells, dtype=int)
+
+        cell_index_coords = current_cells.coords['Cell Index'].values
+
         track_id_map[matched_current_idxs] = matched_old_idxs
         track_id_map[unmatched_current_idxs] = np.arange(self.max_track_id + 1, self.max_track_id + 1 + len(unmatched_current_idxs))
 
@@ -172,31 +175,49 @@ class Tracker:
             # Ensure all cells datasets are no larger than necessasry
             for feature_data in f[self.cells_group].values():
                     feature_data.resize(self.max_track_id+1, axis=1)
-
     def get_tracklet_endpoints(self):
         print('\nGetting tracklets endpoints...\n')
         start_frames, start_coords, end_frames, end_coords = [], [], [], []
         with h5py.File(self.file, 'r') as f:
             coords_ds = self.cell_type.get_features_xr(f, ['X', 'Y'])
 
-            
-            for track_id in tqdm(range(self.max_track_id+1)):
-                # sys.stdout.write(f'\rTracklet {track_id + 1}/{self.max_track_id+1}')
-                # sys.stdout.flush()
-                frames, cell_ids = np.nonzero(self.track_id_map==track_id)
+            # Get all non-negative track assignments
+            valid_mask = self.track_id_map >= 0
+            frames, cell_ids = np.nonzero(valid_mask)
+            track_ids = self.track_id_map[valid_mask]
 
-                start_frame, end_frame = frames[0], frames[-1]
+            # Group frame and cell indices by track_id
+            from collections import defaultdict
+            track_groups = defaultdict(list)
+            for t_id, f_idx, c_idx in zip(track_ids, frames, cell_ids):
+                track_groups[t_id].append((f_idx, c_idx))
 
-                start_coord = np.stack((coords_ds['X'].isel({'Frame': start_frame, 'Cell Index': cell_ids[0]}),
-                               coords_ds['Y'].isel({'Frame': start_frame, 'Cell Index': cell_ids[0]})),
-                               axis=0)
-                end_coord = np.stack((coords_ds['X'].isel({'Frame': end_frame, 'Cell Index': cell_ids[-1]}),
-                               coords_ds['Y'].isel({'Frame': end_frame, 'Cell Index': cell_ids[-1]})),
-                               axis=0)
-                
+            # Process each track_id once
+            for track_id in tqdm(range(self.max_track_id + 1)):
+                positions = track_groups.get(track_id)
+                if positions is None:
+                    # Track ID not present, skip
+                    continue
+
+                positions = np.array(positions)
+                track_frames = positions[:, 0]
+                track_cells = positions[:, 1]
+
+                start_frame, end_frame = track_frames[0], track_frames[-1]
+
+                # Get coordinates of the first and last cells in the track
+                start_coord = np.stack((
+                    coords_ds['X'].isel({'Frame': start_frame, 'Cell Index': track_cells[0]}),
+                    coords_ds['Y'].isel({'Frame': start_frame, 'Cell Index': track_cells[0]})
+                ), axis=0)
+                end_coord = np.stack((
+                    coords_ds['X'].isel({'Frame': end_frame, 'Cell Index': track_cells[-1]}),
+                    coords_ds['Y'].isel({'Frame': end_frame, 'Cell Index': track_cells[-1]})
+                ), axis=0)
+
                 start_frames.append(start_frame)
-                end_frames.append(end_frame)
                 start_coords.append(start_coord)
+                end_frames.append(end_frame)
                 end_coords.append(end_coord)
 
         return (
@@ -204,7 +225,40 @@ class Tracker:
             np.stack(start_coords, axis=0),
             np.stack(end_frames, axis=0),
             np.stack(end_coords, axis=0),
-            )
+        )
+
+    # def get_tracklet_endpoints(self):
+    #     print('\nGetting tracklets endpoints...\n')
+    #     start_frames, start_coords, end_frames, end_coords = [], [], [], []
+    #     with h5py.File(self.file, 'r') as f:
+    #         coords_ds = self.cell_type.get_features_xr(f, ['X', 'Y'])
+
+            
+    #         for track_id in tqdm(range(self.max_track_id+1)):
+    #             # sys.stdout.write(f'\rTracklet {track_id + 1}/{self.max_track_id+1}')
+    #             # sys.stdout.flush()
+    #             frames, cell_ids = np.nonzero(self.track_id_map==track_id)
+
+    #             start_frame, end_frame = frames[0], frames[-1]
+
+    #             start_coord = np.stack((coords_ds['X'].isel({'Frame': start_frame, 'Cell Index': cell_ids[0]}),
+    #                            coords_ds['Y'].isel({'Frame': start_frame, 'Cell Index': cell_ids[0]})),
+    #                            axis=0)
+    #             end_coord = np.stack((coords_ds['X'].isel({'Frame': end_frame, 'Cell Index': cell_ids[-1]}),
+    #                            coords_ds['Y'].isel({'Frame': end_frame, 'Cell Index': cell_ids[-1]})),
+    #                            axis=0)
+                
+    #             start_frames.append(start_frame)
+    #             end_frames.append(end_frame)
+    #             start_coords.append(start_coord)
+    #             end_coords.append(end_coord)
+
+    #     return (
+    #         np.stack(start_frames, axis=0),
+    #         np.stack(start_coords, axis=0),
+    #         np.stack(end_frames, axis=0),
+    #         np.stack(end_coords, axis=0),
+    #         )
 
     def join_tracklets(self, max_time_gap: int = SETTINGS.FRAME_MEMORY, max_dist: int = SETTINGS.MAXIMUM_DISTANCE_THRESHOLD) -> None:
         with h5py.File(self.file, 'r+') as f:
@@ -225,7 +279,7 @@ class Tracker:
         potential_time_weights = time_weights[potential_idxs_0][:, potential_idxs_1]
 
         old, new = linear_sum_assignment(potential_dist_weights)
-        valid_pairs = (potential_dist_weights[old, new] < max_dist) & (potential_time_weights[old, new] < max_time_gap) & (potential_time_weights[old, new] > 0)
+        valid_pairs = (potential_dist_weights[old, new] < max_dist*time_weights) & (potential_time_weights[old, new] < max_time_gap) & (potential_time_weights[old, new] > 0)
 
         old, new = old[valid_pairs], new[valid_pairs]
         tracks_0 = tracks_ids[potential_idxs_0][old]
@@ -244,7 +298,7 @@ class Tracker:
     def join_tracklets_batches(self, max_time_gap: int = SETTINGS.FRAME_MEMORY, max_dist: int = SETTINGS.MAXIMUM_DISTANCE_THRESHOLD, n_batches: int = 4, grid_size: int = 2) -> None:
         """
         Perform tracklet joining in smaller batches to save memory.
-        Kmeans clustering to batch based on similar spatial coords.
+        Split into grid to batch spatially close by batches
         """
         with h5py.File(self.file, 'r+') as f:
             f[self.cells_group].attrs['maximum time gap in tracks'] = max_time_gap
@@ -272,12 +326,6 @@ class Tracker:
         grid_to_track_ids = defaultdict(list)
         for i, cell in enumerate(grid_indices):
             grid_to_track_ids[cell].append(tracks_ids[i])
-        # kmeans = KMeans(n_clusters=min(n_batches, len(tracks_ids)))
-        # cluster_labels = kmeans.fit_predict(start_coords)
-
-        # cluster_to_track_ids = defaultdict(list)
-        # for i, cluster_id in enumerate(cluster_labels):
-        #     cluster_to_track_ids[cluster_id].append(tracks_ids[i])
 
 
         def join_subset(track_ids_subset):
@@ -321,6 +369,12 @@ class Tracker:
             tracks_0 = track_ids_subset[potential_idxs_0][old]
             tracks_1 = track_ids_subset[potential_idxs_1][new]
 
+            # # Initialize union-find with max track id + 1
+            # uf = UnionFind(self.max_track_id + 1)
+
+            # # Union all matched pairs
+            # for t0, t1 in zip(tracks_0, tracks_1):
+            #     uf.union(t0, t1)
             queue = np.column_stack((tracks_0, tracks_1))
 
             for i, (track_0, track_1) in enumerate(queue):
@@ -357,3 +411,6 @@ class Tracker:
 def main():
     my_tracker = Tracker()
     my_tracker.track()
+
+if __name__ == '__main__':
+    main()

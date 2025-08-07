@@ -186,50 +186,32 @@ def make_short_test_copy(orig_file: Path, short_file: Path, start_frame: int = 0
             short_group.attrs['Number of frames'] = end_frame - start_frame
             short.flush()
 
-# def make_short_test_copy(orig_file: Path, short_file: Path, start_frame: int = 0, end_frame: int = 50):
-#     with h5py.File(orig_file, 'r') as orig, h5py.File(short_file, 'w') as short:
-#         if 'Images' not in orig:
-#             raise ValueError("No 'Images' group found in original file")
+def keep_only_group(hdf5_path, keep_groups=['Images', 'Segmentations']):
+    with h5py.File(hdf5_path, 'r+') as f:
+        # List all top-level groups
+        all_groups = list(f.keys())
 
-#         orig_group = orig['Images']
-#         short_group = short.create_group('Images')
+        for group in all_groups:
+            if group not in keep_groups:
+                print(f"Deleting group: {group}")
+                del f[group]  # Deletes the group and its contents
 
-#         # Copy group-level attributes
-#         for attr, val in orig_group.attrs.items():
-#             short_group.attrs[attr] = val
+        # Ensure changes are written to disk
+        f.flush()
 
-#         for name, dataset in orig_group.items():
-#             if not isinstance(dataset, h5py.Dataset):
-#                 continue
+    print(f"Only '{keep_groups}' group retained.")
 
-#             print(f"Copying dataset: {name}")
-
-#             try:
-#                 sliced_data = dataset[start_frame:end_frame].copy()
-#                 print(f"→ sliced shape: {sliced_data.shape}")
-
-#                 short_dset = short_group.create_dataset(name, data=sliced_data)
-                
-#                 # Copy dataset attributes
-#                 for attr, val in dataset.attrs.items():
-#                     short_dset.attrs[attr] = val
-
-#             except Exception as e:
-#                 print(f"❌ Failed writing dataset '{name}': {e}")
-
-#         # File-level info (optional)
-#         short.attrs['Number of frames'] = end_frame - start_frame
-#         short.flush()
 if __name__ == '__main__':
+    keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_500.h5")
     # hdf5_from_tiffs(Path("D:/27_05_1"), 
     #                 Path('D:/27_05.h5'),
     #                 phase_channel=1,
     #                 epi_channel=2,
     #                 )
-    make_short_test_copy(Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05.h5"),
-                         Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05_500.h5"),
-                         start_frame=3000,
-                         end_frame=3500)
+    # make_short_test_copy(Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05.h5"),
+    #                      Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05_500.h5"),
+    #                      start_frame=3000,
+    #                      end_frame=3500)
     # Create dummy data similar to your sliced data
     # data = np.random.randint(0, 256, size=(50, 2048, 2048), dtype=np.uint8)
 

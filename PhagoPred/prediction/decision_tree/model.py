@@ -123,9 +123,9 @@ def save_decision_tree_plot(clf=None, feature_names=None, save_path=Path(__file_
     print(f"\n✅ Decision tree plot saved to {save_path}")
 
 def main():
-    hdf5_files = [Path('PhagoPred') / 'Datasets' / '27_05_500.h5']
+    hdf5_files = [Path('PhagoPred') / 'Datasets' / '24_06.h5']
     dataset = SummaryStatsCellDataset(hdf5_files,
-                                      fixed_length=5,
+                                      fixed_length=20,
                                       pre_death_frames=0,
                                       include_alive=True,
                                       num_alive_samples=1,
