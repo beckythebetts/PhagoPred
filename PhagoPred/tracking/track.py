@@ -71,7 +71,7 @@ class Tracker:
                 current_cells = xr.concat([current_cells[dim] for dim in coords_list], dim='Feature')
                 # Add features and cell index coordinates
                 current_cells = current_cells.assign_coords({'Feature': ('Feature', coords_list),
-                                                             'Cell Index': ('Cell Index', np.arange(current_cells.sizes['Cell Index']))
+                                                             'Cell Index': ('Cell Index', np.arange(current_cells.sizes['Cell Index'])),
                                                              })
                 
                 # Drop nan cells (initial idx preserved in coord). Allows distances between all cells to be calculated.
@@ -138,8 +138,6 @@ class Tracker:
         
         track_id_map = -np.ones(self.max_num_cells, dtype=int)
 
-        cell_index_coords = current_cells.coords['Cell Index'].values
-
         track_id_map[matched_current_idxs] = matched_old_idxs
         track_id_map[unmatched_current_idxs] = np.arange(self.max_track_id + 1, self.max_track_id + 1 + len(unmatched_current_idxs))
 
@@ -184,16 +182,18 @@ class Tracker:
             # Get all non-negative track assignments
             valid_mask = self.track_id_map >= 0
             frames, cell_ids = np.nonzero(valid_mask)
-            track_ids = self.track_id_map[valid_mask]
+            track_ids = np.unique(self.track_id_map[valid_mask])
+
+            # track_ids = range(self.max_track_id+1)
 
             # Group frame and cell indices by track_id
             from collections import defaultdict
             track_groups = defaultdict(list)
-            for t_id, f_idx, c_idx in zip(track_ids, frames, cell_ids):
+            for t_id, f_idx, c_idx in zip(self.track_id_map[valid_mask], frames, cell_ids):
                 track_groups[t_id].append((f_idx, c_idx))
 
             # Process each track_id once
-            for track_id in tqdm(range(self.max_track_id + 1)):
+            for track_id in tqdm(track_ids):
                 positions = track_groups.get(track_id)
                 if positions is None:
                     # Track ID not present, skip
@@ -202,6 +202,10 @@ class Tracker:
                 positions = np.array(positions)
                 track_frames = positions[:, 0]
                 track_cells = positions[:, 1]
+
+                sort_idx = np.argsort(track_frames)
+                track_frames = track_frames[sort_idx]
+                track_cells = track_cells[sort_idx]
 
                 start_frame, end_frame = track_frames[0], track_frames[-1]
 
@@ -225,6 +229,7 @@ class Tracker:
             np.stack(start_coords, axis=0),
             np.stack(end_frames, axis=0),
             np.stack(end_coords, axis=0),
+            track_ids
         )
 
     # def get_tracklet_endpoints(self):
@@ -264,8 +269,10 @@ class Tracker:
         with h5py.File(self.file, 'r+') as f:
             f[self.cells_group].attrs['maximum time gap in tracks'] = max_time_gap
         
-        tracks_ids = np.unique(self.track_id_map[self.track_id_map >= 0])
-        start_frames, start_coords, end_frames, end_coords = self.get_tracklet_endpoints()
+        # tracks_ids = np.unique(self.track_id_map[self.track_id_map >= 0])
+        # tracks_ids = np.arange(self.max_track_id + 1)
+
+        start_frames, start_coords, end_frames, end_coords, tracks_ids = self.get_tracklet_endpoints()
 
         print('\nJoining tracklets...\n')
 
@@ -279,21 +286,37 @@ class Tracker:
         potential_time_weights = time_weights[potential_idxs_0][:, potential_idxs_1]
 
         old, new = linear_sum_assignment(potential_dist_weights)
-        valid_pairs = (potential_dist_weights[old, new] < max_dist*time_weights) & (potential_time_weights[old, new] < max_time_gap) & (potential_time_weights[old, new] > 0)
+        valid_pairs = (potential_dist_weights[old, new] < max_dist*potential_time_weights[old, new]) & (potential_time_weights[old, new] < max_time_gap) & (potential_time_weights[old, new] > 0)
 
         old, new = old[valid_pairs], new[valid_pairs]
         tracks_0 = tracks_ids[potential_idxs_0][old]
         tracks_1 = tracks_ids[potential_idxs_1][new]
 
         queue = np.column_stack((tracks_0, tracks_1))
+        def iterative_merge(track_id_map, queue):
+            changed = True
+            while changed:
+                changed = False
+                for i in range(len(queue)):
+                    track_0, track_1 = queue[i]
+                    if track_0 == track_1:
+                        continue
+                    mask = (track_id_map == track_1)
+                    if np.any(mask):
+                        track_id_map[mask] = track_0
+                        queue[queue == track_1] = track_0
+                        changed = True
+            return track_id_map, queue
 
-        for i, (track_0, track_1) in enumerate(tqdm(queue)):
-            # sys.stdout.write(f'\rTracklet {i + 1}/{len(queue)}')
-            # sys.stdout.flush()
-            # update track_id_map
-            self.track_id_map[self.track_id_map == track_1] = track_0
-            # update queue
-            queue[:, 0][queue[:, 0]==track_1] = track_0
+        self.track_id_map, queue = iterative_merge(self.track, queue)
+
+        # for i, (track_0, track_1) in enumerate(tqdm(queue)):
+        # for i in tqdm(range(len(queue))):
+        #     track_0, track_1 = queue[i]
+        #     self.track_id_map[self.track_id_map == track_1] = track_0
+        #     queue[queue==track_1] = track_0
+
+        self.remap_track_id_map()
 
     def join_tracklets_batches(self, max_time_gap: int = SETTINGS.FRAME_MEMORY, max_dist: int = SETTINGS.MAXIMUM_DISTANCE_THRESHOLD, n_batches: int = 4, grid_size: int = 2) -> None:
         """
