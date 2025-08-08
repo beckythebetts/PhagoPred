@@ -20,6 +20,10 @@ import pyqtgraph as pg
 from PhagoPred.utils import mask_funcs, tools
 from PhagoPred import SETTINGS
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+
 class LoadingBarDialog(QDialog):
     def __init__(self, max_value, message="Loading..."):
         super().__init__()
@@ -253,7 +257,7 @@ class AllCellsViewer(QMainWindow):
                     properties=properties,
                     size=5,
                     face_color='transparent',
-                    edge_color='transparent',
+                    border_color='transparent',
                     text=text,
                     name='Cell IDs',
                 )
@@ -293,6 +297,10 @@ class AllCellsViewer(QMainWindow):
         self.viewer.dims.events.current_step.connect(update_frame_label)
         update_frame_label()
 
+    def closeEvent(self, event):
+        print("AllCellsViewer is closing")
+        super().closeEvent(event)
+
 
 class CellLoaderThread(QThread):
     progress = Signal(int)
@@ -307,47 +315,48 @@ class CellLoaderThread(QThread):
         self.hdf5_file = hdf5_file
 
     def run(self):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        try:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            n_frames = self.last_frame - self.first_frame
 
-        n_frames = self.last_frame - self.first_frame
+            phase_data = np.empty((n_frames, self.frame_size, self.frame_size))
+            epi_data = np.empty((n_frames, self.frame_size, self.frame_size))
+            mask = np.empty((n_frames, self.frame_size, self.frame_size), dtype=np.int32)
 
-        phase_data = np.empty((n_frames, self.frame_size, self.frame_size))
-        epi_data = np.empty((n_frames, self.frame_size, self.frame_size))
-        mask = np.empty((n_frames, self.frame_size, self.frame_size), dtype=np.int32)
+            with h5py.File(self.hdf5_file, 'r') as f:
+                x_centres = f['Cells']['Phase']['X'][self.first_frame:self.last_frame, self.cell_idx]
+                y_centres = f['Cells']['Phase']['Y'][self.first_frame:self.last_frame, self.cell_idx]
+                x_centres, y_centres = tools.fill_nans(x_centres), tools.fill_nans(y_centres)
 
-        with h5py.File(self.hdf5_file, 'r') as f:
-            x_centres = f['Cells']['Phase']['X'][self.first_frame:self.last_frame, self.cell_idx]
-            y_centres = f['Cells']['Phase']['Y'][self.first_frame:self.last_frame, self.cell_idx]
-            x_centres, y_centres = tools.fill_nans(x_centres), tools.fill_nans(y_centres)
+                for idx in range(n_frames):
+                    frame_idx = self.first_frame + idx
+                    xmin, xmax, ymin, ymax = mask_funcs.get_crop_indices(
+                        (y_centres[idx], x_centres[idx]), self.frame_size, SETTINGS.IMAGE_SIZE
+                    )
+                    phase_data[idx] =  f['Images']['Phase'][frame_idx, ymin:ymax, xmin:xmax]
+                    epi_data[idx] = f['Images']['Epi'][frame_idx, ymin:ymax, xmin:xmax]
+                    mask[idx] = f['Segmentations']['Phase'][frame_idx, ymin:ymax, xmin:xmax]
+                    self.progress.emit(idx + 1)
 
-            phase_stack = f['Images']['Phase'][self.first_frame:self.last_frame]
-            epi_stack = f['Images']['Epi'][self.first_frame:self.last_frame]
-            mask_stack = f['Segmentations']['Phase'][self.first_frame:self.last_frame]
+            cell_mask = (mask == self.cell_idx)
 
-            for idx in range(n_frames):
-                xmin, xmax, ymin, ymax = mask_funcs.get_crop_indices(
-                    (y_centres[idx], x_centres[idx]), self.frame_size, SETTINGS.IMAGE_SIZE
-                )
-                phase_data[idx] = phase_stack[idx][ymin:ymax, xmin:xmax]
-                epi_data[idx] = epi_stack[idx][ymin:ymax, xmin:xmax]
-                mask[idx] = mask_stack[idx][ymin:ymax, xmin:xmax]
+            if not cell_mask.any():
+                cell_outline = np.zeros_like(mask[0])
+            else:
+                cell_outline = mask_funcs.mask_outline(torch.tensor(cell_mask).byte().to(device), thickness=2).cpu().numpy()
 
-                self.progress.emit(idx + 1)
+            epi_data = tools.threshold_image(epi_data)
 
-        cell_mask = (mask == self.cell_idx)
+            self.finished.emit(phase_data, epi_data, cell_outline)
 
-        if not cell_mask.any():
-            # Could emit a special signal or handle this differently
-            # For now just create empty outlines
-            cell_outline = np.zeros_like(mask[0])
-        else:
-            cell_outline = mask_funcs.mask_outline(torch.tensor(cell_mask).byte().to(device), thickness=2).cpu().numpy()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
 
-        epi_data = tools.threshold_image(epi_data)
 
-        self.finished.emit(phase_data, epi_data, cell_outline)
 
 class CellViewer(QMainWindow):
+
     def __init__(self):
         super().__init__()
         
@@ -407,6 +416,8 @@ class CellViewer(QMainWindow):
 
         self.viewer.dims.events.current_step.connect(self.update_vertical_lines)
 
+        
+
     def load_cell(self):
         hdf5_file = SETTINGS.DATASET
 
@@ -429,6 +440,7 @@ class CellViewer(QMainWindow):
         self.loader_thread.progress.connect(self.loading_dialog.update_progress)
         self.loader_thread.finished.connect(self.on_load_finished)
         self.loader_thread.start()
+
 
     def on_load_finished(self, phase_data, epi_data, cell_outline):
         self.phase_data = phase_data
@@ -551,14 +563,23 @@ class CellViewer(QMainWindow):
             else:
                 self.showMaximized()
         super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        print("CellViewer is closing")
+        super().closeEvent(event)
     
 def main():
     app = QApplication(sys.argv)
-    cell_window = CellViewer()
+
     all_window = AllCellsViewer()
-    cell_window.showMaximized()
-    all_window.showMaximized()
+    all_window.show()
+    cell_window = CellViewer()
+    cell_window.show()
+  
+
+
     sys.exit(app.exec_())
 
 if __name__ == "__main__":
     main()
+
