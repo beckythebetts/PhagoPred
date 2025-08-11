@@ -21,7 +21,7 @@ from PhagoPred.utils import mask_funcs, tools
 from PhagoPred import SETTINGS
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
+# os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 
 class LoadingBarDialog(QDialog):
@@ -297,9 +297,6 @@ class AllCellsViewer(QMainWindow):
         self.viewer.dims.events.current_step.connect(update_frame_label)
         update_frame_label()
 
-    def closeEvent(self, event):
-        print("AllCellsViewer is closing")
-        super().closeEvent(event)
 
 
 class CellLoaderThread(QThread):
@@ -373,14 +370,14 @@ class CellViewer(QMainWindow):
         self.cell_outline = None
 
         self.feature_names=[
-                # 'Total Fluorescence', 
-                # 'Fluorescence Distance Mean', 
-                # 'Fluorescence Distance Variance'
+                'Total Fluorescence', 
+                'Fluorescence Distance Mean', 
+                'Fluorescence Distance Variance',
                 'Area',
                 # 'Circularity',
                 # 'Perimeter',
                 # 'Displacement',
-                # 'Speed',
+                'Speed',
                 # 'Mode 0',
                 # 'Mode 1',
                 # 'Mode 2',
@@ -389,8 +386,8 @@ class CellViewer(QMainWindow):
                 # 'Phagocytes within 100 pixels',
                 # 'Phagocytes within 250 pixels',
                 # 'Phagocytes within 500 pixels',
-                'X',
-                'Y',
+                # 'X',
+                # 'Y',
                 # 'CellDeath'
         ]
         
@@ -446,6 +443,8 @@ class CellViewer(QMainWindow):
         self.phase_data = phase_data
         self.epi_data = epi_data
         self.cell_outline = cell_outline
+
+        self.viewer.layers.clear()
 
         self.viewer.add_image(self.phase_data, name='Phase')
         self.viewer.add_image(self.epi_data, name='Epi', blending='additive', colormap='red', opacity=0.5)
@@ -564,9 +563,6 @@ class CellViewer(QMainWindow):
                 self.showMaximized()
         super().keyPressEvent(event)
 
-    def closeEvent(self, event):
-        print("CellViewer is closing")
-        super().closeEvent(event)
     
 def main():
     app = QApplication(sys.argv)
@@ -575,8 +571,6 @@ def main():
     all_window.show()
     cell_window = CellViewer()
     cell_window.show()
-  
-
 
     sys.exit(app.exec_())
 
