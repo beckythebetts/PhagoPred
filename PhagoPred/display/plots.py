@@ -6,8 +6,11 @@ import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
+import pandas as pd
 
 from PhagoPred import SETTINGS
+
+plt.rcParams["font.family"] = 'serif'
 
 def plot_cell_features(cell_idx: int, first_frame: int, last_frame: int, save_as: Path, feature_names: Optional[list] = None) -> 'matplotlib.figure.Figure':
     """Plot time series of features for given cell index. If list of features is not given, plot all features."""
@@ -201,6 +204,31 @@ def corr_coefficient(array1, array2):
 
     return np.corrcoef(filtered_x, filtered_y)[0, 1]
 
+def plot_death_frame(death_frames_txt: Path, save_as: Path):
+    death_frames = pd.read_csv(death_frames_txt, sep="|", skiprows=2, engine='python')
+    death_frames.columns = ['Cell Idx', 'True', 'Predicted']
+    death_frames = death_frames[['Cell Idx', 'True', 'Predicted']].applymap(lambda x: x.strip() if isinstance(x, str) else x)
+
+    valid_rows = death_frames[death_frames['True'].str.isnumeric() & death_frames['predicted'].str.isnumeric()].copy()
+
+    valid_rows['True'] = valid_rows['True'].astype(int)
+    valid_rows['True'] = valid_rows['Predicted'].astype(int)
+
+    plt.figure(figsize=(8, 6))
+    plt.scatter(valid_rows['True'], valid_rows['Predicted'], color='blue', label='Cell Death Prediction')
+    plt.plot([valid_rows['True'].min(), valid_rows['True'].max()],
+            [valid_rows['True'].min(), valid_rows['True'].max()],
+            color='red', linestyle='--', label='Perfect Prediction')
+
+    plt.xlabel('True Death Frame')
+    plt.ylabel('Predicted Death Frame')
+    plt.title('Predicted vs. True Cell Death Frame')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+
 def main():
     feature_names=[
         # 'Area',
@@ -223,8 +251,9 @@ def main():
         'Fluorescence Distance Mean', 
         'Fluorescence Distance Variance'
     ]
+    plot_death_frame(Path('temp') / '')
     # plot_cell_features(1, 0, 50, Path('temp') / 'plot.png', feature_names=feature_names)
-    plot_average_cell_features(Path('temp') / 'plot.png', feature_names=feature_names)
+    # plot_average_cell_features(Path('temp') / 'plot.png', feature_names=feature_names)
     # plot_feature_correlations(Path('temp') / 'correlations_plot.png', feature_names=feature_names)
     # plot_num_dead_cells(Path('temp') / 'num_dead_cells_plot.png')
     # plot_feature_correlations(Path('temp') / 'plot.png', feature_names=[
