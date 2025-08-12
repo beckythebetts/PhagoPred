@@ -9,6 +9,9 @@ from detectron2.engine import DefaultPredictor
 from detectron2.config import get_cfg
 from detectron2.utils.visualizer import Visualizer
 from detectron2.data import MetadataCatalog, DatasetCatalog
+from detectron2.data import detection_utils as utils
+from detectron2.checkpoint import DetectionCheckpointer
+from detectron2.modeling import build_model
 
 import tifffile as tiff
 import numpy as np
@@ -27,6 +30,52 @@ from PhagoPred.utils import tools
 
 os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# from detectron2.engine.defaults import DefaultPredictor
+# from detectron2.checkpoint import DetectionCheckpointer
+# from detectron2.data import MetadataCatalog, detection_utils as utils
+# import torch
+
+class NoResizePredictor:
+    def __init__(self, cfg):
+        self.cfg = cfg.clone()  # cfg can be modified by model
+        self.model = build_model(self.cfg)
+        self.model.eval()
+        if len(cfg.DATASETS.TEST):
+            self.metadata = MetadataCatalog.get(cfg.DATASETS.TEST[0])
+
+        checkpointer = DetectionCheckpointer(self.model)
+        checkpointer.load(cfg.MODEL.WEIGHTS)
+
+        self.input_format = cfg.INPUT.FORMAT
+        assert self.input_format in ["RGB", "BGR"], self.input_format
+
+    def __call__(self, original_image):
+        """
+        Args:
+            original_image (np.ndarray): an image of shape (H, W, C) (in BGR order).
+
+        Returns:
+            predictions (dict):
+                the output of the model for one image only.
+                See :doc:`/tutorials/models` for details about the format.
+        """
+        with torch.no_grad():  # https://github.com/sphinx-doc/sphinx/issues/4258
+            # Apply pre-processing to image.
+            if self.input_format == "RGB":
+                # whether the model expects BGR inputs or RGB
+                original_image = original_image[:, :, ::-1]
+            height, width = original_image.shape[:2]
+            image = original_image
+            image = torch.as_tensor(image.astype("float32").transpose(2, 0, 1))
+            image.to(self.cfg.MODEL.DEVICE)
+
+            inputs = {"image": image, "height": height, "width": width}
+
+            predictions = self.model([inputs])[0]
+            return predictions
+
+        
 
 def get_model(cfg_dir: Path) -> tuple[dict, detectron2.config.CfgNode]:
     """
@@ -60,13 +109,15 @@ def seg_image(cfg_dir: Path,
     """
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device_str)
-
     train_metadata, cfg = get_model(cfg_dir)
-
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5   # set a custom testing threshold
     cfg.MODEL.DEVICE = device_str
-    predictor = DefaultPredictor(cfg)
+    # predictor = DefaultPredictor(cfg)
+    predictor = NoResizePredictor(cfg)
     detectron_outputs = predictor(im)
+
+    if len(detectron_outputs["instances"]) == 0:
+        return None
 
     categories = train_metadata["thing_classes"]
 
