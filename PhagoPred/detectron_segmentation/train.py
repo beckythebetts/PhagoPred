@@ -196,8 +196,8 @@ class DiceLSMaskHead(MaskRCNNConvUpsampleHead):
 
 def train(directory=SETTINGS.MASK_RCNN_MODEL):
 
-    if "DiceLSMaskHead" not in ROI_MASK_HEAD_REGISTRY._obj_map:
-        ROI_MASK_HEAD_REGISTRY.register(DiceLSMaskHead)
+    # if "DiceLSMaskHead" not in ROI_MASK_HEAD_REGISTRY._obj_map:
+    #     ROI_MASK_HEAD_REGISTRY.register(DiceLSMaskHead)
     setup_logger()
 
     dataset_dir = directory / 'Training_Data'
@@ -222,7 +222,7 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
 
     #custom loss function
 
-    cfg.MODEL.ROI_MASK_HEAD.NAME = "DiceLSMaskHead"
+    # cfg.MODEL.ROI_MASK_HEAD.NAME = "DiceLSMaskHead"
 
     cfg.MODEL.DEVICE = "cuda"
     cfg.OUTPUT_DIR = str(config_directory)

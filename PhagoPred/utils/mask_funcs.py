@@ -12,11 +12,48 @@ from pathlib import Path
 from PIL import Image
 import shutil
 import copy
+import cv2
 # import mahotas
 from scipy.ndimage import binary_erosion
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import tools
+
+def add_coco_annotation(coco_json: dict, image_name: str, mask: np.ndarray, image_id: int, annotation_id: int, category_id: int):
+    # Get contours
+    contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    segmentation = []
+    for contour in contours:
+        contour = contour.flatten().tolist()
+        if len(contour) >= 6:  # valid polygon must have at least 3 points
+            segmentation.append(contour)
+
+    if not segmentation:
+        return 0 # skip if no valid contours
+
+    # Compute bbox and area from the binary mask
+    x, y, w, h = cv2.boundingRect(mask.astype(np.uint8))
+    bbox = [float(x), float(y), float(w), float(h)]
+    area = float(np.sum(mask))
+
+    coco_json["images"].append({
+        "id": image_id,
+        "width": mask.shape[1],
+        "height": mask.shape[0],
+        "file_name": image_name,
+    })
+
+    coco_json["annotations"].append({
+        "id": annotation_id,
+        "image_id": image_id,
+        "category_id": category_id,
+        "segmentation": segmentation,
+        "area": area,
+        "bbox": bbox,
+        "iscrowd": 0
+    })
+    return 1
 
 def coco_to_masks(coco_file: Union[Path,str], im_name: str) -> dict[str, np.ndarray]:
     """

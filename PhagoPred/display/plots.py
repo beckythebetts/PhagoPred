@@ -206,16 +206,17 @@ def corr_coefficient(array1, array2):
 
 def plot_death_frame(death_frames_txt: Path, save_as: Path):
     death_frames = pd.read_csv(death_frames_txt, sep="|", skiprows=2, engine='python')
+    death_frames = death_frames.iloc[:, 1:-1]
     death_frames.columns = ['Cell Idx', 'True', 'Predicted']
     death_frames = death_frames[['Cell Idx', 'True', 'Predicted']].applymap(lambda x: x.strip() if isinstance(x, str) else x)
 
-    valid_rows = death_frames[death_frames['True'].str.isnumeric() & death_frames['predicted'].str.isnumeric()].copy()
+    valid_rows = death_frames[death_frames['True'].str.isnumeric() & death_frames['Predicted'].str.isnumeric()].copy()
 
     valid_rows['True'] = valid_rows['True'].astype(int)
-    valid_rows['True'] = valid_rows['Predicted'].astype(int)
+    valid_rows['Predicted'] = valid_rows['Predicted'].astype(int)
 
     plt.figure(figsize=(8, 6))
-    plt.scatter(valid_rows['True'], valid_rows['Predicted'], color='blue', label='Cell Death Prediction')
+    plt.scatter(valid_rows['True'], valid_rows['Predicted'], color='blue', label='Cell Death Prediction', marker='.')
     plt.plot([valid_rows['True'].min(), valid_rows['True'].max()],
             [valid_rows['True'].min(), valid_rows['True'].max()],
             color='red', linestyle='--', label='Perfect Prediction')
@@ -226,7 +227,9 @@ def plot_death_frame(death_frames_txt: Path, save_as: Path):
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.show()
+    plt.savefig(save_as)
+    avg_error = np.sum(np.abs(valid_rows['True'] - valid_rows['Predicted'])) / len(valid_rows['True'])
+    print(f"\nAverage error in cell death estimation is {avg_error} frames.\n")
 
 
 def main():
@@ -251,7 +254,7 @@ def main():
         'Fluorescence Distance Mean', 
         'Fluorescence Distance Variance'
     ]
-    plot_death_frame(Path('temp') / '')
+    plot_death_frame(Path('temp') / 'cell_deaths_24_06.txt', Path('temp') / 'cell_death.png')
     # plot_cell_features(1, 0, 50, Path('temp') / 'plot.png', feature_names=feature_names)
     # plot_average_cell_features(Path('temp') / 'plot.png', feature_names=feature_names)
     # plot_feature_correlations(Path('temp') / 'correlations_plot.png', feature_names=feature_names)

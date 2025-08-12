@@ -7,12 +7,16 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import os
 from PIL import Image
+import pycocotools
+
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import tools, mask_funcs
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+
+
 
 def save_masks(dir, first_frame=0, last_frame=50):
     hdf5_file = SETTINGS.DATASET
