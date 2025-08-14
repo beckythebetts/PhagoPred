@@ -23,7 +23,7 @@ except:
 # DATASET = Path('PhagoPred')/'Datasets'/'mac_short_seg.h5'
 # MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'mac_20x'
 
-MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / '27_05_mac_finetune'
+MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / '27_05_mac'
 CELLPOSE_MODEL = Path("PhagoPred") / 'cellpose_segmentation' / 'Models' / 'ash'
 UNET_MODEL = Path("PhagoPred") / 'unet_segmentation' / 'models' / '20x_flir_8'
 TRAINING_DATA = Path("PhagoPred") / 'segmentation' / 'models' / '20x_flir_8'

@@ -66,101 +66,119 @@ def evaluator(directory=SETTINGS.MASK_RCNN_MODEL):
 
 class Evaluator:
   def __init__(self, dataset_dir: Path, model_dir: Path, eval_mode: str = "metrics") -> None:
-      self.dataset_dir = dataset_dir
-      self.model_dir = model_dir
-      self.eval_dir = self.model_dir.parent / 'Evaluation'
-      self.eval_mode = eval_mode  # "metrics" or "confusion"
+    self.dataset_dir = dataset_dir
+    self.model_dir = model_dir
+    self.eval_dir = self.model_dir.parent / 'Evaluation'
+    self.eval_mode = eval_mode  # "metrics" or "confusion"
 
-      with open(self.dataset_dir / 'validate' / 'labels.json') as f:
-          self.categories = [category['name'] for category in json.load(f)["categories"]]
+    with open(self.dataset_dir / 'validate' / 'labels.json') as f:
+        self.categories = [category['name'] for category in json.load(f)["categories"]]
+
+    if self.eval_mode == "confusion":
+        self.categories.append("No Cell")
+    
 
   def eval(self) -> None:
-      if self.eval_mode == "metrics":
+    if self.eval_mode == "metrics":
         tools.remake_dir(self.eval_dir)
 
-      y_true = []
-      y_pred = []
+    y_true = []
+    y_pred = []
 
-      # Load cfg, train_metadata and predictor to avoid repated loading for each image
-      train_metadata, cfg = segment.get_model(cfg_dir=self.model_dir)
-      cfg, predictor = segment.get_predictor(cfg)
+    # Load cfg, train_metadata and predictor to avoid repated loading for each image
+    train_metadata, cfg = segment.get_model(cfg_dir=self.model_dir)
+    cfg, predictor = segment.get_predictor(cfg)
 
-      for im_name in tqdm(list((self.dataset_dir / 'validate' / 'images').iterdir()), desc="Evaluating "):
-          im = plt.imread(im_name)
+    for im_name in tqdm(list((self.dataset_dir / 'validate' / 'images').iterdir()), desc="Evaluating "):
+        im = plt.imread(im_name)
 
-          if im.ndim == 2:
-              frame_processed = np.stack([im]*3, axis=-1)
-          else:
-              frame_processed = im
+        if im.ndim == 2:
+            frame_processed = np.stack([im]*3, axis=-1)
+        else:
+            frame_processed = im
 
-          pred_masks = segment.seg_image(cfg_dir=self.model_dir, im=frame_processed, train_metadata=train_metadata, cfg=cfg, predicotr=predictor)
-          
-          if pred_masks is None:
-              print(f'No Segmentations found for image {im_name}')
-              pred_masks = {category: np.zeros_like(frame_processed[:, :, 0]) for category in self.categories}
-          true_masks = mask_funcs.coco_to_masks(coco_file=self.dataset_dir / 'validate' / 'labels.json', im_name=im_name)
+        pred_masks = segment.seg_image(cfg_dir=self.model_dir, im=frame_processed, train_metadata=train_metadata, cfg=cfg, predictor=predictor)
+        
+        if pred_masks is None:
+        #   print(f'No Segmentations found for image {im_name}')
+            pred_masks = {category: np.zeros_like(frame_processed[:, :, 0]) for category in self.categories}
+        true_masks = mask_funcs.coco_to_masks(coco_file=self.dataset_dir / 'validate' / 'labels.json', im_name=im_name)
 
-          if self.eval_mode == "metrics":
-              self._eval_metrics(im_name, im, pred_masks, true_masks)
-          elif self.eval_mode == "confusion":
-              true_label = self._mask_to_class(true_masks)
-              pred_label = self._mask_to_class(pred_masks)
-              y_true.append(true_label)
-              y_pred.append(pred_label)
+        if self.eval_mode == "metrics":
+            self._eval_metrics(im_name, im, pred_masks, true_masks)
+        elif self.eval_mode == "confusion":
+            true_label = self._mask_to_class(true_masks)
+            pred_label = self._mask_to_class(pred_masks)
+            y_true.append(true_label)
+            y_pred.append(pred_label)
 
-      if self.eval_mode == "confusion":
-          self.plot_confusion_matrix(y_true, y_pred)
+    if self.eval_mode == "confusion":
+        self.plot_confusion_matrix(y_true, y_pred)
 
   def _eval_metrics(self, im_name, im, pred_masks, true_masks):
-      combi_pred = mask_funcs.combine_masks(list(pred_masks.values()))
-      combi_true = mask_funcs.combine_masks(list(true_masks.values()))
+    combi_pred = mask_funcs.combine_masks(list(pred_masks.values()))
+    combi_true = mask_funcs.combine_masks(list(true_masks.values()))
 
-      view_all = tools.show_segmentation(im, combi_pred, combi_true)
-      plt.imsave(self.eval_dir / f'{im_name.stem}_view.png', view_all / 255)
+    view_all = tools.show_segmentation(im, combi_pred, combi_true)
+    plt.imsave(self.eval_dir / f'{im_name.stem}_view.png', view_all / 255)
 
-      pred_mask_im = Image.fromarray(combi_pred.astype(np.int32), mode='I')
-      pred_mask_im.save(self.eval_dir / f'{im_name.stem}_pred_mask.png')
+    pred_mask_im = Image.fromarray(combi_pred.astype(np.int32), mode='I')
+    pred_mask_im.save(self.eval_dir / f'{im_name.stem}_pred_mask.png')
 
-      results = self.prec_recall_curve(combi_true, combi_pred)
-      results.to_csv(self.eval_dir / f'{im_name.stem}_all_results.txt', sep='\t')
+    results = self.prec_recall_curve(combi_true, combi_pred)
+    results.to_csv(self.eval_dir / f'{im_name.stem}_all_results.txt', sep='\t')
 
-      for category in pred_masks.keys():
-          view = tools.show_segmentation(im, pred_masks[category], true_masks[category])
-          plt.imsave(self.eval_dir / f'{im_name.stem}_{category}_view.png', view)
+    for category in pred_masks.keys():
+        view = tools.show_segmentation(im, pred_masks[category], true_masks[category])
+        plt.imsave(self.eval_dir / f'{im_name.stem}_{category}_view.png', view)
 
-          pred_mask_im = Image.fromarray(pred_masks[category].astype(np.int32), mode='I')
-          pred_mask_im.save(self.eval_dir / f'{im_name.stem}_{category}_pred_mask.png')
+        pred_mask_im = Image.fromarray(pred_masks[category].astype(np.int32), mode='I')
+        pred_mask_im.save(self.eval_dir / f'{im_name.stem}_{category}_pred_mask.png')
 
-          results = self.prec_recall_curve(true_masks[category], pred_masks[category])
-          results.to_csv(self.eval_dir / f'{im_name.stem}_{category}_results.txt', sep='\t')
+        results = self.prec_recall_curve(true_masks[category], pred_masks[category])
+        results.to_csv(self.eval_dir / f'{im_name.stem}_{category}_results.txt', sep='\t')
 
   def _mask_to_class(self, mask_dict: dict) -> int:
-      """
-      Convert one-hot mask dict to a class index based on any positive prediction.
-      Assumes mutually exclusive masks (non-overlapping).
-      """
-      for idx, category in enumerate(self.categories):
-          if np.any(mask_dict[category]):
-              return idx
-      return -1  # No object
+    """
+    Convert one-hot mask dict to a class index based on any positive prediction.
+    Assumes mutually exclusive masks (non-overlapping).
+    """
+    for idx, category in enumerate(self.categories):
+        if np.any(mask_dict[category]):
+            return idx
+    return len(self.categories) - 1  # No object
 
   def plot_confusion_matrix(self, y_true: list[int], y_pred: list[int]):
-      plt.rcParams["font.family"] = 'serif'
-      labels = list(range(len(self.categories)))
-      labels_display = self.categories
+    plt.rcParams["font.family"] = 'serif'
+    labels = list(range(len(self.categories)))
+    labels_display = self.categories
 
-      cm = confusion_matrix(y_true, y_pred, labels=labels)
-      disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels_display)
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
 
-      fig, ax = plt.subplots(figsize=(6, 5))
-      disp.plot(cmap='Blues', ax=ax, colorbar=False)
-      plt.setp(ax.get_yticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-      plt.title("Classification Confusion Matrix - Classification Head Fine Tuned")
-      plt.savefig(self.model_dir.parent / 'confusion_matrix.png')
-      plt.close()
+    accuracy = cm.trace() / cm.sum()
 
-                  
-                  
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels_display)
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    disp.plot(cmap='Blues', ax=ax, colorbar=False)
+    ax.set_ylabel("True label")
+    
+    no_cell_idx = len(self.categories) - 1
+    ax.axhline(no_cell_idx - 0.5, color='gray', linestyle='--', linewidth=1)
+    ax.axvline(no_cell_idx - 0.5, color='gray', linestyle='--', linewidth=1)
+    ax.axhline(no_cell_idx + 0.5, color='gray', linestyle='--', linewidth=1)
+    ax.axvline(no_cell_idx + 0.5, color='gray', linestyle='--', linewidth=1)
+
+    # Optional: add text note
+    # ax.text(no_cell_idx, -1.5, '← No Cell Predictions', ha='center', va='center', fontsize=8, color='gray')
+    plt.setp(ax.get_yticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    plt.title("Confusion Matrix - Box Predictor Fine Tuned")
+    plt.tight_layout()
+    plt.savefig(self.model_dir.parent / 'confusion_matrix.png')
+    plt.close()
+
+    print(f'Accuracy: {accuracy:4f}')
+
       
   def prec_recall_curve(self, true_mask: np.ndarray, 
                         pred_mask: np.ndarray, 
@@ -236,7 +254,7 @@ class Evaluator:
 
 def main():
     evaluator = Evaluator(dataset_dir=Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac_finetune/Fine_Tuning_Data"), 
-                          model_dir=Path("PhagoPred/detectron_segmentation/models/27_05_mac_finetune/Model"),
+                          model_dir=Path("PhagoPred/detectron_segmentation/models/27_05_mac_finetune_box/Model"),
                           eval_mode="confusion")
     evaluator.eval()
     # evaluator.plot()

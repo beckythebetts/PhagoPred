@@ -270,25 +270,31 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
     with open(str(config_yaml_path), 'w') as file:
         yaml.dump(cfg, file)
 
+    plot_loss(config_directory)
+    
+
+def plot_loss(cfg_dir):
     def load_json_arr(json_path):
         lines = []
         with open(json_path, 'r') as f:
             for line in f:
                 lines.append(json.loads(line))
         return lines
-
-    experiment_metrics = load_json_arr(config_directory / 'metrics.json')
+    
+    experiment_metrics = load_json_arr(cfg_dir / 'metrics.json')
     plt.rcParams["font.family"] = 'serif'
     plt.scatter([x['iteration'] for x in experiment_metrics if 'total_loss' in x], [x['total_loss'] for x in experiment_metrics if 'total_loss' in x], color='navy')
     plt.scatter(
         [x['iteration'] for x in experiment_metrics if 'validation_loss' in x],
         [x['validation_loss'] for x in experiment_metrics if 'validation_loss' in x], color='red')
-    plt.legend(['total_loss', 'validation_loss'], loc='upper left')
-    plt.savefig(config_directory / 'loss_plot.png')
+    plt.legend(['Training Loss', 'Validation Loss'], loc='upper left')
+    plt.savefig(cfg_dir / 'loss_plot.png')
     plt.clf()
+
 
 def main():
     train()
+    # plot_loss(Path("PhagoPred/detectron_segmentation/models/27_05_mac/Model"))
 
 if __name__ == '__main__':
     main()
