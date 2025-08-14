@@ -1,6 +1,6 @@
 ---
 title: Segmentation
-layout: single
+layout: single 
 sidebar: 
     nav: "navigation"
 toc: true
@@ -54,4 +54,8 @@ These metrics can also be calculated for subsets of the cells, allowing the effe
 
 ![Perimeter over area](images/perim_over_area_performance.png)
 
-Next: [Tracking](../Tracking/)
+---
+
+- [Cell Death Detection](../Segmentation/CellDeathDetection/)
+
+**Next: [Tracking](../Tracking/)**
