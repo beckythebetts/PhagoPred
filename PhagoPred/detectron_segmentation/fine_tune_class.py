@@ -178,7 +178,7 @@ class ClassifierHeadFineTuner(train.MyTrainer):
     def build_optimiser(cls, cfg, model):
         """Freezes eveyhting but classificaiton head."""
         for name, param in model.named_parameters():
-            if "roi_heads.box_predictor.cls_score" in name:
+            if "roi_heads.box_predictor" in name:
                 param.requires_grad = True
 
             else:
@@ -241,27 +241,34 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
     trainer.resume_or_load = False
     trainer.train()
 
+    
+
+    plot_loss(config_directory)
+    
+
+def plot_loss(cfg_dir):
     def load_json_arr(json_path):
         lines = []
         with open(json_path, 'r') as f:
             for line in f:
                 lines.append(json.loads(line))
         return lines
-
-    experiment_metrics = load_json_arr(config_directory / 'metrics.json')
+    
+    experiment_metrics = load_json_arr(cfg_dir / 'metrics.json')
     plt.rcParams["font.family"] = 'serif'
     plt.scatter([x['iteration'] for x in experiment_metrics if 'total_loss' in x], [x['total_loss'] for x in experiment_metrics if 'total_loss' in x], color='navy')
     plt.scatter(
         [x['iteration'] for x in experiment_metrics if 'validation_loss' in x],
         [x['validation_loss'] for x in experiment_metrics if 'validation_loss' in x], color='red')
-    plt.legend(['total_loss', 'validation_loss'], loc='upper left')
-    plt.savefig(config_directory / 'loss_plot.png')
+    plt.legend(['Training Loss', 'Validation Loss'], loc='upper left')
+    plt.savefig(cfg_dir / 'loss_plot.png')
     plt.clf()
 
 
 def main():
     train()
     # get_finetuning_dataset()
+    # plot_loss(Path("PhagoPred/detectron_segmentation/models/27_05_mac_finetune/Model"))
 
 if __name__ == '__main__':
     main()
