@@ -7,6 +7,7 @@ minimal_mistakes_skin: "contrast"
 
 title: "Phagocytosis Outcome Prediction"
 
+baseurl: "/PhagoPred"  # if your repo is 'repo-name'
 
 markdown: kramdown
 permalink: pretty
