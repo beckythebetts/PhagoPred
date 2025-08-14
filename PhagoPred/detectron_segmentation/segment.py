@@ -1,4 +1,5 @@
 import sys
+from typing import Union
 sys.path.insert(0, 'detectron2')
 
 import torch, detectron2
@@ -94,8 +95,17 @@ def get_model(cfg_dir: Path) -> tuple[dict, detectron2.config.CfgNode]:
 
     return train_metadata, cfg
 
+def get_predictor(cfg) -> tuple[object, Union[DefaultPredictor, NoResizePredictor]]:
+    device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5   # set a custom testing threshold
+    cfg.MODEL.DEVICE = device_str
+    return cfg, NoResizePredictor(cfg)
+
 def seg_image(cfg_dir: Path, 
               im: np.ndarray, 
+              train_metadata = None,
+              cfg = None,
+              predictor = None
             #   categories: tuple[str, ...]
               ) -> dict[str, np.ndarray]:
     """
@@ -107,13 +117,16 @@ def seg_image(cfg_dir: Path,
     Returns:
         masks: Dict of {category name: mask}. Each mask shape [X, Y], 0 for background with each item labelled 1, ..,N
     """
-    device_str = "cuda" if torch.cuda.is_available() else "cpu"
-    device = torch.device(device_str)
-    train_metadata, cfg = get_model(cfg_dir)
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5   # set a custom testing threshold
-    cfg.MODEL.DEVICE = device_str
-    # predictor = DefaultPredictor(cfg)
-    predictor = NoResizePredictor(cfg)
+    if train_metadata is None or cfg is None:
+        train_metadata, cfg = get_model(cfg_dir)
+    if predictor is None:
+        cfg, predictor = get_predictor(cfg)
+    # device = torch.device(device_str)
+    # train_metadata, cfg = get_model(cfg_dir)
+    # cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5   # set a custom testing threshold
+    # cfg.MODEL.DEVICE = device_str
+    # # predictor = DefaultPredictor(cfg)
+    # predictor = NoResizePredictor(cfg)
     detectron_outputs = predictor(im)
 
     if len(detectron_outputs["instances"]) == 0:

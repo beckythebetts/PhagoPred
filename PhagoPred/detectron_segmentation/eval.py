@@ -28,7 +28,7 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
 
 from PhagoPred import SETTINGS
-from PhagoPred.detectron_segmentation.segment import seg_image
+from PhagoPred.detectron_segmentation import segment
 from PhagoPred.utils import mask_funcs, tools
 
 os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
@@ -81,6 +81,10 @@ class Evaluator:
       y_true = []
       y_pred = []
 
+      # Load cfg, train_metadata and predictor to avoid repated loading for each image
+      train_metadata, cfg = segment.get_model(cfg_dir=self.model_dir)
+      cfg, predictor = segment.get_predictor(cfg)
+
       for im_name in tqdm(list((self.dataset_dir / 'validate' / 'images').iterdir()), desc="Evaluating "):
           im = plt.imread(im_name)
 
@@ -89,7 +93,8 @@ class Evaluator:
           else:
               frame_processed = im
 
-          pred_masks = seg_image(cfg_dir=self.model_dir, im=frame_processed)
+          pred_masks = segment.seg_image(cfg_dir=self.model_dir, im=frame_processed, train_metadata=train_metadata, cfg=cfg, predicotr=predictor)
+          
           if pred_masks is None:
               print(f'No Segmentations found for image {im_name}')
               pred_masks = {category: np.zeros_like(frame_processed[:, :, 0]) for category in self.categories}
@@ -140,6 +145,7 @@ class Evaluator:
       return -1  # No object
 
   def plot_confusion_matrix(self, y_true: list[int], y_pred: list[int]):
+      plt.rcParams["font.family"] = 'serif'
       labels = list(range(len(self.categories)))
       labels_display = self.categories
 
@@ -148,7 +154,8 @@ class Evaluator:
 
       fig, ax = plt.subplots(figsize=(6, 5))
       disp.plot(cmap='Blues', ax=ax, colorbar=False)
-      plt.title("Classification Confusion Matrix")
+      plt.setp(ax.get_yticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+      plt.title("Classification Confusion Matrix - Classification Head Fine Tuned")
       plt.savefig(self.model_dir.parent / 'confusion_matrix.png')
       plt.close()
 
