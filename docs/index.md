@@ -2,7 +2,7 @@
 title: Overview
 sidebar: 
     nav: "navigation"
-layout: single
+layout: single 
 ---
 
 Phagocytosis, the engulfment and elimination of particles by cells, is a fundamental component of the innate immune response. Bacteria have evolved various strategies to survive and escape phagocytosis, some of which are well understood, while others remain unidentified.

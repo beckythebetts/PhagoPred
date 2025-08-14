@@ -1,6 +1,6 @@
 ---
 title: Dataset Structure
-layout: single
+layout: single 
 sidebar: 
     nav: "navigation"
 toc: true

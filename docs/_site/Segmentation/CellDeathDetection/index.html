@@ -10,7 +10,7 @@
   <head>
     <meta charset="utf-8">
 
-<!-- begin _includes/seo.html --><title>Imaging - Phagocytosis Outcome Prediction</title>
+<!-- begin _includes/seo.html --><title>Cell Death Detection - Phagocytosis Outcome Prediction</title>
 <meta name="description" content="">
 
 
@@ -18,8 +18,8 @@
 <meta property="og:type" content="website">
 <meta property="og:locale" content="en_US">
 <meta property="og:site_name" content="Phagocytosis Outcome Prediction">
-<meta property="og:title" content="Imaging">
-<meta property="og:url" content="http://localhost:4000/Imaging/">
+<meta property="og:title" content="Cell Death Detection">
+<meta property="og:url" content="http://localhost:4000/Segmentation/CellDeathDetection/">
 
 
 
@@ -33,7 +33,7 @@
 
 
 
-<link rel="canonical" href="http://localhost:4000/Imaging/">
+<link rel="canonical" href="http://localhost:4000/Segmentation/CellDeathDetection/">
 
 
 
@@ -198,7 +198,7 @@
 
 
   <article class="page" itemscope itemtype="https://schema.org/CreativeWork">
-    <meta itemprop="headline" content="Imaging">
+    <meta itemprop="headline" content="Cell Death Detection">
     
     
     
@@ -207,7 +207,7 @@
       
         <header>
           <h1 id="page-title" class="page__title" itemprop="headline">
-            <a href="http://localhost:4000/Imaging/" itemprop="url">Imaging
+            <a href="http://localhost:4000/Segmentation/CellDeathDetection/" itemprop="url">Cell Death Detection
 </a>
           </h1>
           
@@ -221,26 +221,18 @@
           <aside class="sidebar__right ">
             <nav class="toc">
               <header><h4 class="nav__title"><i class="fas fa-file-alt"></i> On this page</h4></header>
-              <ul class="toc__menu"><li><a href="#phase-contrast">Phase-contrast</a></li><li><a href="#fluorescence">Fluorescence</a></li></ul>
+              
             </nav>
           </aside>
         
-        <h2 id="phase-contrast">Phase-contrast</h2>
-<p>Intensity describes optical path length (dependent on thickness and refractive index of sample).
-Allows high contrast imaging with low light intensity, minimising photo damage to cells.
-Artefacts such as white halo around objects may help with segmentation of individual cells.</p>
-
-<h2 id="fluorescence">Fluorescence</h2>
-<p>Bacteria labelled with mCherry fluorescent protein.
-Allows bacteria to be localised during and after engulfment.</p>
-
-<hr />
-
-<p>Images taken at intervals of one minute over three days.</p>
-
-<p><img src="/images/imaging_example.gif" alt="Imaging Example" /></p>
-
-<p>Next: <a href="../Segmentation/">Segmentation</a></p>
+        <p>In order to identify when a macrophage dies, the Mask R-CNN model can be trained on images containing both alive and dead cells. In general here, the moment of cell death is taken as when the cell looses it’s structure and the membrane can no longer be clearly defined. (Cells often ball up and exhibit membrane blebbing before this occurs.)
+<img src="/images/CellDeathMontage.png" alt="Images of cell death" />
+KFold cross validation on the training images (taking one image out for validation per fold), suggested that this performed reaosonably:
+<img src="/images/maskrcnn_performance.png" alt="Preciison recall curves for alive and dead macropahages" />
+These classifications coudl then be used to identify the fram eof cell death. It was assumed there would be some noise in the classifications, so alive cells were asigned a score 1, and dead cells 0. These scores were then smoothed for each cell over time (by taking a 5 frame rolling average) and the cell death was taken as the first frame for which the score dropped below 0.5. However, as shown below, this did not accurately identify cell death. Average error was 56.5 frames.
+<img src="/images/CellDeathPredictionAccuracy.png" alt="Predicted vs true cell death frame" />
+The training images contained both alive and dead cells, but to accurately identify the exact frame of death training data of cells just before and just after death would be required. For 50 cells, the exact frame of death was manually identified. Frames [1, 2, 3, 45, 50, 100, 150, 200] before and after this were used to create a new fine tuning dataset. Everything except the classification head of the Mask R-CNN model was frozen, and the previously trained model was fine tuned on this dataset.
+<img src="/images/death_confusion.png" alt="Confusion matrices before and after classification head fine tuning" /></p>
 
         
       </section>
