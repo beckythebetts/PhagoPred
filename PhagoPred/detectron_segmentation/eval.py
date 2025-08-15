@@ -143,7 +143,7 @@ class Evaluator:
     Convert one-hot mask dict to a class index based on any positive prediction.
     Assumes mutually exclusive masks (non-overlapping).
     """
-    for idx, category in enumerate(self.categories):
+    for idx, category in enumerate(self.categories[:-1]):
         if np.any(mask_dict[category]):
             return idx
     return len(self.categories) - 1  # No object
@@ -172,7 +172,7 @@ class Evaluator:
     # Optional: add text note
     # ax.text(no_cell_idx, -1.5, '← No Cell Predictions', ha='center', va='center', fontsize=8, color='gray')
     plt.setp(ax.get_yticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-    plt.title("Confusion Matrix - Box Predictor Fine Tuned")
+    plt.title("Confusion Matrix - Original Model")
     plt.tight_layout()
     plt.savefig(self.model_dir.parent / 'confusion_matrix.png')
     plt.close()
@@ -253,11 +253,14 @@ class Evaluator:
         ax.grid(True)
 
 def main():
-    evaluator = Evaluator(dataset_dir=Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac_finetune/Fine_Tuning_Data"), 
-                          model_dir=Path("PhagoPred/detectron_segmentation/models/27_05_mac_finetune_box/Model"),
-                          eval_mode="confusion")
+    # evaluator = Evaluator(dataset_dir=Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac_finetune/Fine_Tuning_Data"), 
+    #                       model_dir=Path("PhagoPred/detectron_segmentation/models/27_05_mac/Model"),
+    #                       eval_mode="confusion")
+    evaluator = Evaluator(dataset_dir=Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac_new/Training_Data"), 
+                        model_dir=Path("PhagoPred/detectron_segmentation/models/27_05_mac_new/Model"),
+                        eval_mode="metrics")
     evaluator.eval()
-    # evaluator.plot()
+    evaluator.plot()
 
 if __name__ == '__main__':
     main()
