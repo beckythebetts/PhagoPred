@@ -178,7 +178,7 @@ class ClassifierHeadFineTuner(train.MyTrainer):
     def build_optimiser(cls, cfg, model):
         """Freezes eveyhting but classificaiton head."""
         for name, param in model.named_parameters():
-            if "roi_heads.box_predictor" in name:
+            if "roi_heads.box_predictor.cls_score" in name:
                 param.requires_grad = True
 
             else:
@@ -234,7 +234,7 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
     
     cfg = get_cfg()
     cfg.merge_from_file(str(directory / 'Model' / 'config.yaml'))
-    cfg.OUTPUT_DIR = str(directory)
+    cfg.OUTPUT_DIR = str(directory / 'Model')
     cfg.MODEL.WEIGHTS = str(directory / 'model_final.pth')
     cfg.SOLVER.BASE_LR = 0.0001 # Decrease learnign rate for fine tuning (was 0.00025 for main training)
 
@@ -256,6 +256,7 @@ def plot_loss(cfg_dir):
         return lines
     
     experiment_metrics = load_json_arr(cfg_dir / 'metrics.json')
+    plt.clf()
     plt.rcParams["font.family"] = 'serif'
     plt.scatter([x['iteration'] for x in experiment_metrics if 'total_loss' in x], [x['total_loss'] for x in experiment_metrics if 'total_loss' in x], color='navy')
     plt.scatter(
