@@ -8,6 +8,8 @@ navigation:
     children:
     - title: Cell Death Detection
       url: /Segmentation/CellDeathDetection
+    - title: Loss Functions
+      url: /Segmentation/LossFunctions
   - title: 3. Tracking
     url: /Tracking/
   - title: 4. Feature Extraction

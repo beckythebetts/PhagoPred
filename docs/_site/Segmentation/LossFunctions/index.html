@@ -1,0 +1,356 @@
+<!doctype html>
+<!--
+  Minimal Mistakes Jekyll Theme 4.27.1 by Michael Rose
+  Copyright 2013-2025 Michael Rose - mademistakes.com | @mmistakes
+  Free for personal and commercial use under the MIT license
+  https://github.com/mmistakes/minimal-mistakes/blob/master/LICENSE
+-->
+
+<html lang="en" class="no-js">
+  <head>
+    <meta charset="utf-8">
+
+<!-- begin _includes/seo.html --><title>Loss Functions - Phagocytosis Outcome Prediction</title>
+<meta name="description" content="">
+
+
+
+<meta property="og:type" content="website">
+<meta property="og:locale" content="en_US">
+<meta property="og:site_name" content="Phagocytosis Outcome Prediction">
+<meta property="og:title" content="Loss Functions">
+<meta property="og:url" content="http://localhost:4000/PhagoPred/Segmentation/LossFunctions/">
+
+
+
+
+
+
+
+
+
+
+
+
+
+<link rel="canonical" href="http://localhost:4000/PhagoPred/Segmentation/LossFunctions/">
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- end _includes/seo.html -->
+
+
+
+  <link href="/PhagoPred/feed.xml" type="application/atom+xml" rel="alternate" title="Phagocytosis Outcome Prediction Feed">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script>
+  document.documentElement.className = document.documentElement.className.replace(/\bno-js\b/g, '') + ' js ';
+  
+</script>
+
+<!-- For all browsers -->
+<link rel="stylesheet" href="/PhagoPred/assets/css/main.css">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@latest/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@latest/css/all.min.css"></noscript>
+
+
+
+    <!-- start custom head snippets -->
+
+<!-- insert favicons. use https://realfavicongenerator.net/ -->
+
+<!-- end custom head snippets -->
+
+  </head>
+
+  <body class="layout--single" dir="ltr">
+    <nav class="skip-links">
+  <ul>
+    <li><a href="#site-nav" class="screen-reader-shortcut">Skip to primary navigation</a></li>
+    <li><a href="#main" class="screen-reader-shortcut">Skip to content</a></li>
+    <li><a href="#footer" class="screen-reader-shortcut">Skip to footer</a></li>
+  </ul>
+</nav>
+
+    
+
+<div class="masthead">
+  <div class="masthead__inner-wrap">
+    <div class="masthead__menu">
+      <nav id="site-nav" class="greedy-nav">
+        
+        <a class="site-title" href="/PhagoPred/">
+          Phagocytosis Outcome Prediction
+          
+        </a>
+        <ul class="visible-links"></ul>
+        
+        <button class="greedy-nav__toggle hidden" type="button">
+          <span class="visually-hidden">Toggle menu</span>
+          <div class="navicon"></div>
+        </button>
+        <ul class="hidden-links hidden"></ul>
+      </nav>
+    </div>
+  </div>
+</div>
+
+
+    <div class="initial-content">
+      
+
+
+
+
+
+<div id="main" role="main">
+  
+  <div class="sidebar sticky">
+  
+  
+    
+      
+      
+      
+      
+    
+    
+      <nav class="nav__list">
+  
+  <input id="ac-toc" name="accordion-toc" type="checkbox" />
+  <label for="ac-toc">Toggle Menu</label>
+  <ul class="nav__items">
+    
+      
+      
+        <li>
+          
+            <a href="/PhagoPred/"><span class="nav__sub-title">Overview</span></a>
+          
+
+          
+        </li>
+      
+        <li>
+          
+            <a href="/PhagoPred/Imaging/"><span class="nav__sub-title">1. Imaging</span></a>
+          
+
+          
+        </li>
+      
+        <li>
+          
+            <a href="/PhagoPred/Segmentation/"><span class="nav__sub-title">2. Segmentation</span></a>
+          
+
+          
+          <ul>
+            
+              <li><a href="/PhagoPred/Segmentation/CellDeathDetection">Cell Death Detection</a></li>
+            
+              <li><a href="/PhagoPred/Segmentation/LossFunctions">Loss Functions</a></li>
+            
+          </ul>
+          
+        </li>
+      
+        <li>
+          
+            <a href="/PhagoPred/Tracking/"><span class="nav__sub-title">3. Tracking</span></a>
+          
+
+          
+        </li>
+      
+        <li>
+          
+            <a href="/PhagoPred/FeatureExtraction/"><span class="nav__sub-title">4. Feature Extraction</span></a>
+          
+
+          
+        </li>
+      
+        <li>
+          
+            <a href="/PhagoPred/DatasetStructure/"><span class="nav__sub-title">Dataset Structure</span></a>
+          
+
+          
+        </li>
+      
+    
+  </ul>
+</nav>
+
+    
+  
+  </div>
+
+
+
+  <article class="page" itemscope itemtype="https://schema.org/CreativeWork">
+    <meta itemprop="headline" content="Loss Functions">
+    
+    
+    
+
+    <div class="page__inner-wrap">
+      
+        <header>
+          <h1 id="page-title" class="page__title" itemprop="headline">
+            <a href="http://localhost:4000/PhagoPred/Segmentation/LossFunctions/" itemprop="url">Loss Functions
+</a>
+          </h1>
+          
+
+
+        </header>
+      
+
+      <section class="page__content" itemprop="text">
+        
+          <aside class="sidebar__right ">
+            <nav class="toc">
+              <header><h4 class="nav__title"><i class="fas fa-file-alt"></i> On this page</h4></header>
+              <ul class="toc__menu"><li><a href="#classification-loss">Classification Loss</a></li><li><a href="#bounding-box-loss">Bounding Box Loss</a></li><li><a href="#mask-loss">Mask Loss</a><ul><li><a href="#custom-mask-loss">Custom mask loss</a><ul><li><a href="#soft-dice-loss">Soft Dice Loss</a></li><li><a href="#label-smoothing-bce">Label Smoothing BCE</a></li><li><a href="#results">Results</a></li></ul></li></ul></li></ul>
+            </nav>
+          </aside>
+        
+        <p>The Mask R-CNN loss function is a combination of classification loss $L_{cls}$, bounding box loss $L_{box}$, and mask loss $L_{mask}$,
+ \(L = L_{cls}+L_{box}+L_{mask}\)</p>
+
+<h1 id="classification-loss">Classification Loss</h1>
+<ul>
+  <li>$L_{cls}(p, u) = -log p_u$ Log Loss</li>
+  <li>$p$, for each ROI discrete probability distribution over all categories ($p = (p_0, …, p_k)$)</li>
+  <li>$u$ is ground truth class (0 for background and 1, 2, 3 etc otherwise)</li>
+  <li>$p_u$ is $u^{th}$ element of $p$</li>
+</ul>
+
+<h1 id="bounding-box-loss">Bounding Box Loss</h1>
+<ul>
+  <li>$L_{box}(t^u, v) = [u \geq 1] \sum_{i \in {x, y,w, h}} smooth_{L1}(t_i^u-v_i)$</li>
+  <li>$[u \geq 1]$, 0 for background, 1 otherwise (Iverson bracket)</li>
+  <li>$t^u$ is bounding box regression offsets for class $u$ consisitng of ($x, y, w, h$ )</li>
+  <li>$v$ is ground truth bounding box regression target</li>
+</ul>
+
+<h1 id="mask-loss">Mask Loss</h1>
+<ul>
+  <li>$L_{mask}$ BCE calculated only for ground truth category mask (sum is over all pixels)</li>
+  <li>$BCE = -\frac{1}{N} \sum^{N}_{i=1}[y_i log(p_i) + (1-y_i)]$</li>
+</ul>
+
+<h2 id="custom-mask-loss">Custom mask loss</h2>
+<p>Ground truth masks can be noisy so loss funcions which are more robust to noise were tested.</p>
+<h3 id="soft-dice-loss">Soft Dice Loss</h3>
+<p>$L_{dice}(\bf{y}, \bf{\hat{y}}) = 1- \frac{2|\bf{y}\cap\bf{\hat{y}}|}{|\bf{y}|+|\bf{\hat{y}}|}$</p>
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">def</span> <span class="nf">soft_dice_loss</span><span class="p">(</span><span class="n">pred_logits</span><span class="p">,</span> <span class="n">target_masks</span><span class="p">,</span> <span class="n">eps</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">):</span>
+<span class="err"> </span> <span class="err"> </span> <span class="s">"""
+    pred_logits: raw logits (B, H, W)
+    target_masks: binary masks (B, H, W)
+    """</span>
+<span class="err"> </span> <span class="err"> </span> <span class="n">pred_probs</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">sigmoid</span><span class="p">(</span><span class="n">pred_logits</span><span class="p">)</span>
+<span class="err"> </span> <span class="err"> </span> <span class="n">intersection</span> <span class="o">=</span> <span class="p">(</span><span class="n">pred_probs</span> <span class="o">*</span> <span class="n">target_masks</span><span class="p">).</span><span class="nb">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+<span class="err"> </span> <span class="err"> </span> <span class="n">union</span> <span class="o">=</span> <span class="n">pred_probs</span><span class="p">.</span><span class="nb">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span> <span class="o">+</span> <span class="n">target_masks</span><span class="p">.</span><span class="nb">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+<span class="err"> </span> <span class="err"> </span> <span class="n">dice_score</span> <span class="o">=</span> <span class="p">(</span><span class="mf">2.</span> <span class="o">*</span> <span class="n">intersection</span> <span class="o">+</span> <span class="n">eps</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">union</span> <span class="o">+</span> <span class="n">eps</span><span class="p">)</span>
+<span class="err"> </span> <span class="err"> </span> <span class="k">return</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">dice_score</span><span class="p">.</span><span class="n">mean</span><span class="p">()</span>
+</code></pre></div></div>
+<h3 id="label-smoothing-bce">Label Smoothing BCE</h3>
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">def</span> <span class="nf">label_smoothing_bce_loss</span><span class="p">(</span><span class="n">pred_logits</span><span class="p">,</span> <span class="n">target_masks</span><span class="p">,</span> <span class="n">smoothing</span><span class="o">=</span><span class="mf">0.05</span><span class="p">):</span>
+	<span class="s">"""
+	Apply label smoothing to target_masks before BCE.
+	"""</span>
+	<span class="n">target_smoothed</span> <span class="o">=</span> <span class="n">target_masks</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">smoothing</span><span class="p">)</span> <span class="o">+</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">smoothing</span>
+	<span class="k">return</span> <span class="n">F</span><span class="p">.</span><span class="n">binary_cross_entropy_with_logits</span><span class="p">(</span><span class="n">pred_logits</span><span class="p">,</span> <span class="n">target_smoothed</span><span class="p">)</span>
+</code></pre></div></div>
+<p>Reduce confidence in ground truth masks.</p>
+<h3 id="results">Results</h3>
+<p>No significant improvement was observed in the resulting precisoin recall curves.
+<img src="/PhagoPred/images/custom_loss_prec_curve.png" alt="Precsion recall curves for BCE vs custom mask loss" />
+<img src="/PhagoPred/images/custom_loss_training.png" alt="Training Loss curve for cusotm loss" /></p>
+
+        
+      </section>
+
+      <footer class="page__meta">
+        
+        
+
+
+        
+
+      </footer>
+
+      
+
+      
+
+    </div>
+
+    
+  </article>
+
+  
+  
+</div>
+
+      
+    </div>
+
+    
+
+    <div id="footer" class="page__footer">
+      <footer>
+        <!-- start custom footer snippets -->
+
+<!-- end custom footer snippets -->
+        <div class="page__footer-follow">
+  <ul class="social-icons">
+    
+
+    
+
+    
+      <li><a href="/PhagoPred/feed.xml"><i class="fas fa-fw fa-rss-square" aria-hidden="true"></i> Feed</a></li>
+    
+  </ul>
+</div>
+
+<div class="page__footer-copyright">&copy; 2025 <a href="http://localhost:4000">Phagocytosis Outcome Prediction</a>. Powered by <a href="https://jekyllrb.com" rel="nofollow">Jekyll</a> &amp; <a href="https://mademistakes.com/work/jekyll-themes/minimal-mistakes/" rel="nofollow">Minimal Mistakes</a>.</div>
+
+      </footer>
+    </div>
+
+     <script type="text/javascript" async
+   src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.6/MathJax.js?config=TeX-MML-AM_CHTML">
+ </script>
+
+ <script type="text/x-mathjax-config">
+    MathJax.Hub.Config({
+      extensions: ["tex2jax.js"],
+      jax: ["input/TeX", "output/HTML-CSS"],
+      tex2jax: {
+        inlineMath: [ ['$','$'], ["\\(","\\)"] ],
+        displayMath: [ ['$$','$$'], ["\\[","\\]"] ],
+        processEscapes: true
+      },
+      "HTML-CSS": {
+        availableFonts: ["TeX"],
+        scale: 120
+      }
+    });
+ </script>
+  </body>
+</html>

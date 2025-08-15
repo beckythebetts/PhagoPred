@@ -19,7 +19,7 @@
 <meta property="og:locale" content="en_US">
 <meta property="og:site_name" content="Phagocytosis Outcome Prediction">
 <meta property="og:title" content="Cell Death Detection">
-<meta property="og:url" content="http://localhost:4000/Segmentation/CellDeathDetection/">
+<meta property="og:url" content="http://localhost:4000/PhagoPred/Segmentation/CellDeathDetection/">
 
 
 
@@ -33,7 +33,7 @@
 
 
 
-<link rel="canonical" href="http://localhost:4000/Segmentation/CellDeathDetection/">
+<link rel="canonical" href="http://localhost:4000/PhagoPred/Segmentation/CellDeathDetection/">
 
 
 
@@ -50,7 +50,7 @@
 
 
 
-  <link href="/feed.xml" type="application/atom+xml" rel="alternate" title="Phagocytosis Outcome Prediction Feed">
+  <link href="/PhagoPred/feed.xml" type="application/atom+xml" rel="alternate" title="Phagocytosis Outcome Prediction Feed">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <script>
@@ -59,7 +59,7 @@
 </script>
 
 <!-- For all browsers -->
-<link rel="stylesheet" href="/assets/css/main.css">
+<link rel="stylesheet" href="/PhagoPred/assets/css/main.css">
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@latest/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@latest/css/all.min.css"></noscript>
 
@@ -89,7 +89,7 @@
     <div class="masthead__menu">
       <nav id="site-nav" class="greedy-nav">
         
-        <a class="site-title" href="/">
+        <a class="site-title" href="/PhagoPred/">
           Phagocytosis Outcome Prediction
           
         </a>
@@ -135,7 +135,7 @@
       
         <li>
           
-            <a href="/"><span class="nav__sub-title">Overview</span></a>
+            <a href="/PhagoPred/"><span class="nav__sub-title">Overview</span></a>
           
 
           
@@ -143,7 +143,7 @@
       
         <li>
           
-            <a href="/Imaging/"><span class="nav__sub-title">1. Imaging</span></a>
+            <a href="/PhagoPred/Imaging/"><span class="nav__sub-title">1. Imaging</span></a>
           
 
           
@@ -151,13 +151,15 @@
       
         <li>
           
-            <a href="/Segmentation/"><span class="nav__sub-title">2. Segmentation</span></a>
+            <a href="/PhagoPred/Segmentation/"><span class="nav__sub-title">2. Segmentation</span></a>
           
 
           
           <ul>
             
-              <li><a href="/Segmentation/CellDeathDetection">Cell Death Detection</a></li>
+              <li><a href="/PhagoPred/Segmentation/CellDeathDetection">Cell Death Detection</a></li>
+            
+              <li><a href="/PhagoPred/Segmentation/LossFunctions">Loss Functions</a></li>
             
           </ul>
           
@@ -165,7 +167,7 @@
       
         <li>
           
-            <a href="/Tracking/"><span class="nav__sub-title">3. Tracking</span></a>
+            <a href="/PhagoPred/Tracking/"><span class="nav__sub-title">3. Tracking</span></a>
           
 
           
@@ -173,7 +175,7 @@
       
         <li>
           
-            <a href="/FeatureExtraction/"><span class="nav__sub-title">4. Feature Extraction</span></a>
+            <a href="/PhagoPred/FeatureExtraction/"><span class="nav__sub-title">4. Feature Extraction</span></a>
           
 
           
@@ -181,7 +183,7 @@
       
         <li>
           
-            <a href="/DatasetStructure/"><span class="nav__sub-title">Dataset Structure</span></a>
+            <a href="/PhagoPred/DatasetStructure/"><span class="nav__sub-title">Dataset Structure</span></a>
           
 
           
@@ -207,7 +209,7 @@
       
         <header>
           <h1 id="page-title" class="page__title" itemprop="headline">
-            <a href="http://localhost:4000/Segmentation/CellDeathDetection/" itemprop="url">Cell Death Detection
+            <a href="http://localhost:4000/PhagoPred/Segmentation/CellDeathDetection/" itemprop="url">Cell Death Detection
 </a>
           </h1>
           
@@ -226,13 +228,13 @@
           </aside>
         
         <p>In order to identify when a macrophage dies, the Mask R-CNN model can be trained on images containing both alive and dead cells. In general here, the moment of cell death is taken as when the cell looses it’s structure and the membrane can no longer be clearly defined. (Cells often ball up and exhibit membrane blebbing before this occurs.)
-<img src="/images/CellDeathMontage.png" alt="Images of cell death" />
+<img src="/PhagoPred/images/CellDeathMontage.png" alt="Images of cell death" />
 KFold cross validation on the training images (taking one image out for validation per fold), suggested that this performed reaosonably:
-<img src="/images/maskrcnn_performance.png" alt="Preciison recall curves for alive and dead macropahages" />
-These classifications coudl then be used to identify the fram eof cell death. It was assumed there would be some noise in the classifications, so alive cells were asigned a score 1, and dead cells 0. These scores were then smoothed for each cell over time (by taking a 5 frame rolling average) and the cell death was taken as the first frame for which the score dropped below 0.5. However, as shown below, this did not accurately identify cell death. Average error was 56.5 frames.
-<img src="/images/CellDeathPredictionAccuracy.png" alt="Predicted vs true cell death frame" />
+<img src="/PhagoPred/images/maskrcnn_performance.png" alt="Preciison recall curves for alive and dead macropahages" />
+These classifications could then be used to identify the frame of cell death. It was assumed there would be some noise in the classifications, so alive cells were asigned a score 1, and dead cells 0. These scores were then smoothed for each cell over time (by taking a 5 frame rolling average) and the cell death was taken as the first frame for which the score dropped below 0.5 for at least 10 frames. However, as shown below, this did not accurately identify cell death. Average error was 56.5 frames.
+<img src="/PhagoPred/images/CellDeathPredictionAccuracy.png" alt="Predicted vs true cell death frame" />
 The training images contained both alive and dead cells, but to accurately identify the exact frame of death training data of cells just before and just after death would be required. For 50 cells, the exact frame of death was manually identified. Frames [1, 2, 3, 45, 50, 100, 150, 200] before and after this were used to create a new fine tuning dataset. Everything except the classification head of the Mask R-CNN model was frozen, and the previously trained model was fine tuned on this dataset.
-<img src="/images/death_confusion.png" alt="Confusion matrices before and after classification head fine tuning" /></p>
+<img src="/PhagoPred/images/death_confusion.PNG" alt="Confusion matrices before and after classification head fine tuning" /></p>
 
         
       </section>
@@ -276,7 +278,7 @@ The training images contained both alive and dead cells, but to accurately ident
     
 
     
-      <li><a href="/feed.xml"><i class="fas fa-fw fa-rss-square" aria-hidden="true"></i> Feed</a></li>
+      <li><a href="/PhagoPred/feed.xml"><i class="fas fa-fw fa-rss-square" aria-hidden="true"></i> Feed</a></li>
     
   </ul>
 </div>
