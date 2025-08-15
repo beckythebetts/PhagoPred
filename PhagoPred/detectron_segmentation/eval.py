@@ -65,7 +65,7 @@ def evaluator(directory=SETTINGS.MASK_RCNN_MODEL):
 
 
 class Evaluator:
-  def __init__(self, dataset_dir: Path, model_dir: Path, eval_mode: str = "metrics") -> None:
+  def __init__(self, dataset_dir: Path = (SETTINGS.MASK_RCNN_MODEL / 'Fine_Tuning_Data'), model_dir : Path= (SETTINGS.MASK_RCNN_MODEL / 'Model'), eval_mode: str = "metrics") -> None:
     self.dataset_dir = dataset_dir
     self.model_dir = model_dir
     self.eval_dir = self.model_dir.parent / 'Evaluation'
@@ -106,14 +106,19 @@ class Evaluator:
 
         if self.eval_mode == "metrics":
             self._eval_metrics(im_name, im, pred_masks, true_masks)
+            self.plot()
+
         elif self.eval_mode == "confusion":
             true_label = self._mask_to_class(true_masks)
             pred_label = self._mask_to_class(pred_masks)
             y_true.append(true_label)
             y_pred.append(pred_label)
 
-    if self.eval_mode == "confusion":
+    if self.eval_mode == 'metrics':
+            self.plot()
+    elif self.eval_mode == 'confusion':
         self.plot_confusion_matrix(y_true, y_pred)
+       
 
   def _eval_metrics(self, im_name, im, pred_masks, true_masks):
     combi_pred = mask_funcs.combine_masks(list(pred_masks.values()))
@@ -256,11 +261,12 @@ def main():
     # evaluator = Evaluator(dataset_dir=Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac_finetune/Fine_Tuning_Data"), 
     #                       model_dir=Path("PhagoPred/detectron_segmentation/models/27_05_mac/Model"),
     #                       eval_mode="confusion")
-    evaluator = Evaluator(dataset_dir=Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac_new/Training_Data"), 
-                        model_dir=Path("PhagoPred/detectron_segmentation/models/27_05_mac_new/Model"),
-                        eval_mode="metrics")
+    evaluator = Evaluator(
+        # dataset_dir=Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac_new/Fine_Tuning_Data"), 
+        # model_dir=Path("PhagoPred/detectron_segmentation/models/27_05_mac_new/Model"),
+        eval_mode="confusion",
+        )
     evaluator.eval()
-    evaluator.plot()
 
 if __name__ == '__main__':
     main()
