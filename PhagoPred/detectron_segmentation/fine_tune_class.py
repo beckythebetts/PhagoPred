@@ -175,10 +175,11 @@ def get_finetuning_dataset(hdf5_file: Path = SETTINGS.DATASET, model_dir: Path =
 class ClassifierHeadFineTuner(train.MyTrainer):
     """Freeze everything except classification head, and remove all augemtnations in mapper (can't set augmentation sizes to image size like in MyTrainer as image crop sizes vary)."""
     @classmethod
-    def build_optimiser(cls, cfg, model):
+    def build_optimizer(cls, cfg, model):
         """Freezes eveyhting but classificaiton head."""
         for name, param in model.named_parameters():
-            if "roi_heads.box_predictor.cls_score" in name:
+            # if "roi_heads.box_predictor.cls_score" in name:
+            if "roi_heads.box_predictor" in name:
                 param.requires_grad = True
 
             else:
@@ -189,7 +190,7 @@ class ClassifierHeadFineTuner(train.MyTrainer):
             lr=cfg.SOLVER.BASE_LR
         )
     
-    def build_train_loader(cls, cfg):
+    def build_train_loader(self, cfg):
         """Set mapper as no resize mapper,"""
         return build_detection_train_loader(cfg, mapper=no_resize_mapper)
 
@@ -235,11 +236,11 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
     cfg = get_cfg()
     cfg.merge_from_file(str(directory / 'Model' / 'config.yaml'))
     cfg.OUTPUT_DIR = str(directory / 'Model')
-    cfg.MODEL.WEIGHTS = str(directory / 'model_final.pth')
+    cfg.MODEL.WEIGHTS = str(directory / 'Model' / 'model_final.pth')
     cfg.SOLVER.BASE_LR = 0.0001 # Decrease learnign rate for fine tuning (was 0.00025 for main training)
 
     trainer = ClassifierHeadFineTuner(cfg)
-    trainer.resume_or_load = False
+    trainer.resume_or_load(resume=False)
     trainer.train()
 
     
