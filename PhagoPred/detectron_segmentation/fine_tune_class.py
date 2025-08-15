@@ -234,6 +234,7 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
     
     cfg = get_cfg()
     cfg.merge_from_file(str(directory / 'Model' / 'config.yaml'))
+    cfg.OUTPUT_DIR = str(directory)
     cfg.MODEL.WEIGHTS = str(directory / 'model_final.pth')
     cfg.SOLVER.BASE_LR = 0.0001 # Decrease learnign rate for fine tuning (was 0.00025 for main training)
 
