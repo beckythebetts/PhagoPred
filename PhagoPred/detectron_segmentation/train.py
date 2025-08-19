@@ -156,6 +156,7 @@ def soft_dice_loss(pred_logits, target_masks, eps=1e-6):
     dice_score = (2. * intersection + eps) / (union + eps)
     return 1 - dice_score.mean()
 
+
 def label_smoothing_bce_loss(pred_logits, target_masks, smoothing=0.05):
     """
     Apply label smoothing to target_masks before BCE.

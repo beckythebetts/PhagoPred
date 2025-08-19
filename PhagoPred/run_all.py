@@ -15,5 +15,5 @@ if __name__ == '__main__':
     # fitting.main()
     # napari_GUI.main()
     # model.main()
-    # fine_tune_class.main()
-    eval.main()
+    fine_tune_class.main()
+    # eval.main()

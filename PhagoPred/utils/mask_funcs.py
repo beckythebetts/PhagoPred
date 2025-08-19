@@ -55,6 +55,7 @@ def add_coco_annotation(coco_json: dict, image_name: str, mask: np.ndarray, imag
     })
     return 1
 
+
 def coco_to_masks(coco_file: Union[Path,str], im_name: str) -> dict[str, np.ndarray]:
     """
     Get a mask for each class category in coco_file
@@ -77,23 +78,78 @@ def coco_to_masks(coco_file: Union[Path,str], im_name: str) -> dict[str, np.ndar
 
     assert im_id is not None, f"image {im_name} not found"
 
-    masks = {category["id"]: np.zeros(shape=(height, width)) for category in coco_json["categories"]}
+    masks = {category["id"]: np.zeros(shape=(height, width), dtype=np.int32) for category in coco_json["categories"]}
     category_counts = {category["id"]: 0 for category in coco_json['categories']}
 
     for annotation in coco_json['annotations']:
         if annotation['image_id'] == im_id:
-            outline_coords = np.array(np.array(annotation['segmentation']).reshape(-1, 2))
-            outline_coords = outline_coords[:, [1,0]]
-            binary_mask = skimage.draw.polygon2mask((height, width), outline_coords)
-            for category_id, mask in masks.items():
-                if annotation['category_id'] == category_id:
-                    category_counts[category_id] += 1
-                    mask[binary_mask] = category_counts[category_id]
-    
+            category_id = annotation['category_id']
+            segmentation = annotation['segmentation']
+
+            # Handle multiple polygons per annotation
+            # segmentation can be list of polygons or RLE (not handled here)
+            if isinstance(segmentation, list):
+                # segmentation is list of polygons, possibly multiple
+                instance_mask = np.zeros((height, width), dtype=bool)
+                for polygon in segmentation:
+                    # polygon is list of x,y coords flat
+                    outline_coords = np.array(polygon).reshape(-1, 2)
+                    outline_coords = outline_coords[:, [1, 0]]  # swap x,y to y,x for mask indexing
+                    poly_mask = skimage.draw.polygon2mask((height, width), outline_coords)
+                    instance_mask = np.logical_or(instance_mask, poly_mask)
+                
+                category_counts[category_id] += 1
+                masks[category_id][instance_mask] = category_counts[category_id]
+
+            else:
+                # If segmentation is RLE (not handled here), you could add support later
+                raise NotImplementedError("RLE segmentation not supported yet")
+
     id_to_name = {cat['id']: cat['name'] for cat in coco_json['categories']}
     masks = {id_to_name[id]: mask for id, mask in masks.items()}
-
+    
     return masks
+
+# def coco_to_masks(coco_file: Union[Path,str], im_name: str) -> dict[str, np.ndarray]:
+#     """
+#     Get a mask for each class category in coco_file
+#     Parameters:
+#         coco_file: coco file containing annnotations for im_name
+#         im_name: image for which to get mask/s
+#     Returns: 
+#         dictionary {category name: np array mask}
+#     """
+#     with open(coco_file, 'r') as f:
+#         coco_json = json.load(f)
+
+#     im_id = None
+#     for image in coco_json['images']:
+#         if image['file_name'] == im_name.name:
+#             im_id = image['id']
+#             height = image['height']
+#             width = image['width']
+#             break
+
+#     assert im_id is not None, f"image {im_name} not found"
+
+#     masks = {category["id"]: np.zeros(shape=(height, width)) for category in coco_json["categories"]}
+#     category_counts = {category["id"]: 0 for category in coco_json['categories']}
+
+#     for annotation in coco_json['annotations']:
+#         if annotation['image_id'] == im_id:
+            
+#             outline_coords = np.array(np.array(annotation['segmentation']).reshape(-1, 2))
+#             outline_coords = outline_coords[:, [1,0]]
+#             binary_mask = skimage.draw.polygon2mask((height, width), outline_coords)
+#             for category_id, mask in masks.items():
+#                 if annotation['category_id'] == category_id:
+#                     category_counts[category_id] += 1
+#                     mask[binary_mask] = category_counts[category_id]
+    
+#     id_to_name = {cat['id']: cat['name'] for cat in coco_json['categories']}
+#     masks = {id_to_name[id]: mask for id, mask in masks.items()}
+
+#     return masks
 
 def boolean_combine_masks(masks: list[np.ndarray]) -> np.ndarray:
     """
@@ -596,6 +652,23 @@ def calculate_mean_diameter(training_folder):
 def erode_mask(mask: np.array, erosion_val: int=10) -> np.array:
     struct = np.ones((2*erosion_val+1, 2*erosion_val+1))
     return binary_erosion(mask, structure=struct)
+
+def clean_coco_json(coco_json_path: Path, image_dir: Path) -> None:
+    with open(coco_json_path, 'r') as f:
+        coco = json.load(f)
+    
+    existing_ims = set([im.name for im in image_dir.iterdir()])
+    valid_ims = [img for img in coco['images'] if img['file_name'] in existing_ims]
+    valid_im_ids = set(img['id'] for img in valid_ims)
+    valid_annotations = [ann for ann in coco['annotations'] if ann['image_id'] in valid_im_ids]
+
+    coco['images'] = valid_ims
+    coco['annotations'] = valid_annotations
+
+    with open(coco_json_path, 'w') as f:
+        json.dump(coco, f)
+
+
 
 if __name__ == '__main__':
     # get_centre(np.zeros((5, 5)))

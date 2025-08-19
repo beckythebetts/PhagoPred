@@ -69,8 +69,7 @@ class NoResizePredictor:
             height, width = original_image.shape[:2]
             image = original_image
             image = torch.as_tensor(image.astype("float32").transpose(2, 0, 1))
-            image.to(self.cfg.MODEL.DEVICE)
-
+            image = image.to(self.cfg.MODEL.DEVICE)
             inputs = {"image": image, "height": height, "width": width}
 
             predictions = self.model([inputs])[0]

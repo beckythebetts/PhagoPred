@@ -25,7 +25,7 @@ import pandas as pd
 import cellpose
 from tqdm import tqdm
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-
+from skimage.measure import label
 
 from PhagoPred import SETTINGS
 from PhagoPred.detectron_segmentation import segment
@@ -109,8 +109,10 @@ class Evaluator:
             self.plot()
 
         elif self.eval_mode == "confusion":
-            true_label = self._mask_to_class(true_masks)
-            pred_label = self._mask_to_class(pred_masks)
+            # true_label = self._mask_to_class(true_masks)
+            # pred_label = self._mask_to_class(pred_masks)
+            true_label = self._largest_mask_to_class(true_masks)
+            pred_label = self._largest_mask_to_class(pred_masks)
             y_true.append(true_label)
             y_pred.append(pred_label)
 
@@ -152,6 +154,29 @@ class Evaluator:
         if np.any(mask_dict[category]):
             return idx
     return len(self.categories) - 1  # No object
+  
+  def _largest_mask_to_class(self, mask_dict: dict) -> int:
+        """
+        Given a dict of category -> binary mask, finds the largest connected predicted segment
+        across all categories and returns its class index.
+        If no predicted segment, returns "No Cell" class index (last index).
+        """
+        largest_area = 0
+        largest_class_idx = len(self.categories) - 1  # Default to "No Cell"
+
+        for idx, category in enumerate(self.categories[:-1]):  # exclude "No Cell"
+            binary_mask = mask_dict[category]
+            if np.any(binary_mask):
+                # Label connected components in this category mask
+                labeled_mask = label(binary_mask)
+                # Get areas of all connected components
+                for region_label in range(1, labeled_mask.max() + 1):
+                    region_area = np.sum(labeled_mask == region_label)
+                    if region_area > largest_area:
+                        largest_area = region_area
+                        largest_class_idx = idx
+
+        return largest_class_idx
 
   def plot_confusion_matrix(self, y_true: list[int], y_pred: list[int]):
     plt.rcParams["font.family"] = 'serif'
@@ -177,7 +202,7 @@ class Evaluator:
     # Optional: add text note
     # ax.text(no_cell_idx, -1.5, '← No Cell Predictions', ha='center', va='center', fontsize=8, color='gray')
     plt.setp(ax.get_yticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-    plt.title("Confusion Matrix - Original Model")
+    plt.title("Confusion Matrix - No Fine Tuning")
     plt.tight_layout()
     plt.savefig(self.model_dir.parent / 'confusion_matrix.png')
     plt.close()
