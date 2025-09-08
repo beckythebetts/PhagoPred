@@ -1,0 +1,52 @@
+<ul>
+  <li>Train network: <code class="language-plaintext highlighter-rouge">PhagoPred.detectron_segmentation.train</code></li>
+  <li>Segment dataset: <code class="language-plaintext highlighter-rouge">PhagoPred.detectron_segmentation.segment</code></li>
+  <li>Evaluate performance: <code class="language-plaintext highlighter-rouge">PhagoPred.detectron_segmentation.kfold</code></li>
+</ul>
+
+<h1 id="mask-r-cnn">Mask R-CNN</h1>
+
+<p>Each image is segmented with a <a href="https://arxiv.org/abs/1703.06870">Mask R-CNN</a> network, implemented using <a href="https://github.com/facebookresearch/detectron2">Detectron2</a> and pretrained on 2.5 million instances of objects (the <a href="https://cocodataset.org/#home">COCO Datset</a>). This allows the network to achieve reasonable segmentation performance when fine tuned on ~500 instances of macrophages.</p>
+
+<h2 id="architecture-overview">Architecture Overview</h2>
+
+<p><img src="images/maskrcnn.png" alt="Mask R-CNN Architecture" /></p>
+
+<ol>
+  <li><strong>Backbone</strong> – A pretrained convolutional neural network classifier, which is truncated before outputting a class.  This results in a  feature map of the total image.</li>
+  <li><strong>Region Proposal Network</strong> – From the feature map, a set of rectangular region proposals are extracted, each with an associated probability of containing an object. The network is again convolutional, with a regressor branch to adjust the proposed region shape, and classifier to give the object probability.</li>
+  <li><strong>ROI Align</strong> – The region proposals are used to extract sections of the feature map. ROI Align provides an improvement over previous methods for this step by interpolating the feature map to allow the exact proposed region to be extracted.</li>
+  <li><strong>Output</strong> – Each extracted feature map is then passed through dense layers to give a class and bounding box prediction. Convolutional layers output a segmentation mask.</li>
+</ol>
+
+<h2 id="performance">Performance</h2>
+
+<p><span style="color: green">Ground Truth</span> | <span style="color: red">Prediction </span> | <span style="color: yellow">Overlap of ground truth and prediction</span></p>
+
+<p><img src="images/maskrcnn_exampleseg.png" alt="Example of Mask R-CNN performance" /></p>
+
+<p>In order to quantitatively evaluate the performance, precision, recall and F1-score are calculated.</p>
+
+\[Precision = \frac{Correct \: Predictions}{Total \: Predictions} = \frac{TP}{TP+FP}\]
+
+\[Recall = \frac{Correct \: Predictions}{Total \: Ground \: Truth} = \frac{TP}{TP + FN}\]
+
+\[F1 = \frac{2 \times Precision \times Recall}{Precision + Recall}\]
+
+<p>These require each instance to be classed as a True Positive, False Positive or False Negative. Therefore, they are calucated over a range of Intersection over Union (IOU) thresholds.</p>
+
+\[IoU = \frac{Area \: of \: Intersection}{Area \: of \: Union}\]
+
+<p><img src="images/maskrcnn_performance.png" alt="Mask R-CNN Performance" /></p>
+
+<p>These metrics can also be calculated for subsets of the cells, allowing the effect of individual cell features on segmentation peroformance to be determined. Below are precision-recall curves for three subsets of cells with different ranges of perimeter over area. Those with the highest perimeter over area (so less circular shape) performed significantly worse, suggesting more training data containing these sorts of cells should be included.</p>
+
+<p><img src="images/perim_over_area_performance.png" alt="Perimeter over area" /></p>
+
+<hr />
+
+<ul>
+  <li><a href="../Segmentation/CellDeathDetection/">Cell Death Detection</a></li>
+</ul>
+
+<p><strong>Next: <a href="../Tracking/">Tracking</a></strong></p>

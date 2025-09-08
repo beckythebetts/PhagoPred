@@ -1,0 +1,53 @@
+<p>The Mask R-CNN loss function is a combination of classification loss $L_{cls}$, bounding box loss $L_{box}$, and mask loss $L_{mask}$,
+ \(L = L_{cls}+L_{box}+L_{mask}\)</p>
+
+<h1 id="classification-loss">Classification Loss</h1>
+<ul>
+  <li>$L_{cls}(p, u) = -log p_u$ Log Loss</li>
+  <li>$p$, for each ROI discrete probability distribution over all categories ($p = (p_0, …, p_k)$)</li>
+  <li>$u$ is ground truth class (0 for background and 1, 2, 3 etc otherwise)</li>
+  <li>$p_u$ is $u^{th}$ element of $p$</li>
+</ul>
+
+<h1 id="bounding-box-loss">Bounding Box Loss</h1>
+<ul>
+  <li>$L_{box}(t^u, v) = [u \geq 1] \sum_{i \in {x, y,w, h}} smooth_{L1}(t_i^u-v_i)$</li>
+  <li>$[u \geq 1]$, 0 for background, 1 otherwise (Iverson bracket)</li>
+  <li>$t^u$ is bounding box regression offsets for class $u$ consisitng of ($x, y, w, h$ )</li>
+  <li>$v$ is ground truth bounding box regression target</li>
+</ul>
+
+<h1 id="mask-loss">Mask Loss</h1>
+<ul>
+  <li>$L_{mask}$ BCE calculated only for ground truth category mask (sum is over all pixels)</li>
+  <li>$BCE = -\frac{1}{N} \sum^{N}_{i=1}[y_i log(p_i) + (1-y_i)]$</li>
+</ul>
+
+<h2 id="custom-mask-loss">Custom mask loss</h2>
+<p>Ground truth masks can be noisy so loss funcions which are more robust to noise were tested.</p>
+<h3 id="soft-dice-loss">Soft Dice Loss</h3>
+<p>$L_{dice}(\bf{y}, \bf{\hat{y}}) = 1- \frac{2|\bf{y}\cap\bf{\hat{y}}|}{|\bf{y}|+|\bf{\hat{y}}|}$</p>
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">def</span> <span class="nf">soft_dice_loss</span><span class="p">(</span><span class="n">pred_logits</span><span class="p">,</span> <span class="n">target_masks</span><span class="p">,</span> <span class="n">eps</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">):</span>
+<span class="err"> </span> <span class="err"> </span> <span class="s">"""
+    pred_logits: raw logits (B, H, W)
+    target_masks: binary masks (B, H, W)
+    """</span>
+<span class="err"> </span> <span class="err"> </span> <span class="n">pred_probs</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">sigmoid</span><span class="p">(</span><span class="n">pred_logits</span><span class="p">)</span>
+<span class="err"> </span> <span class="err"> </span> <span class="n">intersection</span> <span class="o">=</span> <span class="p">(</span><span class="n">pred_probs</span> <span class="o">*</span> <span class="n">target_masks</span><span class="p">).</span><span class="nb">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+<span class="err"> </span> <span class="err"> </span> <span class="n">union</span> <span class="o">=</span> <span class="n">pred_probs</span><span class="p">.</span><span class="nb">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span> <span class="o">+</span> <span class="n">target_masks</span><span class="p">.</span><span class="nb">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+<span class="err"> </span> <span class="err"> </span> <span class="n">dice_score</span> <span class="o">=</span> <span class="p">(</span><span class="mf">2.</span> <span class="o">*</span> <span class="n">intersection</span> <span class="o">+</span> <span class="n">eps</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">union</span> <span class="o">+</span> <span class="n">eps</span><span class="p">)</span>
+<span class="err"> </span> <span class="err"> </span> <span class="k">return</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">dice_score</span><span class="p">.</span><span class="n">mean</span><span class="p">()</span>
+</code></pre></div></div>
+<h3 id="label-smoothing-bce">Label Smoothing BCE</h3>
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">def</span> <span class="nf">label_smoothing_bce_loss</span><span class="p">(</span><span class="n">pred_logits</span><span class="p">,</span> <span class="n">target_masks</span><span class="p">,</span> <span class="n">smoothing</span><span class="o">=</span><span class="mf">0.05</span><span class="p">):</span>
+	<span class="s">"""
+	Apply label smoothing to target_masks before BCE.
+	"""</span>
+	<span class="n">target_smoothed</span> <span class="o">=</span> <span class="n">target_masks</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">smoothing</span><span class="p">)</span> <span class="o">+</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">smoothing</span>
+	<span class="k">return</span> <span class="n">F</span><span class="p">.</span><span class="n">binary_cross_entropy_with_logits</span><span class="p">(</span><span class="n">pred_logits</span><span class="p">,</span> <span class="n">target_smoothed</span><span class="p">)</span>
+</code></pre></div></div>
+<p>Reduce confidence in ground truth masks.</p>
+<h3 id="results">Results</h3>
+<p>No significant improvement was observed in the resulting precisoin recall curves.
+<img src="/images/custom_loss_prec_curve.png" alt="Precsion recall curves for BCE vs custom mask loss" />
+<img src="/images/custom_loss_training.png" alt="Training Loss curve for cusotm loss" /></p>
