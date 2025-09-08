@@ -51,6 +51,6 @@ def label_smoothing_bce_loss(pred_logits, target_masks, smoothing=0.05):
 ```
 Reduce confidence in ground truth masks.
 ### Results
-No significant improvement was observed in the resulting precisoin recall curves.
+No significant improvement was observed in the resulting precision recall curves.
 ![Precsion recall curves for BCE vs custom mask loss]({{ site.baseurl  }}/images/custom_loss_prec_curve.png)
 ![Training Loss curve for cusotm loss]({{ site.baseurl  }}/images/custom_loss_training.png)
