@@ -27,6 +27,7 @@ import datetime
 from detectron2.data import transforms as T
 from detectron2.data import build_detection_train_loader
 from detectron2.modeling.roi_heads.mask_head import MaskRCNNConvUpsampleHead
+from detectron2.modeling.roi_heads import StandardROIHeads
 from detectron2.structures import Instances
 from detectron2.modeling.roi_heads.mask_head import ROI_MASK_HEAD_REGISTRY
 
@@ -54,6 +55,7 @@ from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers
 from detectron2.structures import Boxes, Instances, pairwise_iou
 from detectron2.modeling.box_regression import Box2BoxTransform
 from detectron2.layers import cat
+from detectron2.modeling.roi_heads import ROI_HEADS_REGISTRY
 
 from PhagoPred.utils import tools, mask_funcs
 from PhagoPred.detectron_segmentation import train
@@ -67,11 +69,17 @@ def get_finetuning_dataset(
         hdf5_file: Path = SETTINGS.DATASET, 
         model_dir: Path = SETTINGS.MASK_RCNN_MODEL,
         include_no_cell: bool = True,
+        include_wrong_segs: bool = True,
+        padding: int = 20,
         ):
     """For each cell in death_frames, take frames before and after cell death. 
     Crop images/masks to minimum required to cover cell.
     Split into train/val folders based on Cell Idx (~80:20).
+    If include wrong_segs, take images labelled as 'Wrong Segmentation' in death_frames.txt and include as no cell (random frames).
     If include_no_cell is true, take random crops of areas with no cell.
+    Args
+    ----
+        Padding: Number of pixels around each cell outline to 
     """
     base_dir = Path(model_dir) / 'Fine_Tuning_Data'
     tools.remake_dir(base_dir)
@@ -99,23 +107,43 @@ def get_finetuning_dataset(
         }
 
     # Load death_frames
-    death_frames = pd.read_csv(model_dir / 'death_frames.txt', sep='|', skiprows=1, engine='python', dtype=str)
-    death_frames = death_frames.iloc[:, 1:3]
-    death_frames.columns = ['Cell Idx', 'Death Frame']
-    death_frames = death_frames.map(lambda x: x.strip() if isinstance(x, str) else x)
-    death_frames = death_frames[death_frames['Death Frame'].str.isnumeric()].astype(int)
+    death_frames_df = pd.read_csv(model_dir / 'death_frames.txt', sep='|', skiprows=1, engine='python', dtype=str)
+    death_frames_df = death_frames_df.iloc[:, 1:3]
+    death_frames_df.columns = ['Cell Idx', 'Death Frame']
+    death_frames_df = death_frames_df.map(lambda x: x.strip() if isinstance(x, str) else x)
+
+    death_frames = death_frames_df[death_frames_df['Death Frame'].str.isnumeric()].astype(int)
+    wrong_segmentations = death_frames_df[death_frames_df['Death Frame'] == 'Wrong Segmentation']
+    wrong_segmentations['Cell Idx'] = wrong_segmentations['Cell Idx'].astype(int)
 
     # Split cell ids into train/val
     cell_ids = death_frames['Cell Idx'].unique()
     val_count = max(1, int(len(cell_ids) * 0.2))
     val_cell_ids = set(random.sample(list(cell_ids), val_count))
 
-    frames_sample = np.array([1, 2, 3, 4, 5, 50, 100, 150, 200])
-
+    alive_frames_sample = np.array([1, 2, 3, 4, 5, 50, 100, 150, 200])
+    dead_frames_sample = np.array([1, 2, 3, 4,5 , 6, 7, 8, 9])
     annotation_id = 1
     image_id = 1
 
-    pbar = tqdm(total=len(death_frames) * len(frames_sample) * 3)
+    pbar = tqdm(total=(len(death_frames) * (len(alive_frames_sample) + len(dead_frames_sample)) * 1.5) + len(wrong_segmentations))
+
+    def crop_image_and_mask(image: np.ndarray, mask:np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        x_coords, y_coords = np.nonzero(mask)
+        crop_coords = [np.min(x_coords) - padding,
+                        np.max(x_coords) + 1 + padding,
+                        np.min(y_coords) - padding,
+                        np.max(y_coords) + 1 + padding,
+                        ]
+        crop_coords = np.clip(crop_coords, 0, mask.shape[0]) # Assuming square images
+        x_crop = slice(crop_coords[0], crop_coords[1])
+        y_crop = slice(crop_coords[2], crop_coords[3])
+
+        crop_shapes[split].append((x_crop.stop - x_crop.start, y_crop.stop - y_crop.start))
+
+        image = image[x_crop, y_crop]
+        mask = mask[x_crop, y_crop]
+        return image, mask
 
     with h5py.File(hdf5_file, 'r') as f:
         for cell_idx, death_frame in zip(death_frames['Cell Idx'], death_frames['Death Frame']):
@@ -126,7 +154,7 @@ def get_finetuning_dataset(
             num_frames, image_h, image_w = f['Images']['Phase'].shape
 
             # Alive frames
-            for alive_frame in death_frame - frames_sample:
+            for alive_frame in death_frame - alive_frames_sample:
                 if alive_frame < 0:
                     pbar.update(1)
                     continue
@@ -135,28 +163,22 @@ def get_finetuning_dataset(
                 if not mask.any():
                     pbar.update(1)
                     continue
-
-                x_coords, y_coords = np.nonzero(mask)
-                x_crop = slice(np.min(x_coords), np.max(x_coords) + 1)
-                y_crop = slice(np.min(y_coords), np.max(y_coords) + 1)
-
-                crop_shapes[split].append((x_crop.stop - x_crop.start, y_crop.stop - y_crop.start))
-
                 image = f['Images']['Phase'][alive_frame]
-                image = image[x_crop, y_crop]
-                mask = mask[x_crop, y_crop]
 
+                image, mask = crop_image_and_mask(image, mask)
+                
                 image_file = f'{cell_idx}_{alive_frame}_alive.jpeg'
-                plt.imsave(images_dir / image_file, image / 255, cmap='gray')
+                
 
-                mask_funcs.add_coco_annotation(coco_json, image_file, mask, image_id, annotation_id, 1)
-
+                seg_found = mask_funcs.add_coco_annotation(coco_json, image_file, mask, image_id, annotation_id, 1)
+                if seg_found == 1:
+                    plt.imsave(images_dir / image_file, image / 255, cmap='gray')
                 annotation_id += 1
                 image_id += 1
                 pbar.update(1)
 
             # Dead frames
-            for dead_frame in death_frame + frames_sample:
+            for dead_frame in death_frame + dead_frames_sample:
                 if dead_frame > SETTINGS.NUM_FRAMES:
                     pbar.update(1)
                     continue
@@ -166,14 +188,9 @@ def get_finetuning_dataset(
                     pbar.update(1)
                     continue
 
-                x_coords, y_coords = np.nonzero(mask)
-                x_crop = slice(np.min(x_coords), np.max(x_coords) + 1)
-                y_crop = slice(np.min(y_coords), np.max(y_coords) + 1)
+                image = f['Images']['Phase'][dead_frame]
 
-                crop_shapes[split].append((x_crop.stop - x_crop.start, y_crop.stop - y_crop.start))
-
-                image = f['Images']['Phase'][dead_frame][x_crop, y_crop]
-                mask = mask[x_crop, y_crop]
+                image, mask = crop_image_and_mask(image, mask)
 
                 image_file = f'{cell_idx}_{dead_frame}_dead.jpeg'
                 seg_found = mask_funcs.add_coco_annotation(coco_json, image_file, mask, image_id, annotation_id, 2)
@@ -182,6 +199,37 @@ def get_finetuning_dataset(
                     plt.imsave(images_dir / image_file, image / 255, cmap='gray')
 
                 annotation_id += 1
+                image_id += 1
+                pbar.update(1)
+
+        if include_wrong_segs:
+            cell_idxs = wrong_segmentations['Cell Idx']
+            val_count = max(1, int(len(cell_ids) * 0.2))
+            val_cell_ids = set(random.sample(list(cell_ids), val_count))
+
+            max_attempts = 100
+
+            for cell_idx in cell_idxs:
+                split = 'validate' if cell_idx in val_cell_ids else 'train'
+                coco_json = dirs[split]['coco_json']
+                images_dir = dirs[split]['images']
+
+                frames = np.nonzero(~np.isnan(f['Cells']['Phase']['Area'][:, cell_idx]))[0]
+                frame = np.random.choice(frames)
+
+                mask = f['Segmentations']['Phase'][frame] == cell_idx
+                image = f['Images']['Phase'][frame]
+
+                image, _ = crop_image_and_mask(image, mask)
+                image_file = image_file = f'wrong_seg_{cell_idx}.jpeg'
+
+                coco_json["images"].append({
+                    "id": image_id,
+                    "width": image.shape[1],
+                    "height": image.shape[0],
+                    "file_name": image_file,
+                    })
+                plt.imsave(images_dir / image_file, image / 255, cmap='gray')
                 image_id += 1
                 pbar.update(1)
 
@@ -300,21 +348,21 @@ class ClassifierHeadFineTuner(train.MyTrainer):
         ))
         return hooks
     
-    # @classmethod
-    # def build_optimizer(cls, cfg, model):
-    #     """Freezes eveyhting but classificaiton head."""
-    #     for name, param in model.named_parameters():
-    #         if "roi_heads.box_predictor.cls_score" in name:
-    #         # if "roi_heads.box_predictor" in name:
-    #             param.requires_grad = True
+    @classmethod
+    def build_optimizer(cls, cfg, model):
+        """Freezes eveyhting but classificaiton head."""
+        for name, param in model.named_parameters():
+            if "roi_heads.box_predictor" in name:
+            # if "roi_heads.box_predictor" in name:
+                param.requires_grad = True
 
-    #         else:
-    #             param.requires_grad = False
+            else:
+                param.requires_grad = False
         
-    #     return torch.optim.Adam(
-    #         [p for p in model.parameters() if p.requires_grad],
-    #         lr=cfg.SOLVER.BASE_LR
-    #     )
+        return torch.optim.Adam(
+            [p for p in model.parameters() if p.requires_grad],
+            lr=cfg.SOLVER.BASE_LR
+        )
     
     # @classmethod
     # def build_model(cls, cfg):
@@ -325,6 +373,36 @@ class ClassifierHeadFineTuner(train.MyTrainer):
     def build_train_loader(self, cfg):
         """Set mapper as no resize mapper,"""
         return build_detection_train_loader(cfg, mapper=no_resize_mapper)
+    def build_test_loader(self, cfg, dataset_name=None):
+        if dataset_name is None:
+            dataset_name = cfg.DATASETS.TEST[0]
+        return build_detection_test_loader(cfg, dataset_name, mapper=no_resize_mapper)
+
+
+class CustomWeightedROIHeads(StandardROIHeads):
+    def __init__(self, cfg, input_shape):
+        super().__init__(cfg, input_shape)
+        # Set your weights here
+        self.cls_loss_weight = 1.0
+        self.bbox_loss_weight = 0.1
+        self.mask_loss_weight = 0.1
+
+    def losses(self, predictions, proposals):
+        """
+        Override to compute weighted loss.
+        """
+        # This calls the original StandardROIHeads losses method
+        losses = super().losses(predictions, proposals)
+
+        # Modify weights here
+        if "loss_cls" in losses:
+            losses["loss_cls"] *= self.cls_loss_weight
+        if "loss_box_reg" in losses:
+            losses["loss_box_reg"] *= self.bbox_loss_weight
+        if "loss_mask" in losses:
+            losses["loss_mask"] *= self.mask_loss_weight
+
+        return losses
 
 def no_resize_mapper(dataset_dict):
     """
@@ -335,15 +413,15 @@ def no_resize_mapper(dataset_dict):
 
     # Load image from file
     image = utils.read_image(dataset_dict["file_name"], format="BGR")
-    # image = torch.as_tensor(image.transpose(2, 0, 1).copy())
-    # dataset_dict["image"] = image
 
-    # print(f"\nImage shape: {image.shape}\n")
-
-    augs = T.AugmentationList([T.RandomFlip(prob=0.5, horizontal=True, vertical=False),
-                               T.RandomFlip(prob=0.5, horizontal=False, vertical=True)])
+    augs = T.AugmentationList([
+                            T.RandomFlip(prob=0.5, horizontal=True, vertical=False),
+                            T.RandomFlip(prob=0.5, horizontal=False, vertical=True),
+                               ])
     
     aug_input = T.AugInput(image)
+
+    h, w = aug_input.image.shape[:2]
 
     transforms = augs(aug_input)
     image = torch.as_tensor(aug_input.image.transpose(2, 0, 1).copy())
@@ -352,43 +430,44 @@ def no_resize_mapper(dataset_dict):
     # Load annotations (if training)
     if "annotations" in dataset_dict:
         annos = [
-            utils.transform_instance_annotations(obj, transforms, image.shape[:2])
+            utils.transform_instance_annotations(obj, transforms, (h, w))
             for obj in dataset_dict.pop("annotations")
         ]
-        dataset_dict["instances"] = utils.annotations_to_instances(annos, image.shape[:2])
+        dataset_dict["instances"] = utils.annotations_to_instances(annos, (h, w))
+    # instances = utils.annotations_to_instances(annos, (h, w))
+    # i = 0
+    # import matplotlib.patches as patches
+    # for box in instances.gt_boxes.tensor:
+    #     # if not (box[2] > box[0] and box[3] > box[1]):
+    #     fig, ax = plt.subplots(1)
+    #     ax.imshow(image.permute(1, 2, 0).cpu().numpy())
 
+    #     # Create a rectangle patch
+    #     rect = patches.Rectangle(
+    #         (box[0], box[1]),
+    #         box[2] - box[0],
+    #         box[3] - box[1],
+    #         linewidth=2,
+    #         edgecolor='r',
+    #         facecolor='none'
+    #     )
+    #     ax.add_patch(rect)
+
+    #     # plt.title("Image with Bad Bounding Box")
+    #     # plt.show()
+    #     # print(image.shape)
+    #     plt.savefig(Path('temp') / f'badbbox_{i}.png')
+    #     i+= 1
+    #     # assert box[2] > box[0] and box[3] > box[1], f"Bad box found: {box}"
     return dataset_dict
-
-# def replace_box_predictor_with_custom(model, cfg):
-#     box2box_transform = model.roi_heads.box_predictor.box2box_transform
-
-#     model.roi_heads.box_predictor = ClassOnlyFastRCNNOutputLayers(
-#         model.roi_heads.box_head.output_shape,
-#         box2box_transform=box2box_transform,
-#         num_classes=cfg.MODEL.ROI_HEADS.NUM_CLASSES,
-#         cls_agnostic_bbox_reg=cfg.MODEL.ROI_BOX_HEAD.CLS_AGNOSTIC_BBOX_REG,
-#         test_score_thresh=0.0,  # optionally set or leave default
-#         test_nms_thresh=0.5,
-#         test_topk_per_image=100,
-#         smooth_l1_beta=0.0,
-#         box_reg_loss_type="smooth_l1",
-#     )
-#     device = next(model.parameters()).device
-#     model.roi_heads.box_predictor.to(device)
-#     print("Box head output shape:", model.roi_heads.box_head.output_shape)
-#     print("Box predictor device:", next(model.roi_heads.box_predictor.parameters()).device)
-#     print("Box head parameters device:", next(model.roi_heads.box_head.parameters()).device)
-
-#     pass
-
 
 
 def fine_tune(directory=SETTINGS.MASK_RCNN_MODEL):
     """
     Fine tune the Mask R-CNNmodel on cropped cell images just before and after cell death. Freeze everything expect for classification head.
     """
-    # if "DiceLSMaskHead" not in ROI_MASK_HEAD_REGISTRY._obj_map:
-    #     ROI_MASK_HEAD_REGISTRY.register(DiceLSMaskHead)
+    if "CustomWeightedROIHeads" not in ROI_MASK_HEAD_REGISTRY._obj_map:
+        ROI_HEADS_REGISTRY.register(CustomWeightedROIHeads)
     setup_logger()
 
     metrics_path = Path(directory / 'Model' / 'metrics.json')
@@ -398,7 +477,7 @@ def fine_tune(directory=SETTINGS.MASK_RCNN_MODEL):
     dataset_dir = directory / 'Fine_Tuning_Data'
     config_directory = directory / 'Model'
     register_coco_instances("my_dataset_train", {}, str(dataset_dir / 'train' / 'labels.json'), str(dataset_dir / 'train' / 'images'))
-    register_coco_instances("my_dataset_val", {},str(dataset_dir / 'validate' / 'labels.json'), str(dataset_dir / 'validate' / 'images'))
+    register_coco_instances("my_dataset_val", {},str(dataset_dir / 'train' / 'labels.json'), str(dataset_dir / 'train' / 'images'))
 
     train_metadata = MetadataCatalog.get("my_dataset_train")
     
@@ -406,14 +485,13 @@ def fine_tune(directory=SETTINGS.MASK_RCNN_MODEL):
     cfg.merge_from_file(str(directory / 'Model' / 'config.yaml'))
     cfg.OUTPUT_DIR = str(directory / 'Model')
     cfg.MODEL.WEIGHTS = str(directory / 'Model' / 'model_final.pth')
-    cfg.SOLVER.BASE_LR = 1e-5 # Decrease learnign rate for fine tuning (was 0.00025 for main training)
+    cfg.SOLVER.BASE_LR = 1e-4 # Decrease learnign rate for fine tuning (was 0.00025 for main training)
     cfg.SOLVER.IMS_PER_BATCH = 1 # Avoids issues with collating images of different sizes
+    cfg.MODEL.ROI_HEADS.NAME = "CustomWeightedROIHeads"
 
     trainer = ClassifierHeadFineTuner(cfg)
     trainer.resume_or_load(resume=False)
     trainer.train()
-
-    
 
     plot_loss(config_directory)
     

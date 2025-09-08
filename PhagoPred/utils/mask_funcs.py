@@ -16,6 +16,7 @@ import cv2
 # import mahotas
 from scipy.ndimage import binary_erosion
 
+
 from PhagoPred import SETTINGS
 from PhagoPred.utils import tools
 
@@ -34,6 +35,8 @@ def add_coco_annotation(coco_json: dict, image_name: str, mask: np.ndarray, imag
 
     # Compute bbox and area from the binary mask
     x, y, w, h = cv2.boundingRect(mask.astype(np.uint8))
+    if w < 3 or h < 3:
+        return 0
     bbox = [float(x), float(y), float(w), float(h)]
     area = float(np.sum(mask))
 

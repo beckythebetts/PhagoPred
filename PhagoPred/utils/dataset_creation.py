@@ -77,6 +77,9 @@ def hdf5_from_tiffs(tiff_files_path: Path, hdf5_file: Path,
     if os.path.exists(hdf5_file):
         os.remove(hdf5_file)
 
+    print(f'Tiff files found? {tiff_files_path.exists()}')
+    print(f'HDF5 path found? {hdf5_file.parent.exists()}')
+
     def natural_sort_key(s):
         import re
         return [int(text) if text.isdigit() else text.lower()
@@ -202,12 +205,13 @@ def keep_only_group(hdf5_path, keep_groups=['Images']):
     print(f"Only '{keep_groups}' group retained.")
 
 if __name__ == '__main__':
-    keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_500_seg.h5")
-    # hdf5_from_tiffs(Path("D:/27_05_1"), 
-    #                 Path('D:/27_05.h5'),
-    #                 phase_channel=1,
-    #                 epi_channel=2,
-    #                 )
+    # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_500_seg.h5")
+    hdf5_from_tiffs(Path("~/thor_server/13_06_1").expanduser(), 
+                    # Path('D:/27_05.h5'),
+                    Path("~/PhagoPred/PhagoPred/Datasets/13_06.h5").expanduser(),
+                    phase_channel=1,
+                    epi_channel=2,
+                    )
     # make_short_test_copy(Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05.h5"),
     #                      Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05_500.h5"),
     #                      start_frame=3000,
