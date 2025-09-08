@@ -1,0 +1,28 @@
+<p><code class="language-plaintext highlighter-rouge">PhagoPred.tracking.tracker.Tracker()</code>
+Match cells between each frame to form tracks.</p>
+<h1 id="find-tracklets">Find Tracklets</h1>
+<p>Between each pair of consecutive frames, pair cells in order to minimise the total distance between all cell pairs.
+For each time step:</p>
+<ol>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">Tracker().get_cell_info()</code>
+ Find centroids (average x, and y coordinates) of each cell, see <a href="/FeatureExtraction/">Feature Extraction</a>.</p>
+  </li>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">Tracker().frame_to_frame_matching()</code>
+ Create ‘cost matrix’ of distances between each possible cell pairing. Apply Jonker-Volgenant algorithm to match cells in order to minimise sum of distances between all cells. (Discard matching if distance is below <code class="language-plaintext highlighter-rouge">SETTINGS.MAXIMUM_DISTANCE_THRESHOLD</code>)</p>
+  </li>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">Tracker().apply_lut()</code>
+ Update the stored segmentation masks and cell datasets to assign matched cells the same cell index, see <a href="/DatasetStructure/">Dataset Structure</a>.</p>
+  </li>
+</ol>
+
+<h1 id="join-tracklets">Join Tracklets</h1>
+<p><code class="language-plaintext highlighter-rouge">Tracker().join_tracklets()</code></p>
+
+<p>Cell segmentations may be missing/wrong in some frames, so the tracklets formed above are matched up again using the Jonker-Volgenant algorithm to minimise distances. The distances between the start and end of each tracklet are used to form the cost matrix, provided that the <code class="language-plaintext highlighter-rouge">start_frame</code> - <code class="language-plaintext highlighter-rouge">end_frame</code> is between 0 and <code class="language-plaintext highlighter-rouge">SETTINGS.FRAME_MEMORY</code>.</p>
+
+<p>Again the segmentation masks and cell datsets are updated using <code class="language-plaintext highlighter-rouge">Tracker().apply_lut()</code>.</p>
+
+<p>Next: <a href="../FeatureExtraction/">Feature Extraction</a></p>

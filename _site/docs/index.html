@@ -1,0 +1,18 @@
+<p>Phagocytosis, the engulfment and elimination of particles by cells, is a fundamental component of the innate immune response. Bacteria have evolved various strategies to survive and escape phagocytosis, some of which are well understood, while others remain unidentified.</p>
+
+<p><strong>Aim</strong>: Identify patterns in phagocyte morphology and dynamics that indicate successful or failed phagocytosis.</p>
+
+<p>Using time-lapse, two-channel microscopy, we image macrophages (professional phagocytes) and Staphylococcus aureus bacteria to capture phagocytosis events.
+Segmentation via Mask R-CNN provides cell outlines.
+Tracking is performed with a linear sum assignment problem approach.
+We extract multivariate time series features describing the morphology, movement, and interactions of cells involved in each phagocytosis event. 
+To classify phagocytosis events as successful or failed, we plan to evaluate several machine learning approaches, balancing accuracy and interpretability.</p>
+
+<p><img src="images/phago_example.png" alt="Phagocytosis" /></p>
+
+<ol>
+  <li><a href="Imaging/">Imaging</a></li>
+  <li><a href="Segmentation/">Segmentation</a></li>
+  <li><a href="Tracking/">Tracking</a></li>
+  <li><a href="FeatureExtraction/">Feature Extraction</a></li>
+</ol>
