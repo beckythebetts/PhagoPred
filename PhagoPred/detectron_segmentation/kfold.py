@@ -16,10 +16,12 @@ import matplotlib.pyplot as plt
 import cellpose.metrics
 import pandas as pd
 from PIL import Image
+import seaborn as sns
 
 from PhagoPred.detectron_segmentation.train import train
-from PhagoPred.detectron_segmentation.eval import evaluator
+from PhagoPred.detectron_segmentation.eval import evaluator, Evaluator
 from PhagoPred.detectron_segmentation.segment import seg_image
+from PhagoPred.detectron_segmentation import fine_tune_class
 from PhagoPred import SETTINGS
 from PhagoPred.utils import tools, mask_funcs
 
@@ -51,14 +53,19 @@ def make_coco_subset(orig_coco, ims):
 
 class KFold:
 
-    def __init__(self, directory):
+    def __init__(self, directory, fine_tune: bool = False):
         self.directory = directory
         self.ims = sorted([im for im in (self.directory / 'images').iterdir()])
         self.coco = directory / 'labels.json'
+        self.fine_tune = fine_tune
         with open(self.coco, 'r') as f:
             self.categories = [category['name'] for category in json.load(f)["categories"]]
 
     def split_all(self, num_val=1):
+        if self.fine_tune:
+            self.split_for_fine_tune()
+            return 0
+        
         for i in range(int(len(self.ims)/num_val)):
             training_data = self.directory / f'model_{i}' / 'Training_Data'
 
@@ -82,19 +89,74 @@ class KFold:
                 elif im in train_ims:
                     shutil.copy(im, training_data / 'train' / 'images' / im.name)
 
+    def split_for_fine_tune(self, num_splits: int = 3):
+        """
+        Split data into num_splits folds for fine tuning. Each split has a different set of validation images, and images containing the same cells are kept together.
+        80:20 train val split.
+        """
+        all_cell_idxs = []
+        for im in self.ims:
+            if 'alive' in im.name or 'dead' in im.name:
+                all_cell_idxs.append(im.name.split('_')[0])
+        all_cell_idxs = set(all_cell_idxs)
+        validation_cell_idxs = np.random.choice(list(all_cell_idxs), size=int(num_splits*0.2*len(all_cell_idxs)), replace=False)
+        for i in range(num_splits):
+            split_data_dir = self.directory / f'split_{i}' / 'Fine_Tuning_Data'
 
+            tools.remake_dir(split_data_dir / 'train' / 'images')
+            tools.remake_dir(split_data_dir / 'validate' / 'images')
+
+            split_val_idxs = validation_cell_idxs[i::num_splits]
+            for im in self.ims:
+                if 'alive' in im.name or 'dead' in im.name:
+                    cell_idx = im.name.split('_')[0]
+                    if cell_idx in split_val_idxs:
+                        shutil.copy(im, split_data_dir / 'validate' / 'images' / im.name)
+                    else:
+                        shutil.copy(im, split_data_dir / 'train' / 'images' / im.name)
+                else:
+                    val = np.random.rand() < 0.2
+                    if val:
+                        shutil.copy(im, split_data_dir / 'validate' / 'images' / im.name)   
+                    else:
+                        shutil.copy(im, split_data_dir / 'train' / 'images' / im.name)
+
+            # Collect names s all training and validation images
+            train_ims = [im for im in (split_data_dir / 'train' / 'images').iterdir()]
+            val_ims = [im for im in (split_data_dir / 'validate' / 'images').iterdir()]
+
+            # Make COCO subsets and save
+            train_coco = make_coco_subset(self.coco, train_ims)
+            with open(split_data_dir / 'train' / 'labels.json', 'w') as f:
+                json.dump(train_coco, f)
+            val_coco = make_coco_subset(self.coco, val_ims)
+            with open(split_data_dir / 'validate' / 'labels.json', 'w') as f:
+                json.dump(val_coco, f)
+            
+            # Copy original model into each split directory
+            shutil.copytree(self.directory.parent / 'Model', split_data_dir.parent / 'Model')
+
+
+
+    
         # for names in [('00', '01'), ('01', '10'), ('10', '11'), ('11', '10')]:
         #     self.make_split(names)
 
     def train(self):
-        for file in self.directory.glob('*model_*'):
-            # if 'model_3' not in file.name:
-            train(directory=file)
-            unregister_coco_instances('my_dataset_train')
-            unregister_coco_instances('my_dataset_val')
-            evaluator(directory=file)
-            unregister_coco_instances('my_dataset_train')
-            unregister_coco_instances('my_dataset_val')
+        if self.fine_tune:
+            for file in self.directory.glob('split_*'):
+                fine_tune_class.fine_tune(directory=file)
+                unregister_coco_instances('my_dataset_train')
+                unregister_coco_instances('my_dataset_val')
+        else:
+            for file in self.directory.glob('*model_*'):
+                # if 'model_3' not in file.name:
+                train(directory=file)
+                unregister_coco_instances('my_dataset_train')
+                unregister_coco_instances('my_dataset_val')
+                evaluator(directory=file)
+                unregister_coco_instances('my_dataset_train')
+                unregister_coco_instances('my_dataset_val')
 
     def eval(self):
         for file in self.directory.glob('*model_*'):
@@ -130,7 +192,41 @@ class KFold:
                     results = self.prec_recall_curve(true_masks[category], pred_masks[category])
                     results.to_csv(str(file / f'{im_name.stem}_{category}_results.txt'), sep='\t')
                 
-                
+    def fine_tune_eval(self):
+        cms = []
+        accs = []
+        for file in self.directory.glob('split_*'):
+            evaluator = Evaluator(file / 'Fine_Tuning_Data', file / 'Model', eval_mode="confusion")
+            cm, acc = evaluator.eval()
+            cms.append(cm)
+            accs.append(acc)
+
+        cms = np.array(cms)
+        mean_cm = np.mean(cms, axis=0)
+        std_cm = np.std(cms, axis=0)
+
+        # Create annotation strings like "0.85±0.02"
+        annotations = np.empty_like(mean_cm, dtype=object)
+        for i in range(mean_cm.shape[0]):
+            for j in range(mean_cm.shape[1]):
+                annotations[i, j] = f"{mean_cm[i, j]:.2f}±{std_cm[i, j]:.2f}"
+
+        labels = ['Macrophage', 'Dead Macrophage', 'No Cell']
+        # Plot
+        plt.figure(figsize=(6, 6))
+        sns.heatmap(mean_cm, annot=annotations, fmt='', cmap='Blues', xticklabels=labels, yticklabels=labels, cbar=False)
+        plt.xlabel("Predicted label")
+        plt.ylabel("True label")
+        plt.title("Fine Tuned")
+        no_cell_idx = 2
+        plt.axhline(no_cell_idx, color='gray', linestyle='--', linewidth=2)
+        plt.axvline(no_cell_idx, color='gray', linestyle='--', linewidth=2)
+        # plt.axhline(no_cell_idx + 1, color='gray', linestyle='--', linewidth=2)
+        # plt.axvline(no_cell_idx + 1, color='gray', linestyle='--', linewidth=2)
+        plt.tight_layout()
+        plt.savefig(self.directory / "confusion_matrix_mean_std.png")
+
+        print(f'Accuracy: {np.mean(accs):.4f} ± {np.std(accs):.4f}')
     
     def prec_recall_curve(self, true_mask: np.ndarray, 
                           pred_mask: np.ndarray, 
@@ -497,8 +593,10 @@ def main():
     faulthandler.enable()
     # merge_jsons(Path('PhagoPred')/ 'detectron_segmentation' / 'models' / 'toumai_01_05' / 'labels')
 
-    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_low_mask_loss')
+    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_fine_tune_freezerpn', fine_tune=True)
     # my_kfold.split_all()
+    my_kfold.train()
+    my_kfold.fine_tune_eval()
     # my_kfold.train()
     # my_kfold.eval()
     # my_kfold.plot()
@@ -507,11 +605,11 @@ def main():
     # my_kfold.eval_feature(feature_func=mask_funcs.get_perimeters_over_areas, feature_name='perim_over_area', n_groups=3)
     # my_kfold.features_scatter_plot(feature_func=mask_funcs.get_perimeters_over_areas, feature_name='perimeter/area')
 
-    plot_comparison(
-        {'$L_{mask}$ x 0.3': KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_low_mask_loss'),
-         '$L_{mask}$ x 1.0': KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_custom_loss')},
-         save_as=Path('temp') / 'comparison.png',
-         category='all')
+    # plot_comparison(
+    #     {'$L_{mask}$ x 0.3': KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_low_mask_loss'),
+    #      '$L_{mask}$ x 1.0': KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_custom_loss')},
+    #      save_as=Path('temp') / 'comparison.png',
+    #      category='all')
 
     # my_kfold.plot_av_loss(output_path=Path('temp') / 'av_loss_plot.png')
 

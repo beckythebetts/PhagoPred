@@ -7,13 +7,13 @@ from PhagoPred.feature_extraction.morphology import fitting
 from PhagoPred.prediction.decision_tree import model
 
 if __name__ == '__main__':
-    # segment.main()
-    # trackpy.main()
+    segment.main()
+    trackpy.main()
     # save.main()
-    # extract_features.main()
+    extract_features.main()
     # plots.main()
     # fitting.main()
     # napari_GUI.main()
     # model.main()
-    fine_tune_class.main()
+    # fine_tune_class.main()
     # eval.main()

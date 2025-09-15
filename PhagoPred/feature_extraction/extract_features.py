@@ -336,13 +336,13 @@ def main():
     feature_extractor = FeaturesExtraction()
 
     phase_features = [
-        # features.Fluorescence(),
+        features.Fluorescence(),
         # features.MorphologyModes(), 
-        # features.Speed(),
-        # features.DensityPhase(),
-        # features.Displacement(),
-        # features.Perimeter(),
-        # features.Circularity(),
+        features.Speed(),
+        features.DensityPhase(),
+        features.Displacement(),
+        features.Perimeter(),
+        features.Circularity(),
         # features.GaborScale(),
         features.CellDeath()
         ]

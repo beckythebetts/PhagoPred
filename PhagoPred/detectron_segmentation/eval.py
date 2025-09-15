@@ -119,7 +119,8 @@ class Evaluator:
     if self.eval_mode == 'metrics':
             self.plot()
     elif self.eval_mode == 'confusion':
-        self.plot_confusion_matrix(y_true, y_pred)
+        cm, acc = self.plot_confusion_matrix(y_true, y_pred)
+        return cm, acc
        
 
   def _eval_metrics(self, im_name, im, pred_masks, true_masks):
@@ -202,12 +203,15 @@ class Evaluator:
     # Optional: add text note
     # ax.text(no_cell_idx, -1.5, '← No Cell Predictions', ha='center', va='center', fontsize=8, color='gray')
     plt.setp(ax.get_yticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-    plt.title("Confusion Matrix - No Fine Tuning")
+    plt.title("Confusion Matrix")
     plt.tight_layout()
     plt.savefig(self.model_dir.parent / 'confusion_matrix.png')
     plt.close()
 
-    print(f'Accuracy: {accuracy:4f}')
+    normalised_cm = confusion_matrix(y_true, y_pred, labels=labels, normalize='true')
+    print(normalised_cm)
+    print(accuracy)
+    return normalised_cm, accuracy
 
       
   def prec_recall_curve(self, true_mask: np.ndarray, 
@@ -287,9 +291,9 @@ def main():
     #                       model_dir=Path("PhagoPred/detectron_segmentation/models/27_05_mac/Model"),
     #                       eval_mode="confusion")
     evaluator = Evaluator(
-        # dataset_dir=Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac_new/Fine_Tuning_Data"), 
-        # model_dir=Path("PhagoPred/detectron_segmentation/models/27_05_mac_new/Model"),
-        eval_mode="confusion",
+        dataset_dir=Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac/kfold_fine_tune/orig_training_data"), 
+        model_dir=Path("PhagoPred/detectron_segmentation/models/27_05_mac/kfold_fine_tune/split_1/Model"),
+        eval_mode="metrics",
         )
     evaluator.eval()
 
