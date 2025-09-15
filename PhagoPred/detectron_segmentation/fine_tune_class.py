@@ -350,14 +350,18 @@ class ClassifierHeadFineTuner(train.MyTrainer):
     
     @classmethod
     def build_optimizer(cls, cfg, model):
-        """Freezes eveyhting but classificaiton head."""
+        """Freezes everything but classification head."""
         for name, param in model.named_parameters():
-            if "roi_heads.box_predictor" in name:
-            # if "roi_heads.box_predictor" in name:
-                param.requires_grad = True
-
-            else:
+            if 'proposal_generator' in name:
                 param.requires_grad = False
+            else:
+                param.requires_grad = True
+            # if "roi_heads.box_predictor.cls_score" in name:
+            # # if "roi_heads.box_predictor" in name:
+            #     param.requires_grad = True
+
+            # else:
+            #     param.requires_grad = False
         
         return torch.optim.Adam(
             [p for p in model.parameters() if p.requires_grad],
@@ -369,16 +373,22 @@ class ClassifierHeadFineTuner(train.MyTrainer):
     #     model = super().build_model(cfg)
     #     replace_box_predictor_with_custom(model, cfg)
     #     return model
-    
-    def build_train_loader(self, cfg):
+    @classmethod
+    def build_train_loader(cls, cfg):
         """Set mapper as no resize mapper,"""
         return build_detection_train_loader(cfg, mapper=no_resize_mapper)
-    def build_test_loader(self, cfg, dataset_name=None):
-        if dataset_name is None:
-            dataset_name = cfg.DATASETS.TEST[0]
-        return build_detection_test_loader(cfg, dataset_name, mapper=no_resize_mapper)
+    
+    @classmethod
+    def build_test_loader(cls, cfg, dataset_name):
+        # if dataset_name is None:
+        #     dataset_name = cfg.DATASETS.TEST[0]
+        return build_detection_test_loader(cfg, 
+                                           dataset_name,
+                                        #    mapper=DatasetMapper(cfg, is_train=False),
+                                           mapper=no_resize_mapper,
+                                           )
 
-
+# NOT USED IGNORE
 class CustomWeightedROIHeads(StandardROIHeads):
     def __init__(self, cfg, input_shape):
         super().__init__(cfg, input_shape)
@@ -414,10 +424,11 @@ def no_resize_mapper(dataset_dict):
     # Load image from file
     image = utils.read_image(dataset_dict["file_name"], format="BGR")
 
-    augs = T.AugmentationList([
-                            T.RandomFlip(prob=0.5, horizontal=True, vertical=False),
-                            T.RandomFlip(prob=0.5, horizontal=False, vertical=True),
-                               ])
+    # augs = T.AugmentationList([
+    #                         T.RandomFlip(prob=0.5, horizontal=True, vertical=False),
+    #                         T.RandomFlip(prob=0.5, horizontal=False, vertical=True),
+    #                            ])
+    augs = T.AugmentationList([])
     
     aug_input = T.AugInput(image)
 
@@ -434,31 +445,7 @@ def no_resize_mapper(dataset_dict):
             for obj in dataset_dict.pop("annotations")
         ]
         dataset_dict["instances"] = utils.annotations_to_instances(annos, (h, w))
-    # instances = utils.annotations_to_instances(annos, (h, w))
-    # i = 0
-    # import matplotlib.patches as patches
-    # for box in instances.gt_boxes.tensor:
-    #     # if not (box[2] > box[0] and box[3] > box[1]):
-    #     fig, ax = plt.subplots(1)
-    #     ax.imshow(image.permute(1, 2, 0).cpu().numpy())
 
-    #     # Create a rectangle patch
-    #     rect = patches.Rectangle(
-    #         (box[0], box[1]),
-    #         box[2] - box[0],
-    #         box[3] - box[1],
-    #         linewidth=2,
-    #         edgecolor='r',
-    #         facecolor='none'
-    #     )
-    #     ax.add_patch(rect)
-
-    #     # plt.title("Image with Bad Bounding Box")
-    #     # plt.show()
-    #     # print(image.shape)
-    #     plt.savefig(Path('temp') / f'badbbox_{i}.png')
-    #     i+= 1
-    #     # assert box[2] > box[0] and box[3] > box[1], f"Bad box found: {box}"
     return dataset_dict
 
 
@@ -466,8 +453,8 @@ def fine_tune(directory=SETTINGS.MASK_RCNN_MODEL):
     """
     Fine tune the Mask R-CNNmodel on cropped cell images just before and after cell death. Freeze everything expect for classification head.
     """
-    if "CustomWeightedROIHeads" not in ROI_MASK_HEAD_REGISTRY._obj_map:
-        ROI_HEADS_REGISTRY.register(CustomWeightedROIHeads)
+    # if "CustomWeightedROIHeads" not in ROI_HEADS_REGISTRY._obj_map:
+    #     ROI_HEADS_REGISTRY.register(CustomWeightedROIHeads)
     setup_logger()
 
     metrics_path = Path(directory / 'Model' / 'metrics.json')
@@ -477,7 +464,7 @@ def fine_tune(directory=SETTINGS.MASK_RCNN_MODEL):
     dataset_dir = directory / 'Fine_Tuning_Data'
     config_directory = directory / 'Model'
     register_coco_instances("my_dataset_train", {}, str(dataset_dir / 'train' / 'labels.json'), str(dataset_dir / 'train' / 'images'))
-    register_coco_instances("my_dataset_val", {},str(dataset_dir / 'train' / 'labels.json'), str(dataset_dir / 'train' / 'images'))
+    register_coco_instances("my_dataset_val", {},str(dataset_dir / 'validate' / 'labels.json'), str(dataset_dir / 'validate' / 'images'))
 
     train_metadata = MetadataCatalog.get("my_dataset_train")
     
@@ -485,9 +472,15 @@ def fine_tune(directory=SETTINGS.MASK_RCNN_MODEL):
     cfg.merge_from_file(str(directory / 'Model' / 'config.yaml'))
     cfg.OUTPUT_DIR = str(directory / 'Model')
     cfg.MODEL.WEIGHTS = str(directory / 'Model' / 'model_final.pth')
-    cfg.SOLVER.BASE_LR = 1e-4 # Decrease learnign rate for fine tuning (was 0.00025 for main training)
-    cfg.SOLVER.IMS_PER_BATCH = 1 # Avoids issues with collating images of different sizes
-    cfg.MODEL.ROI_HEADS.NAME = "CustomWeightedROIHeads"
+    cfg.SOLVER.BASE_LR = 1e-5 # Decrease learnign rate for fine tuning (was 0.00025 for main training)
+    cfg.SOLVER.IMS_PER_BATCH = 8 # Avoids issues with collating images of different sizes
+    cfg.SOLVER.MAX_ITER = 500
+    cfg.TEST.EVAL_PERIOD = 100
+    cfg.DATASETS.TRAIN = ("my_dataset_train",)
+    cfg.DATASETS.TEST = ("my_dataset_val",)
+    # cfg.MODEL.ROI_HEADS.NAME = "CustomWeightedROIHeads"
+    cfg.MODEL.ROI_HEADS.NAME = 'StandardROIHeads'
+    cfg.DATALOADER.FILTER_EMPTY_ANNOTATIONS = False
 
     trainer = ClassifierHeadFineTuner(cfg)
     trainer.resume_or_load(resume=False)

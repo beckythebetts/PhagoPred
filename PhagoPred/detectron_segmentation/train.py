@@ -55,7 +55,9 @@ class LossEvalHook(HookBase):
         self._model = model
         self._period = eval_period
         self._data_loader = data_loader
-
+    def before_train(self):
+        # Run loss eval once before training starts
+        self._do_loss_eval()
     def _do_loss_eval(self):
         # Copying inference_on_dataset from evaluator.py
         total = len(self._data_loader)
@@ -232,7 +234,7 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
     cfg.DATASETS.TRAIN = ("my_dataset_train",)
     cfg.DATASETS.TEST = ("my_dataset_val",)
     cfg.DATALOADER.NUM_WORKERS = 1
-    cfg.SOLVER.IMS_PER_BATCH = 4  
+    cfg.SOLVER.IMS_PER_BATCH = 2  
     cfg.SOLVER.BASE_LR = 0.00025 
     cfg.SOLVER.MAX_ITER = 1000 
     cfg.SOLVER.STEPS = []  
