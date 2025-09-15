@@ -66,10 +66,12 @@ import random
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def get_finetuning_dataset(
-        hdf5_file: Path = SETTINGS.DATASET, 
+        hdf5_files: list = [SETTINGS.DATASET], 
+        death_frames_files: list = [SETTINGS.MASK_RCNN_MODEL / 'death_frames.txt'],
         model_dir: Path = SETTINGS.MASK_RCNN_MODEL,
         include_no_cell: bool = True,
         include_wrong_segs: bool = True,
+        include_merged: bool = True,
         padding: int = 20,
         ):
     """For each cell in death_frames, take frames before and after cell death. 
@@ -84,172 +86,234 @@ def get_finetuning_dataset(
     base_dir = Path(model_dir) / 'Fine_Tuning_Data'
     tools.remake_dir(base_dir)
 
-    crop_shapes = {'train': [], 'validate': []}
+    # crop_shapes = {'train': [], 'validate': []}
+    crop_shapes = []
 
     # Define directories for train and val
-    dirs = {}
-    for split in ['train', 'validate']:
-        split_dir = base_dir / split
-        images_dir = split_dir / 'images'
-        tools.remake_dir(images_dir)
-        dirs[split] = {
-            'root': split_dir,
-            'images': images_dir,
-            'json_file': split_dir / 'labels.json',
-            'coco_json': {
-                "images": [],
-                "annotations": [],
-                "categories": [
-                    {"id": 1, "name": "Macrophage"},
-                    {"id": 2, "name": "Dead Macrophage"},
-                ]
-            }
+    # dirs = {}
+    # for split in ['train', 'validate']:
+    #     split_dir = base_dir / split
+
+    images_dir = base_dir / 'images'
+    tools.remake_dir(images_dir)
+    settings = {
+        'root': base_dir,
+        'images': images_dir,
+        'json_file': base_dir / 'labels.json',
+        'coco_json': {
+            "images": [],
+            "annotations": [],
+            "categories": [
+                {"id": 1, "name": "Macrophage"},
+                {"id": 2, "name": "Dead Macrophage"},
+            ]
         }
+    }
 
-    # Load death_frames
-    death_frames_df = pd.read_csv(model_dir / 'death_frames.txt', sep='|', skiprows=1, engine='python', dtype=str)
-    death_frames_df = death_frames_df.iloc[:, 1:3]
-    death_frames_df.columns = ['Cell Idx', 'Death Frame']
-    death_frames_df = death_frames_df.map(lambda x: x.strip() if isinstance(x, str) else x)
+    crop_shapes = []
 
-    death_frames = death_frames_df[death_frames_df['Death Frame'].str.isnumeric()].astype(int)
-    wrong_segmentations = death_frames_df[death_frames_df['Death Frame'] == 'Wrong Segmentation']
-    wrong_segmentations['Cell Idx'] = wrong_segmentations['Cell Idx'].astype(int)
-
-    # Split cell ids into train/val
-    cell_ids = death_frames['Cell Idx'].unique()
-    val_count = max(1, int(len(cell_ids) * 0.2))
-    val_cell_ids = set(random.sample(list(cell_ids), val_count))
-
-    alive_frames_sample = np.array([1, 2, 3, 4, 5, 50, 100, 150, 200])
-    dead_frames_sample = np.array([1, 2, 3, 4,5 , 6, 7, 8, 9])
     annotation_id = 1
     image_id = 1
 
-    pbar = tqdm(total=(len(death_frames) * (len(alive_frames_sample) + len(dead_frames_sample)) * 1.5) + len(wrong_segmentations))
+    def crop_image_and_mask(image: np.ndarray, mask:np.ndarray, padding: int = padding) -> tuple[np.ndarray, np.ndarray]:
+            x_coords, y_coords = np.nonzero(mask)
+            crop_coords = [np.min(x_coords) - padding,
+                            np.max(x_coords) + 1 + padding,
+                            np.min(y_coords) - padding,
+                            np.max(y_coords) + 1 + padding,
+                            ]
+            crop_coords = np.clip(crop_coords, 0, mask.shape[0]) # Assuming square images
+            x_crop = slice(crop_coords[0], crop_coords[1])
+            y_crop = slice(crop_coords[2], crop_coords[3])
 
-    def crop_image_and_mask(image: np.ndarray, mask:np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        x_coords, y_coords = np.nonzero(mask)
-        crop_coords = [np.min(x_coords) - padding,
-                        np.max(x_coords) + 1 + padding,
-                        np.min(y_coords) - padding,
-                        np.max(y_coords) + 1 + padding,
-                        ]
-        crop_coords = np.clip(crop_coords, 0, mask.shape[0]) # Assuming square images
-        x_crop = slice(crop_coords[0], crop_coords[1])
-        y_crop = slice(crop_coords[2], crop_coords[3])
+            crop_shapes.append((x_crop.stop - x_crop.start, y_crop.stop - y_crop.start))
 
-        crop_shapes[split].append((x_crop.stop - x_crop.start, y_crop.stop - y_crop.start))
+            image = image[x_crop, y_crop]
+            mask = mask[x_crop, y_crop]
+            return image, mask
 
-        image = image[x_crop, y_crop]
-        mask = mask[x_crop, y_crop]
-        return image, mask
+    for death_frames_file, hdf5_file in zip(death_frames_files, hdf5_files):
 
-    with h5py.File(hdf5_file, 'r') as f:
-        for cell_idx, death_frame in zip(death_frames['Cell Idx'], death_frames['Death Frame']):
-            split = 'validate' if cell_idx in val_cell_ids else 'train'
-            coco_json = dirs[split]['coco_json']
-            images_dir = dirs[split]['images']
+        # Load death_frames
+        death_frames_df = pd.read_csv(death_frames_file, sep='|', skiprows=1, engine='python', dtype=str)
+        death_frames_df = death_frames_df.iloc[:, 1:3]
+        death_frames_df.columns = ['Cell Idx', 'Death Frame']
+        death_frames_df = death_frames_df.map(lambda x: x.strip() if isinstance(x, str) else x)
 
+        death_frames = death_frames_df[death_frames_df['Death Frame'].str.isnumeric()].astype(int)
+        wrong_segmentations = death_frames_df[death_frames_df['Death Frame'] == 'Wrong Segmentation']
+        wrong_segmentations['Cell Idx'] = wrong_segmentations['Cell Idx'].astype(int)
+
+        merged_cells = death_frames_df['Merged' in death_frames_df['Death Frame']]
+        merged_cells['Cell Idx'] = merged_cells['Cell Idx'].astype(int)
+
+        cell_ids = death_frames['Cell Idx'].unique()
+        # val_count = max(1, int(len(cell_ids) * 0.2))
+        # val_cell_ids = set(random.sample(list(cell_ids), val_count))
+
+        # alive_frames_sample = np.array([1, 10, 100])
+        # dead_frames_sample = np.array([1, 2, 3, 4,5 , 6, 7, 8, 9])
+       
+
+        pbar = tqdm(total=(len(death_frames))*1.5)
+
+        coco_json = settings['coco_json']
+        images_dir = settings['images']
+
+        with h5py.File(hdf5_file, 'r') as f:
+            
             num_frames, image_h, image_w = f['Images']['Phase'].shape
-
-            # Alive frames
-            for alive_frame in death_frame - alive_frames_sample:
-                if alive_frame < 0:
-                    pbar.update(1)
-                    continue
-
-                mask = f['Segmentations']['Phase'][alive_frame][:] == cell_idx
-                if not mask.any():
-                    pbar.update(1)
-                    continue
-                image = f['Images']['Phase'][alive_frame]
-
-                image, mask = crop_image_and_mask(image, mask)
+            for cell_idx, death_frame in zip(death_frames['Cell Idx'], death_frames['Death Frame']):
+                # split = 'validate' if cell_idx in val_cell_ids else 'train'
                 
-                image_file = f'{cell_idx}_{alive_frame}_alive.jpeg'
-                
+                alive_frames_sample = np.random.choice(np.arange(1, 10), 2, replace=False)
+                alive_frames_sample = np.append(alive_frames_sample, 100)
 
-                seg_found = mask_funcs.add_coco_annotation(coco_json, image_file, mask, image_id, annotation_id, 1)
-                if seg_found == 1:
+                # Alive frames
+                for alive_frame in death_frame - alive_frames_sample:
+                    if alive_frame < 0:
+                        # pbar.update(1)
+                        continue
+
+                    mask = f['Segmentations']['Phase'][alive_frame][:] == cell_idx
+
+                    if not mask.any():
+                        # find closest mask before and after and add to get crop coordinates
+
+                        prev_frames = np.clip(alive_frame - np.arange(20), a_min=0, a_max=num_frames - 1)
+                        prev_masks = f['Segmentations']['Phase'][prev_frames][:]  # fancy indexing on hdf5 5 files possible?
+                        valid_prev_frames = prev_frames[np.any(prev_masks == cell_idx, axis=(1, 2))]
+
+                        next_frames = np.clip(alive_frame + np.arange(1, 21), a_min=0, a_max=num_frames - 1)
+                        next_masks = f['Segmentations']['Phase'][next_frames][:]    
+                        valid_next_frames = next_frames[np.any(next_masks == cell_idx, axis=(1, 2))]
+
+                        if len(valid_prev_frames) == 0 and len(valid_next_frames) == 0:
+                            continue
+
+                        prev_mask = f['Segmentations']['Phase'][np.max(valid_prev_frames)][:]
+                        next_mask = f['Segmentations']['Phase'][np.min(valid_next_frames)][:]
+
+                        crop_mask = np.logical_and(prev_mask == cell_idx, next_mask == cell_idx)
+                    else:
+                        crop_mask = mask
+
+                    image = f['Images']['Phase'][alive_frame]
+
+                    image, mask = crop_image_and_mask(image, crop_mask)
+
+                    image_file = f'{cell_idx}_{alive_frame}_alive.jpeg'
+                    
+                    seg_found = mask_funcs.add_coco_annotation(coco_json, image_file, mask, image_id, annotation_id, 1)
+
+                    if seg_found == 1:
+                        image_file = f'{cell_idx}_{alive_frame}_alive.jpeg'
+                        annotation_id += 1
+                    else:
+                        image_file = f'ANNOTATE_{cell_idx}_{alive_frame}_alive.jpeg'
+
                     plt.imsave(images_dir / image_file, image / 255, cmap='gray')
-                annotation_id += 1
-                image_id += 1
-                pbar.update(1)
+                    
+                    image_id += 1
+ 
 
-            # Dead frames
-            for dead_frame in death_frame + dead_frames_sample:
-                if dead_frame > SETTINGS.NUM_FRAMES:
-                    pbar.update(1)
-                    continue
+                # Dead frames
+                dead_frames_sample = np.random.choice(np.arange(1, 10), 2, replace=False)
+                for dead_frame in death_frame + dead_frames_sample:
 
-                mask = f['Segmentations']['Phase'][dead_frame][:] == cell_idx
-                if not mask.any():
-                    pbar.update(1)
-                    continue
+                    if dead_frame > num_frames - 1:
+                        continue
 
-                image = f['Images']['Phase'][dead_frame]
+                    mask = f['Segmentations']['Phase'][dead_frame][:] == cell_idx
 
-                image, mask = crop_image_and_mask(image, mask)
+                    if not mask.any():
+                        # find closest mask before and after and add to get crop coordinates
 
-                image_file = f'{cell_idx}_{dead_frame}_dead.jpeg'
-                seg_found = mask_funcs.add_coco_annotation(coco_json, image_file, mask, image_id, annotation_id, 2)
+                        prev_frames = np.clip(dead_frame - np.arange(20), a_min=0, a_max=num_frames - 1)
+                        prev_masks = f['Segmentations']['Phase'][prev_frames][:]  # fancy indexing on hdf5 5 files possible?
+                        valid_prev_frames = prev_frames[np.any(prev_masks == cell_idx, axis=(1, 2))]
 
-                if seg_found == 1:
+                        next_frames = np.clip(dead_frame + np.arange(1, 21), a_min=0, a_max=num_frames - 1)
+                        next_masks = f['Segmentations']['Phase'][next_frames][:]    
+                        valid_next_frames = next_frames[np.any(next_masks == cell_idx, axis=(1, 2))]
+
+                        if len(valid_prev_frames) == 0 and len(valid_next_frames) == 0:
+                            continue
+
+                        prev_mask = f['Segmentations']['Phase'][np.max(valid_prev_frames)][:]
+                        next_mask = f['Segmentations']['Phase'][np.min(valid_next_frames)][:]
+
+                        crop_mask = np.logical_and(prev_mask == cell_idx, next_mask == cell_idx)
+                    else:
+                        crop_mask = mask
+
+                    image = f['Images']['Phase'][dead_frame]
+
+                    image, mask = crop_image_and_mask(image, crop_mask)
+
+                    image_file = f'{cell_idx}_{dead_frame}_dead.jpeg'
+                    
+                    seg_found = mask_funcs.add_coco_annotation(coco_json, image_file, mask, image_id, annotation_id, 1)
+
+                    if seg_found == 1:
+                        image_file = f'{cell_idx}_{dead_frame}_dead.jpeg'
+                        annotation_id += 1
+                    else:
+                        image_file = f'ANNOTATE_{cell_idx}_{dead_frame}_dead.jpeg'
+
                     plt.imsave(images_dir / image_file, image / 255, cmap='gray')
 
-                annotation_id += 1
-                image_id += 1
-                pbar.update(1)
+                    image_id += 1
+ 
+            if include_wrong_segs:
+                cell_idxs = wrong_segmentations['Cell Idx']
+                # val_count = max(1, int(len(cell_ids) * 0.2))
+                # val_cell_ids = set(random.sample(list(cell_ids), val_count))
 
-        if include_wrong_segs:
-            cell_idxs = wrong_segmentations['Cell Idx']
-            val_count = max(1, int(len(cell_ids) * 0.2))
-            val_cell_ids = set(random.sample(list(cell_ids), val_count))
+                max_attempts = 100
 
-            max_attempts = 100
+                for cell_idx in cell_idxs:
+                    # split = 'validate' if cell_idx in val_cell_ids else 'train'
+                    coco_json = settings['coco_json']
+                    images_dir = settings['images']
 
-            for cell_idx in cell_idxs:
-                split = 'validate' if cell_idx in val_cell_ids else 'train'
-                coco_json = dirs[split]['coco_json']
-                images_dir = dirs[split]['images']
+                    frames = np.nonzero(~np.isnan(f['Cells']['Phase']['Area'][:, cell_idx]))[0]
+                    frame = np.random.choice(frames)
 
-                frames = np.nonzero(~np.isnan(f['Cells']['Phase']['Area'][:, cell_idx]))[0]
-                frame = np.random.choice(frames)
+                    mask = f['Segmentations']['Phase'][frame] == cell_idx
+                    image = f['Images']['Phase'][frame]
 
-                mask = f['Segmentations']['Phase'][frame] == cell_idx
-                image = f['Images']['Phase'][frame]
+                    image, _ = crop_image_and_mask(image, mask)
+                    image_file = image_file = f'wrong_seg_{cell_idx}.jpeg'
 
-                image, _ = crop_image_and_mask(image, mask)
-                image_file = image_file = f'wrong_seg_{cell_idx}.jpeg'
+                    coco_json["images"].append({
+                        "id": image_id,
+                        "width": image.shape[1],
+                        "height": image.shape[0],
+                        "file_name": image_file,
+                        })
+                    
+                    plt.imsave(images_dir / image_file, image / 255, cmap='gray')
+                    image_id += 1
+                    pbar.update(1)
 
-                coco_json["images"].append({
-                    "id": image_id,
-                    "width": image.shape[1],
-                    "height": image.shape[0],
-                    "file_name": image_file,
-                    })
-                plt.imsave(images_dir / image_file, image / 255, cmap='gray')
-                image_id += 1
-                pbar.update(1)
+            if include_no_cell:
+                # for split in ['train', 'validate']:
+                crops = crop_shapes
 
-        if include_no_cell:
-            for split in ['train', 'validate']:
-                crops = crop_shapes[split]
-
-                coco_json = dirs[split]['coco_json']
-                images_dir = dirs[split]['images']
+                coco_json = settings['coco_json']
+                images_dir = settings['images']
 
                 num_samples = len(crops) / 2 # Get approximately same number of no cell images as alive/dead cell images
                 attempts = 0
                 added = 0
                 max_attempts = len(crops) * 20  # avoid infinite loop   
 
-                coco_json = dirs[split]['coco_json'] 
+                coco_json = settings['coco_json']
 
                 while added < num_samples and attempts < max_attempts:
                     attempts += 1
-                    frame = random.randint(0, num_frames - 1)           
+                    frame = random.randint(0, num_frames - 1)      
 
                     h_crop, w_crop = random.choice(crops)
 
@@ -278,12 +342,42 @@ def get_finetuning_dataset(
                     added += 1
                     pbar.update(1)
 
-    pbar.close()
+            if include_merged:
+                for cell_idx in cell_idxs:
+                    # split = 'validate' if cell_idx in val_cell_ids else 'train'
+                    coco_json = settings['coco_json']
+                    images_dir = settings['images']
+
+                    frames = np.nonzero(~np.isnan(f['Cells']['Phase']['Area'][:, cell_idx]))[0]
+                    frame = np.random.choice(frames)
+
+                    mask = f['Segmentations']['Phase'][frame] == cell_idx
+                    image = f['Images']['Phase'][frame]
+
+                    image, _ = crop_image_and_mask(image, mask)
+                    image_file = image_file = f'ANNOTATE_{cell_idx}.jpeg'
+
+                    coco_json["images"].append({
+                        "id": image_id,
+                        "width": image.shape[1],
+                        "height": image.shape[0],
+                        "file_name": image_file,
+                        })
+                    
+                    plt.imsave(images_dir / image_file, image / 255, cmap='gray')
+                    image_id += 1
+                    pbar.update(1)
+
+
+        pbar.close()
 
     # Save COCO jsons
-    for split in dirs.keys():
-        with open(dirs[split]['json_file'], 'w') as f:
-            json.dump(dirs[split]['coco_json'], f)
+    with open(settings['json_file'], 'w') as f:
+        json.dump(settings['coco_json'], f)
+
+    # for split in dirs.keys():
+    #     with open(dirs[split]['json_file'], 'w') as f:
+    #         json.dump(dirs[split]['coco_json'], f)
 
 # class ClassOnlyFastRCNNOutputLayers(FastRCNNOutputLayers):
 #     def __init__(self, input_shape, *, box2box_transform, num_classes, **kwargs):
