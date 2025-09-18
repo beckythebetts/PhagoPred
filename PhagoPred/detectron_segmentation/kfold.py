@@ -1,6 +1,8 @@
 import sys
 import faulthandler
 import warnings
+
+from sympy import im
 sys.path.insert(0, 'detectron2')
 
 from pathlib import Path
@@ -159,19 +161,29 @@ class KFold:
                 unregister_coco_instances('my_dataset_val')
 
     def eval(self):
-        for file in self.directory.glob('*model_*'):
-            for im_name in (file / 'Training_Data' / 'validate' / 'images').iterdir():
+        for file in self.directory.glob('*split_*'):
+            for im_name in (file / 'Fine_Tuning_Data' / 'validate' / 'images').iterdir():
                 im = plt.imread(im_name)
 
-                frame_processed = np.stack([np.array(im)]*3, axis=-1)
+                if im.ndim == 2:
+                    frame_processed = np.stack([im]*3, axis=-1)
+                else:
+                    frame_processed = im
 
+                # frame_processed = np.stack([np.array(im)]*3, axis=-1)
+                print(frame_processed.shape)
                 pred_masks = seg_image(cfg_dir = file / 'Model', im = frame_processed)
-                true_masks = mask_funcs.coco_to_masks(coco_file = file / 'Training_Data' / 'validate' / 'labels.json', im_name = im_name) 
+                true_masks = mask_funcs.coco_to_masks(coco_file = file / 'Fine_Tuning_Data' / 'validate' / 'labels.json', im_name = im_name) 
                 
-            
-                #binary masks showing positions of all cateogries
-                combi_pred = mask_funcs.combine_masks(list(pred_masks.values()))
-                combi_true = mask_funcs.combine_masks(list(true_masks.values()))
+                if pred_masks is not None:
+                    combi_pred = mask_funcs.combine_masks(list(pred_masks.values()))
+                else: 
+                    combi_pred = np.zeros(im.shape[:2], dtype=np.uint8)
+                
+                if true_masks is not None:
+                    combi_true = mask_funcs.combine_masks(list(true_masks.values()))
+                else:
+                    combi_true = np.zeros(im.shape[:2], dtype=np.uint8)
 
                 view_all = tools.show_segmentation(im, combi_pred, combi_true)
                 plt.imsave(file / f'{im_name.stem}_view.png', view_all/255)
@@ -192,7 +204,7 @@ class KFold:
                     results = self.prec_recall_curve(true_masks[category], pred_masks[category])
                     results.to_csv(str(file / f'{im_name.stem}_{category}_results.txt'), sep='\t')
                 
-    def fine_tune_eval(self):
+    def fine_tune_eval(self, cm_title: str):
         cms = []
         accs = []
         for file in self.directory.glob('split_*'):
@@ -217,7 +229,7 @@ class KFold:
         sns.heatmap(mean_cm, annot=annotations, fmt='', cmap='Blues', xticklabels=labels, yticklabels=labels, cbar=False)
         plt.xlabel("Predicted label")
         plt.ylabel("True label")
-        plt.title("Fine Tuned")
+        plt.title(cm_title)
         no_cell_idx = 2
         plt.axhline(no_cell_idx, color='gray', linestyle='--', linewidth=2)
         plt.axvline(no_cell_idx, color='gray', linestyle='--', linewidth=2)
@@ -593,10 +605,11 @@ def main():
     faulthandler.enable()
     # merge_jsons(Path('PhagoPred')/ 'detectron_segmentation' / 'models' / 'toumai_01_05' / 'labels')
 
-    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_fine_tune_freezerpn', fine_tune=True)
+    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_fine_tune', fine_tune=True)
     # my_kfold.split_all()
-    my_kfold.train()
-    my_kfold.fine_tune_eval()
+    my_kfold.eval()
+    # my_kfold.train()
+    # my_kfold.fine_tune_eval('Fine Tuned')
     # my_kfold.train()
     # my_kfold.eval()
     # my_kfold.plot()

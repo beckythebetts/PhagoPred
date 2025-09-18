@@ -656,21 +656,72 @@ def erode_mask(mask: np.array, erosion_val: int=10) -> np.array:
     struct = np.ones((2*erosion_val+1, 2*erosion_val+1))
     return binary_erosion(mask, structure=struct)
 
+# def clean_coco_json(coco_json_path: Path, image_dir: Path) -> None:
+#     with open(coco_json_path, 'r') as f:
+#         coco = json.load(f)
+    
+#     existing_ims = set([im.name for im in image_dir.iterdir()])
+#     valid_ims = [img for img in coco['images'] if img['file_name'] in existing_ims]
+#     valid_im_ids = set(img['id'] for img in valid_ims)
+#     valid_annotations = [ann for ann in coco['annotations'] if ann['image_id'] in valid_im_ids]
+
+#     coco['images'] = valid_ims
+#     coco['annotations'] = valid_annotations
+
+#     with open(coco_json_path, 'w') as f:
+#         json.dump(coco, f)
+
 def clean_coco_json(coco_json_path: Path, image_dir: Path) -> None:
     with open(coco_json_path, 'r') as f:
         coco = json.load(f)
-    
-    existing_ims = set([im.name for im in image_dir.iterdir()])
-    valid_ims = [img for img in coco['images'] if img['file_name'] in existing_ims]
-    valid_im_ids = set(img['id'] for img in valid_ims)
-    valid_annotations = [ann for ann in coco['annotations'] if ann['image_id'] in valid_im_ids]
 
-    coco['images'] = valid_ims
+    image_exts = {'.jpg', '.jpeg', '.png', '.bmp'}
+    existing_ims = [im for im in image_dir.iterdir() if im.suffix.lower() in image_exts]
+    existing_im_names = set(im.name.lower() for im in existing_ims)
+
+    images = coco.get('images', [])
+    annotations = coco.get('annotations', [])
+
+    # Filter valid images already in the JSON
+    valid_ims = [img for img in images if img['file_name'].lower() in existing_im_names]
+    valid_im_ids = set(img['id'] for img in valid_ims)
+    valid_annotations = [ann for ann in annotations if ann['image_id'] in valid_im_ids]
+
+    # Track existing file_names in JSON (case-insensitive)
+    json_filenames = set(img['file_name'].lower() for img in valid_ims)
+
+    # Determine the next available image ID
+    used_ids = {img['id'] for img in images}
+    next_id = max(used_ids, default=0) + 1
+
+    # Add missing image files from directory
+    new_images = []
+    for im in existing_ims:
+        if im.name.lower() not in json_filenames:
+            try:
+                with Image.open(im) as img:
+                    width, height = img.size
+                new_images.append({
+                    "id": next_id,
+                    "file_name": im.name,
+                    "width": width,
+                    "height": height
+                })
+                next_id += 1
+            except Exception as e:
+                print(f"Warning: Failed to read image {im.name}: {e}")
+
+    # Update COCO JSON
+    coco['images'] = valid_ims + new_images
     coco['annotations'] = valid_annotations
 
     with open(coco_json_path, 'w') as f:
         json.dump(coco, f)
 
+    print(f"Cleaned COCO JSON:")
+    print(f"  - Retained {len(valid_ims)} existing valid images")
+    print(f"  - Added {len(new_images)} new image(s) from folder")
+    print(f"  - Retained {len(valid_annotations)} annotations")
 
 
 if __name__ == '__main__':
@@ -679,7 +730,11 @@ if __name__ == '__main__':
     # array_2 = np.array([[0,1], [2, 2], [3, 4], [2, 1]])
     # distances = np.linalg.norm(array_1[:, np.newaxis] - array_2[np.newaxis], axis=2)
     # print(distances)
-    convert_coco_file(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '20x_flir' / 'labels.json',
-                      Path('PhagoPred') / 'detectron_segmentation' / 'models' / '20x_flir' / 'images',
-                      Path('PhagoPred') / 'cellpose_segmentation' / 'Models' / '20x_flir' / 'all')
+    # convert_coco_file(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '20x_flir' / 'labels.json',
+    #                   Path('PhagoPred') / 'detectron_segmentation' / 'models' / '20x_flir' / 'images',
+    #                   Path('PhagoPred') / 'cellpose_segmentation' / 'Models' / '20x_flir' / 'all')
+    clean_coco_json(
+        Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac/Fine_Tune_data_full/labels.json"),
+        Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac/Fine_Tune_data_full/images")
+    )
     # plt.imsave('/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/20x_flir/mask0003.png', coco_to_masks(Path('/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/20x_flir/labels.json'), Path('0003.png'))[0].astype(np.uint16), cmap='gray') 

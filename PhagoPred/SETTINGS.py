@@ -5,7 +5,7 @@ try:
 # ******* GENERAL *******
     # DATASET = Path('PhagoPred')/'Datasets'/'secondwithlight - Copy.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_short_seg_test.h5'
-    DATASET = Path('PhagoPred')/'Datasets'/'13_06.h5'
+    DATASET = Path('PhagoPred')/'Datasets'/'24_06.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_500.h5'
 
     with h5py.File(DATASET, 'r') as f:
@@ -23,7 +23,7 @@ except:
 # DATASET = Path('PhagoPred')/'Datasets'/'mac_short_seg.h5'
 # MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'mac_20x'
 
-MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / '27_05_mac'
+MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / '27_05_mac_fine_tuned'
 CELLPOSE_MODEL = Path("PhagoPred") / 'cellpose_segmentation' / 'Models' / 'ash'
 UNET_MODEL = Path("PhagoPred") / 'unet_segmentation' / 'models' / '20x_flir_8'
 TRAINING_DATA = Path("PhagoPred") / 'segmentation' / 'models' / '20x_flir_8'

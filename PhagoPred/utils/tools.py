@@ -926,7 +926,9 @@ if __name__ == '__main__':
     #                 phase_channel=1,
     #                 epi_channel=2,
     #                 )
-    repack_hdf5()
+    # repack_hdf5()
+    copy_hdf5_groups(Path('PhagoPred') / 'Datasets' / '24_06.h5', Path('PhagoPred')/'Datasets'/'24_06_new.h5', ['Images'])
+
     # with h5py.File(Path('D:/27_05.h5'), 'r') as f:
     #     dset = f['Images/Epi/Data']
     #     plt.imsave('D:/test0.png', dset[0])
