@@ -342,7 +342,7 @@ class CellLoaderThread(QThread):
             else:
                 cell_outline = mask_funcs.mask_outline(torch.tensor(cell_mask).byte().to(device), thickness=2).cpu().numpy()
 
-            epi_data = tools.threshold_image(epi_data)
+            # epi_data = tools.threshold_image(epi_data)
 
             self.finished.emit(phase_data, epi_data, cell_outline)
 

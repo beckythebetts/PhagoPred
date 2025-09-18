@@ -40,13 +40,18 @@ def show_raw_images(first_frame=0, last_frame=50):
     """
     print('\nSHOWING MERGED IMAGES')
     with h5py.File(hdf5_file, 'r') as f:
-        phase_data = tools.get_images(f, 'Phase', first_frame, last_frame)
-        epi_data = tools.get_images(f, 'Epi', first_frame, last_frame)
-    merged_im = np.stack((phase_data, phase_data, phase_data), axis=-1)
-    for i, im in enumerate(merged_im):
-        cv2.putText(im, text=f'frame: {i+first_frame} | time: {(i+first_frame)*SETTINGS.TIME_STEP}/s', org=(20, SETTINGS.IMAGE_SIZE[1]-20), fontFace=cv2.FONT_HERSHEY_COMPLEX, 
-                    fontScale=3, color=(255, 255, 255), thickness=3)
-    merged_im[:, :, :, 0][epi_data > SETTINGS.THRESHOLD] = epi_data[epi_data > SETTINGS.THRESHOLD]
+        # phase_data = tools.get_images(f, 'Phase', first_frame, last_frame)
+        # epi_data = tools.get_images(f, 'Epi', first_frame, last_frame)
+        phase_data = f['Images']['Phase'][first_frame:last_frame]
+        epi_data = f['Images']['Epi'][first_frame:last_frame]
+    merged_im = np.stack((phase_data, phase_data, phase_data), axis=-1).astype(np.float32)
+    # for i, im in enumerate(merged_im):
+    #     cv2.putText(im, text=f'frame: {i+first_frame} | time: {(i+first_frame)*SETTINGS.TIME_STEP}/s', org=(20, SETTINGS.IMAGE_SIZE[1]-20), fontFace=cv2.FONT_HERSHEY_COMPLEX, 
+    #                 fontScale=3, color=(255, 255, 255), thickness=3)
+ 
+    merged_im[:, :, :, 0] += epi_data
+    merged_im = np.clip(merged_im, a_min=0, a_max=255).astype(np.uint8)
+
     merged_image = ij.py.to_dataset(merged_im, dim_order=['t', 'row', 'col', 'ch'])
     ij.ui().show('ims', merged_image)
     ij.py.run_macro(macro='run("Make Composite")')
