@@ -291,8 +291,8 @@ def main():
     #                       model_dir=Path("PhagoPred/detectron_segmentation/models/27_05_mac/Model"),
     #                       eval_mode="confusion")
     evaluator = Evaluator(
-        dataset_dir=Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac/kfold_fine_tune/orig_training_data"), 
-        model_dir=Path("PhagoPred/detectron_segmentation/models/27_05_mac/kfold_fine_tune/split_1/Model"),
+        dataset_dir=Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac/kfold_fine_tune/Training_Data"), 
+        model_dir=Path("PhagoPred/detectron_segmentation/models/27_05_mac/kfold_no_fine_tune/split_1/Model"),
         eval_mode="metrics",
         )
     evaluator.eval()
