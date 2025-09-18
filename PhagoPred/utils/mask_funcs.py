@@ -184,6 +184,35 @@ def combine_masks(masks: list[np.ndarray]) -> np.ndarray:
     
     return combined_mask
 
+import json
+from collections import defaultdict
+
+def analyze_coco_annotations(coco_json_path):
+    with open(coco_json_path, 'r') as f:
+        data = json.load(f)
+
+    # Count total images
+    total_images = len(data.get('images', []))
+
+    # Build category ID -> name mapping
+    category_id_to_name = {cat['id']: cat['name'] for cat in data.get('categories', [])}
+
+    # Count instances per category
+    category_instance_counts = defaultdict(int)
+    for ann in data.get('annotations', []):
+        cat_id = ann['category_id']
+        category_instance_counts[cat_id] += 1
+
+    # Print results
+    print(f"Total images: {total_images}\n")
+    print("Instances per category:")
+    for cat_id, count in sorted(category_instance_counts.items(), key=lambda x: x[1], reverse=True):
+        cat_name = category_id_to_name.get(cat_id, f"Unknown (ID {cat_id})")
+        print(f"  {cat_name}: {count}")
+
+# if __name__ == "__main__":
+#     path_to_coco_json = "path/to/your/coco_annotations.json"  # ← Replace this
+#     analyze_coco_annotations(path_to_coco_json)
 
 # def coco_to_masks(coco_file, im_name):
 #     with open(coco_file, 'r') as f:
@@ -733,8 +762,11 @@ if __name__ == '__main__':
     # convert_coco_file(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '20x_flir' / 'labels.json',
     #                   Path('PhagoPred') / 'detectron_segmentation' / 'models' / '20x_flir' / 'images',
     #                   Path('PhagoPred') / 'cellpose_segmentation' / 'Models' / '20x_flir' / 'all')
-    clean_coco_json(
-        Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac/Fine_Tune_data_full/labels.json"),
-        Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac/Fine_Tune_data_full/images")
+    # clean_coco_json(
+    #     Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac/Fine_Tune_data_full/labels.json"),
+    #     Path("/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac/Fine_Tune_data_full/images")
+    # )
+    analyze_coco_annotations(
+        "/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/27_05_mac/Fine_Tune_data_full/labels.json"
     )
     # plt.imsave('/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/20x_flir/mask0003.png', coco_to_masks(Path('/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/20x_flir/labels.json'), Path('0003.png'))[0].astype(np.uint16), cmap='gray') 

@@ -4,6 +4,10 @@ import sys
 import tifffile
 import h5py
 from pathlib import Path
+from tqdm import tqdm
+import cv2
+
+from PhagoPred import SETTINGS
 
 def compute_percentile_limits(
         images: np.ndarray,
@@ -204,14 +208,43 @@ def keep_only_group(hdf5_path, keep_groups=['Images']):
 
     print(f"Only '{keep_groups}' group retained.")
 
+def epi_background_correction(dataset=SETTINGS.DATASET):
+    """Averge all epi images, then subtract avrgaed image from each frame. Gaussian blur then rescale to 8bit taking only top 10% of pixel values"""
+    with h5py.File(dataset, 'r+') as f:
+        epi_ds = f['Images']['Epi']
+        d = epi_ds.shape[0]
+        sum_image = np.zeros(epi_ds.shape[1:], dtype=np.float32)
+
+        
+        for i in tqdm(range(d), desc='Avergaing all epi images'):
+            sum_image += epi_ds[i].astype(np.float32) / d
+
+        print('Sampling pixel values...')
+        sample_pixel_values = []
+        for i in np.linspace(0, d-1, 50).astype(int):
+            sample_pixel_values.append(np.clip((epi_ds[i] - sum_image).astype(np.float32), a_min=0, a_max=None))
+        all_pixel_values = np.concatenate(sample_pixel_values)
+        p0 = np.percentile(all_pixel_values, 0)
+        p99_9 = np.percentile(all_pixel_values, 99.9)
+
+        for i in tqdm(range(d), desc='Subtracting background'):
+            corrected = np.clip(epi_ds[i].astype(np.float32) - sum_image, a_min=0, a_max=None)
+            # corrected = cv2.medianBlur(corrected, 5)
+            corrected = cv2.GaussianBlur(corrected, (31, 31), 0)
+            epi_ds[i] = to_8bit(corrected, p0, p99_9)
+            # epi_ds[i] = to_8bit(corrected, np.percentile(corrected, 90), np.percentile(corrected, 99.9))
+
+        epi_ds.attrs['Background corrected'] = True
+
 if __name__ == '__main__':
     # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_500_seg.h5")
-    hdf5_from_tiffs(Path("~/thor_server/13_06_1").expanduser(), 
-                    # Path('D:/27_05.h5'),
-                    Path("~/PhagoPred/PhagoPred/Datasets/13_06.h5").expanduser(),
-                    phase_channel=1,
-                    epi_channel=2,
-                    )
+    # hdf5_from_tiffs(Path("~/thor_server/16_09_1").expanduser(), 
+    #                 # Path('D:/27_05.h5'),
+    #                 Path("~/PhagoPred/PhagoPred/Datasets/16_09_1.h5").expanduser(),
+    #                 phase_channel=1,
+    #                 epi_channel=2,
+    #                 )
+    epi_background_correction()
     # make_short_test_copy(Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05.h5"),
     #                      Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05_500.h5"),
     #                      start_frame=3000,
