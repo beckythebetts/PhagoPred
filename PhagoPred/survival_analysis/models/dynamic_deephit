@@ -1,0 +1,60 @@
+import torch
+
+def build_fc_layers(input_size,
+                    output_size,
+                    layer_sizes: list[int] = [],
+                    dropout: float=0.0,
+                    activation=None,
+                    batch_norm: bool=False,
+                    final_layer_activation: bool=False):
+    modules = []
+    dim_size = input_size
+    for layer_size in layer_sizes:
+        modules.append(torch.nn.Linear(dim_size, layer_size))
+        if batch_norm:
+            modules.append(torch.nn.BatchNorm1d(layer_size))
+        modules.append(activation())
+        if dropout > 0:
+            modules.append(torch.nn.Dropout(dropout))
+        modules.append(activation())
+        dim_size = layer_size
+    modules.append(torch.nn.Linear(dim_size, output_size))
+    if final_layer_activation is True:
+        modules.append(activation())
+    return torch.nn.Sequential(*modules)
+
+
+class DynamicDeepHit(torch.nn.Module):
+    """A dynamic deep hit survival analysis model (https://ieeexplore.ieee.org/document/8681104).
+    Only one 'cause' (no competing risks). Fixed time between each time step. LSTM + attention as shared subnetwork.
+    The covariates of the final observation are NOT used in the attention mechanism."""
+    def __init__(self, 
+                 input_size: int, 
+                 output_size: int,
+                 lstm_hidden_size: int = 64,
+                 lstm_dropout: float = 0.0,
+                 attention_layers: list[int] = [64, 64],
+                 fc_layers: list[int] = [64, 64],
+    ):
+        super().__init__()
+        self.lstm = torch.nn.LSTM(input_size=input_size, 
+                                  hidden_size=lstm_hidden_size, 
+                                  dropout=lstm_dropout,
+                                  )
+        self.attention = build_fc_layers(input_size=lstm_hidden_size, output_size=1, layer_sizes=attention_layers)
+
+        self.fc = build_fc_layers(input_size=lstm_hidden_size, output_size=output_size, layer_sizes=fc_layers)
+
+
+    def forward(self, x):
+        """
+        Args:
+            x: [Sequence length, batch_size, num_features]
+        """
+        lstm_out = self.lstm(x)[0]  # (seq_len, batch, lstm_hidden_size)
+        attn_weights = self.attention(lstm_out).squeeze(-1) # (seq_len, batch)
+        attn_weights = torch.nn.functional.softmax(attn_weights, dim=0)  # (seq_len, batch)
+        context_vector = torch.sum(attn_weights.unsqueeze(-1) * lstm_out, dim=0)  # (batch, lstm_hidden_size)
+        output = self.fc(context_vector)  # (batch, output_size)
+        output = torch.nn.functional.softmax(output, dim=-1)  # (batch, output_size)
+        return output, lstm_out

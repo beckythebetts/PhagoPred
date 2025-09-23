@@ -204,6 +204,66 @@ def corr_coefficient(array1, array2):
 
     return np.corrcoef(filtered_x, filtered_y)[0, 1]
 
+def plot_death_frames_hist(death_frames_txt: Path, save_as: Path):
+    death_frames = pd.read_csv(death_frames_txt, sep="|", skiprows=2, engine='python')
+    death_frames = death_frames.iloc[:, 1:-1]
+    death_frames.columns = ['Cell Idx', 'True', 'Predicted']
+    death_frames = death_frames[['Cell Idx', 'True', 'Predicted']].applymap(lambda x: x.strip() if isinstance(x, str) else x)
+
+    valid_rows = death_frames[death_frames['True'].str.isnumeric() & death_frames['Predicted'].str.isnumeric()].copy()
+
+    valid_rows['True'] = valid_rows['True'].astype(int)
+    valid_rows['Predicted'] = valid_rows['Predicted'].astype(int)
+
+    errors = valid_rows['Predicted'] - valid_rows['True']
+    plt.figure(figsize=(8, 6))
+    plt.hist(errors, bins=30, color='blue', alpha=0.7, edgecolor='black')
+    plt.xlabel('Prediction Error (Predicted - True)')
+    plt.ylabel('Number of Cells')
+    plt.title('Histogram of Cell Death Frame Prediction Errors')
+    plt.grid(axis='y', alpha=0.75)
+    plt.tight_layout()
+    plt.savefig(save_as)
+
+def plot_two_death_frame_hists(
+    death_frames_txt1: Path,
+    death_frames_txt2: Path,
+    label1: str,
+    label2: str,
+    save_as: Path
+):
+    def load_and_compute_errors(path: Path):
+        df = pd.read_csv(path, sep="|", skiprows=2, engine='python')
+        df = df.iloc[:, 1:-1]
+        df.columns = ['Cell Idx', 'True', 'Predicted']
+        df = df[['Cell Idx', 'True', 'Predicted']].applymap(lambda x: x.strip() if isinstance(x, str) else x)
+        valid = df[df['True'].str.isnumeric() & df['Predicted'].str.isnumeric()].copy()
+        valid['True'] = valid['True'].astype(int)
+        valid['Predicted'] = valid['Predicted'].astype(int)
+        errors = valid['Predicted'] - valid['True']
+        return errors
+
+    errors1 = load_and_compute_errors(death_frames_txt1)
+    errors2 = load_and_compute_errors(death_frames_txt2)
+    all_errors = pd.concat([errors1, errors2])
+    min_edge = all_errors.min()
+    max_edge = all_errors.max()
+    bins = 7  # or any number you choose
+    bin_edges = np.linspace(min_edge, max_edge, bins + 1)
+
+    plt.figure(figsize=(8, 6))
+    plt.hist(errors1, bins=bin_edges, alpha=0.6, color='blue', edgecolor='black', label=label1)
+    plt.hist(errors2, bins=bin_edges, alpha=0.6, color='red', edgecolor='black', label=label2)
+
+    plt.xlabel('Prediction Error (Predicted - True)')
+    plt.ylabel('Number of Cells')
+    plt.title('Comparison of Cell Death Frame Prediction Errors')
+    plt.legend()
+    plt.grid(axis='y', alpha=0.75)
+    plt.tight_layout()
+    plt.savefig(save_as)
+    plt.close()
+
 def plot_death_frame(death_frames_txt: Path, save_as: Path):
     death_frames = pd.read_csv(death_frames_txt, sep="|", skiprows=2, engine='python')
     death_frames = death_frames.iloc[:, 1:-1]
@@ -254,7 +314,13 @@ def main():
         'Fluorescence Distance Mean', 
         'Fluorescence Distance Variance'
     ]
-    plot_death_frame(Path('temp') / 'cell_deaths_24_06.txt', Path('temp') / 'cell_death.png')
+    plot_two_death_frame_hists(
+        Path('temp') / 'death_frames_fine_tuned.txt',
+        Path('temp') / 'cell_deaths_24_06.txt',
+        label1='Fine Tuned',
+        label2='Original',
+        save_as=Path('temp') / 'death_frame_comparison.png'
+    )
     # plot_cell_features(1, 0, 50, Path('temp') / 'plot.png', feature_names=feature_names)
     # plot_average_cell_features(Path('temp') / 'plot.png', feature_names=feature_names)
     # plot_feature_correlations(Path('temp') / 'correlations_plot.png', feature_names=feature_names)
