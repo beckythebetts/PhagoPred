@@ -61,7 +61,7 @@ class CellDataset(torch.utils.data.Dataset):
             'Fluorescence Distance Variance',
             ]
         
-        self.file_idxs, self.local_cell_idxs, self.death_frames, self.start_frames, self.end_frames = [], [], [], [], []
+        
         self.file_idxs, self.local_cell_idxs, self.death_frames, self.start_frames, self.end_frames = self._load_cells() 
 
 

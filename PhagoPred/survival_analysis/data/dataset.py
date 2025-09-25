@@ -38,7 +38,9 @@ class CellDataset(torch.utils.data.Dataset):
         for path in self.hdf5_paths:
             with h5py.File(path, 'r') as f:
                 cell_features = CellType('Phase').get_features_xr(f, features=self.features)
-                cell_features = cell_features.transpose('Cell Index', 'Frame', 'Feature').to_array().values  # shape: (num_cells, num_frames, num_features)
+                print(type(cell_features))
+                cell_features = cell_features.to_dataarray(dim='Feature')
+                cell_features = cell_features.transpose('Cell Index', 'Frame', 'Feature').to_numpy()  # shape: (num_cells, num_frames, num_features)
                 all_data.append(cell_features)
         all_data = np.concatenate(all_data, axis=0)  # shape: (total_num_cells, num_frames, num_features)
         all_data = all_data.reshape(-1, all_data.shape[-1])  # shape: (total_num_cells * num_frames, num_features)
@@ -88,23 +90,19 @@ class CellDataset(torch.utils.data.Dataset):
         with h5py.File(self.hdf5_paths[cell_metadata['File Idxs']], 'r') as f:
             all_cell_features = CellType('Phase').get_features_xr(f, features=self.features)
             
-            if np.isnan(cell_metadata['Death Frames']):
-                observation_time = cell_metadata['End Frames'] - cell_metadata['Start Frames'] + 1
-                event_indicator = 0
-            else:
-                observation_time = cell_metadata['Death Frames'] - cell_metadata['Start Frames'] + 1 - self.pre_death_frames
-                event_indicator = 1
+            observation_time = cell_metadata['End Frames'] - cell_metadata['Start Frames'] + 1
+            event_indicator = 0 if np.isnan(cell_metadata['Death Frames']) else 1
 
             cell_features = all_cell_features.isel({'Cell Index': cell_metadata['Local Cell Idxs']})
-            cell_features = cell_features.sel(Frame=slice(cell_metadata['Start Frames'], cell_metadata['Start Frames'] + observation_time))
-            cell_features = cell_features.transpose('Frame', 'Feature').to_array().values  # [num_frames, num_features]
+            cell_features = cell_features.sel(Frame=slice(cell_metadata['Start Frames'], cell_metadata['End Frames'] - self.pre_death_frames if event_indicator == 1 else cell_metadata['End Frames']))
+            cell_features = cell_features.to_dataarray(dim='Feature')
+            cell_features = cell_features.transpose('Frame', 'Feature').to_numpy()  # [num_frames, num_features]
             
-            
+            nan_mask = ~np.isnan(cell_features)
             cell_features = np.nan_to_num(cell_features, nan=0.0)
             cell_features = (cell_features - self.means) / self.stds
 
-            nan_mask = ~np.isnan(cell_features)
-            cell_features = np.concatenate([cell_features, nan_mask.astype(np.float32)], axis=-1)  # Add mask as additional feature
+            cell_features = np.concatenate([cell_features, nan_mask.astype(np.float32)], axis=-1)  # Add mask as additional features
         
         return cell_features, observation_time, event_indicator
     
@@ -118,7 +116,7 @@ def collate_fn(batch, fixed_length=None):
     observation_times = torch.tensor(observation_times, dtype=torch.float32)
     event_indicators = torch.tensor(event_indicators, dtype=torch.float32)
 
-    cell_features = [torch.tensor(features.values, dtype=torch.float32) for features in cell_features]  # List of [num_frames, num_features]
+    cell_features = [torch.tensor(features, dtype=torch.float32) for features in cell_features]  # List of [num_frames, num_features]
 
     if fixed_length is not None:
         cell_features = [f[:fixed_length] for f in cell_features]
