@@ -19,3 +19,4 @@ For 50 cells, the exact frame of death was manually identified. Frames [1, 2, 3,
 3. The entire model
 ![Confusion matrices before and after fine tuning]({{ site.baseurl }}/images/cms.png)
 The resulting accuracies are either lower than or the same as when doing no fine tuning, more training data is probably needed.
+More cells were added to the training set (total 200 cells). For each cell a random frame between 1 and 10 frames before cell death was selected, a frame 100 frames before cell death and a random frame between1 and 10 frames after cell death. False psitive segmentations and incorrectly merged cells (undersegmentation) were also corrected and added to the dataset.
