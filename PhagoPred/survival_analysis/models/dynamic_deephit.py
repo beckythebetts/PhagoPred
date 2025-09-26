@@ -38,6 +38,7 @@ class DynamicDeepHit(torch.nn.Module):
                  predictor_layers: list[int] = [32],
                  attention_layers: list[int] = [64, 64],
                  fc_layers: list[int] = [64, 64],
+                 **kwargs
     ):
         super().__init__()
         self.lstm = torch.nn.LSTM(input_size=input_size, 
@@ -132,4 +133,4 @@ def compute_loss(
         print(f"  t: {t}")
         print(f"  e: {e}")
         raise ValueError("NaN or inf loss encountered in compute_loss")
-    return loss
+    return loss, negative_log_likelihood, ranking_loss, prediction_loss

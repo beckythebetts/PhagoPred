@@ -82,9 +82,12 @@ def ranking_loss(
     cif_comparisons = eta(F_i, F_j)  # (batch_size_i, batch_size_j)
 
     A_ij = ((s_i < s_j) & (e_i == 1)).float()  # Valid mask (batch_size_i, batch_size_j)
+    # A_ij = (e_i ==1).float()
 
     loss = torch.sum(A_ij * cif_comparisons) / (torch.sum(A_ij) + 1e-8)
     
+    # valid_pairs = torch.sum(A_ij)
+    # print(valid_pairs)
     return loss
 
 def prediction_loss(y: torch.Tensor, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
