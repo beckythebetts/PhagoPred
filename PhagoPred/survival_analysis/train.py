@@ -6,10 +6,13 @@ from collections import defaultdict
 import torch
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.model_selection import train_test_split
 
 from PhagoPred.survival_analysis.data.dataset import CellDataset, collate_fn
 from PhagoPred.survival_analysis.models import dynamic_deephit
 from PhagoPred.survival_analysis.validate import validate_step, visualize_validation_predictions
+
 
 def train_step(model, dataloader, optimiser, loss_fn, device):
     model.train()
@@ -45,26 +48,33 @@ def train_step(model, dataloader, optimiser, loss_fn, device):
 def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list, features: list, optimiser, loss_fn, num_epochs, save_dir: Path, batch_size: int, lr: float):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+    # model_params = {k: v.to()}
     model = model(**model_params)
+    model = model.to(device)
     
-    with open(save_dir / 'model_params.json', 'w') as f:
-        json.dump(model_params, f)
-        
-        
     train_dataset = CellDataset(
         hdf5_paths=train_hdf5_paths,
         features=features,
     )
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size, shuffle=True, collate_fn=collate_fn)
+    
+    normalisation_means, normalization_stds = train_dataset.get_normalization_stats()
+    model_params['normalization_means'] = normalisation_means.tolist()
+    model_params['normalization_stds'] = normalization_stds.tolist()
 
     validate_dataset = CellDataset(
         hdf5_paths=val_hdf5_paths,
         features=features,
+        means=normalisation_means,
+        stds=normalization_stds,
     )
 
     validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size, shuffle=False, collate_fn=collate_fn)
 
+    with open(save_dir / 'model_params.json', 'w') as f:
+        json.dump(model_params, f)
+        
     optimiser = optimiser(model.parameters(), lr=lr)
     os.makedirs(save_dir, exist_ok=True)
     
@@ -83,6 +93,85 @@ def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list, fea
 
     print(f"Training complete. Model saved to {save_dir}")
     
+
+def train_single_dataset(
+    model,
+    model_params,
+    hdf5_path: Path,
+    features: list,
+    optimiser,
+    loss_fn,
+    num_epochs: int,
+    save_dir: Path,
+    batch_size: int,
+    lr: float,
+    val_split: float = 0.2,
+    seed: int = 42,
+):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = model(**model_params)
+    model = model.to(device)
+    
+    os.makedirs(save_dir, exist_ok=True)
+
+    # --- Step 1: Load metadata to get available cell indices ---
+    dummy_dataset = CellDataset(hdf5_paths=[hdf5_path], features=features)
+    all_idxs = np.arange(len(dummy_dataset))  # Total number of cells in the file
+
+    # --- Step 2: Split into train and validation sets ---
+    train_idxs, val_idxs = train_test_split(
+        all_idxs,
+        test_size=val_split,
+        random_state=seed,
+        shuffle=True
+    )
+
+    # --- Step 3: Initialize datasets with selected indices ---
+    train_dataset = CellDataset(
+        hdf5_paths=[hdf5_path],
+        features=features,
+        specified_cell_idxs=train_idxs.tolist()
+    )
+
+    normalisation_means, normalization_stds = train_dataset.get_normalization_stats()
+    model_params['normalization_means'] = normalisation_means.tolist()
+    model_params['normalization_stds'] = normalization_stds.tolist()
+
+    validate_dataset = CellDataset(
+        hdf5_paths=[hdf5_path],
+        features=features,
+        specified_cell_idxs=val_idxs.tolist(),
+        means=normalisation_means,
+        stds=normalization_stds,
+    )
+
+    # --- Step 4: Create data loaders ---
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size, shuffle=True, collate_fn=collate_fn)
+    validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size, shuffle=False, collate_fn=collate_fn)
+
+    # --- Step 5: Save model params ---
+    with open(save_dir / 'model_params.json', 'w') as f:
+        json.dump(model_params, f)
+
+    # --- Step 6: Train loop ---
+    optimiser = optimiser(model.parameters(), lr=lr)
+    training_json = save_dir / 'training.jsonl'
+
+    with open(training_json, 'w') as f:
+        for epoch in tqdm(range(1, num_epochs + 1), desc="Training"):
+            train_losses = train_step(model, train_loader, optimiser, loss_fn, device)
+            validate_losses = validate_step(model, validate_loader, loss_fn, device)
+            losses_dict = {'epoch': epoch, 'train': train_losses, 'validate': validate_losses}
+            print(losses_dict)
+            f.write(json.dumps(losses_dict) + '\n')
+
+    # --- Step 7: Save model and plot ---
+    torch.save(model.state_dict(), save_dir / 'model.pth')
+    plot_training_losses(training_json, save_dir / 'loss_plot.png')
+    print(f"Training complete. Model saved to {save_dir}")
+
+    visualize_validation_predictions(model, validate_loader, device, num_examples=5, save_path=save_dir)
+
 
 def plot_training_losses(losses_json_path: Path, output_path: Path = None):
     # Load losses dictionary from JSON
@@ -112,6 +201,7 @@ def plot_training_losses(losses_json_path: Path, output_path: Path = None):
         for loss_type in loss_types:
             train_losses[loss_type].append(all_losses[epoch_str]['train'][loss_type])
             val_losses[loss_type].append(all_losses[epoch_str]['validate'][loss_type])
+            
 
     plt.figure(figsize=(12, 8))
 
@@ -139,28 +229,28 @@ def plot_training_losses(losses_json_path: Path, output_path: Path = None):
 def main():
     features = [
             'Area',
-            'X',
-            'Y',
-            # 'Circularity',
-            # 'Perimeter',
-            # 'Displacement',
+            # 'X',
+            # 'Y',
+            'Circularity',
+            'Perimeter',
+            'Displacement',
             # 'Mode 0',
             # 'Mode 1',
             # 'Mode 2',
             # 'Mode 3',
             # 'Mode 4',
             # 'Speed',
-            # 'Phagocytes within 100 pixels',
-            # 'Phagocytes within 250 pixels',
-            # 'Phagocytes within 500 pixels',
-            # 'Total Fluorescence', 
-            # 'Fluorescence Distance Mean', 
-            # 'Fluorescence Distance Variance',
+            'Phagocytes within 100 pixels',
+            'Phagocytes within 250 pixels',
+            'Phagocytes within 500 pixels',
+            'Total Fluorescence', 
+            'Fluorescence Distance Mean', 
+            'Fluorescence Distance Variance',
             ] 
     
     model_params = {
         'input_size': len(features)*2,  # Features + mask
-        'output_size': 501,  # Number of time bins
+        'output_size': 5000,  # Number of time bins
         'lstm_hidden_size': 64,
         'lstm_dropout': 0.0,
         'predictor_layers': [32],
@@ -169,23 +259,40 @@ def main():
         'features': features,
     }
     
-    train(
+    # train(
+    #     model=dynamic_deephit.DynamicDeepHit,
+    #     model_params=model_params,
+    #     train_hdf5_paths=[
+    #         Path('PhagoPred') / 'Datasets' / '27_05_500.h5',
+    #     ],
+    #     val_hdf5_paths=[
+    #         Path('PhagoPred') / 'Datasets' / '27_05_500.h5',
+    #     ],
+    #     features=features,
+    #     optimiser=torch.optim.Adam,
+    #     loss_fn=dynamic_deephit.compute_loss,
+    #     num_epochs=5,
+    #     save_dir=Path('PhagoPred') / 'survival_analysis' / 'models' / 'dynamic_deephit' / 'test_run',
+    #     batch_size=32,
+    #     lr=1e-3
+    # )
+    
+    train_single_dataset(
         model=dynamic_deephit.DynamicDeepHit,
         model_params=model_params,
-        train_hdf5_paths=[
-            Path('PhagoPred') / 'Datasets' / '27_05_500.h5',
-        ],
-        val_hdf5_paths=[
-            Path('PhagoPred') / 'Datasets' / '27_05_500.h5',
-        ],
+        hdf5_path=Path('PhagoPred') / 'Datasets' / '24_06.h5',
         features=features,
         optimiser=torch.optim.Adam,
         loss_fn=dynamic_deephit.compute_loss,
-        num_epochs=5,
-        save_dir=Path('PhagoPred') / 'survival_analysis' / 'models' / 'dynamic_deephit' / 'test_run',
+        num_epochs=10,
+        save_dir=Path('PhagoPred') / 'survival_analysis' / 'models' / 'dynamic_deephit' / 'test_run_single',
         batch_size=32,
-        lr=1e-3
+        lr=1e-3,
+        val_split=0.2,
+        seed=42
     )
+    
+if __name__ == '__main__':
+    main()
 
-    # loss_fn = torch.nn.CrossEntropyLoss()
 

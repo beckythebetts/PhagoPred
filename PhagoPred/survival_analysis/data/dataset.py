@@ -12,6 +12,9 @@ class CellDataset(torch.utils.data.Dataset):
                  features: list[str],
                  pre_death_frames: int=0,
                  interpolate_nan: bool=False,
+                 means: np.ndarray=None,
+                 stds: np.ndarray=None,
+                 specified_cell_idxs: list[int]=None
                  ):
         """
         A PyTorch Dataset for loading cell data from multiple HDF5 files.
@@ -22,16 +25,22 @@ class CellDataset(torch.utils.data.Dataset):
             fixed_length (int, optional): If specified, all sequences will be padded or truncated to this length.
             pre_death_frames (int, optional): Number of frames before cell death
             nan_threshold (float, optional): Maximum allowed fraction of NaN values in a sequence.
+            cell_idxs (list[int], optional): If specified, only these cell indices will be included.
         """
         self.hdf5_paths = hdf5_paths
         self.features = features
         self.pre_death_frames = pre_death_frames
         self.interpolate_nan = interpolate_nan
+        self.specified_cell_idxs = specified_cell_idxs if specified_cell_idxs and len(self.hdf5_paths) == 1 else None
 
         self.cell_metadata = None
         self._load_cell_metadata()
-
-        self.means, self.stds = self.compute_normalization_stats()
+        
+        if means is None or stds is None:
+            self.means, self.stds = self.compute_normalization_stats()
+        else:
+            self.means = means
+            self.stds = stds
 
         print(f"Loaded dataset from {', '.join(map(str, hdf5_paths))}")
 
@@ -49,22 +58,36 @@ class CellDataset(torch.utils.data.Dataset):
         stds = np.nanstd(all_data, axis=0)
         return means, stds
     
+    def get_normalization_stats(self):
+        return self.means, self.stds
+    
     def _load_cell_metadata(self):
         self.cell_metadata = {'File Idxs': [], 'Local Cell Idxs': [], 'Death Frames': [], 'Start Frames': [], 'End Frames': []}
 
         for path_idx, path in enumerate(self.hdf5_paths):
             with h5py.File(path, 'r') as f:
-                # Load death frames
-                cell_deaths = CellType('Phase').get_features_xr(f, features=['CellDeath'])['CellDeath'].sel(Frame=0).values
-                cell_deaths = np.squeeze(cell_deaths)
+                 # Load death frames
+                total_cell_deaths = CellType('Phase').get_features_xr(f, features=['CellDeath'])['CellDeath'].sel(Frame=0).values
+                total_cell_deaths = np.squeeze(total_cell_deaths)
+                total_num_cells = len(total_cell_deaths)
+                
+                if self.specified_cell_idxs is not None:
+                    local_cell_idxs = np.array(self.specified_cell_idxs)
+                    
+                else:
+                    local_cell_idxs = np.arange(total_num_cells)
+                    
+                local_cell_idxs = local_cell_idxs.astype(int)
+
+                cell_deaths = total_cell_deaths[local_cell_idxs]
                 num_cells = len(cell_deaths)
 
                 self.cell_metadata['File Idxs'] += [path_idx] * num_cells
-                self.cell_metadata['Local Cell Idxs'] += list(range(num_cells))
+                self.cell_metadata['Local Cell Idxs'] += list(local_cell_idxs)
                 self.cell_metadata['Death Frames'] += list(cell_deaths)
 
                 # Load only 'Area' to compute start/end frames
-                area_data = CellType('Phase').get_features_xr(f, features=['Area'])['Area'].transpose('Cell Index', 'Frame').values  # shape: (num_cells, num_frames)
+                area_data = CellType('Phase').get_features_xr(f, features=['Area'])['Area'].transpose('Cell Index', 'Frame').values[local_cell_idxs]  # shape: (num_cells, num_frames)
 
                 # Use numpy vectorization for speed
                 not_nan_mask = ~np.isnan(area_data)
@@ -77,8 +100,8 @@ class CellDataset(torch.utils.data.Dataset):
                 self.cell_metadata['Start Frames'] += list(start)
                 self.cell_metadata['End Frames'] += list(last)
      
-            for key, value in self.cell_metadata.items():
-                self.cell_metadata[key] = np.array(value)
+        for key, value in self.cell_metadata.items():
+            self.cell_metadata[key] = np.array(value)
 
     def __len__(self):
         return len(self.cell_metadata['File Idxs'])
