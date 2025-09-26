@@ -1,0 +1,1 @@
+{"input_size": 6, "output_size": 501, "lstm_hidden_size": 64, "lstm_dropout": 0.0, "predictor_layers": [32], "attention_layers": [64, 64], "fc_layers": [64, 64], "features": ["Area", "X", "Y"]}

@@ -32,13 +32,14 @@ class CellDataset(torch.utils.data.Dataset):
         self._load_cell_metadata()
 
         self.means, self.stds = self.compute_normalization_stats()
-    
+
+        print(f"Loaded dataset from {', '.join(map(str, hdf5_paths))}")
+
     def compute_normalization_stats(self):
         all_data = []
         for path in self.hdf5_paths:
             with h5py.File(path, 'r') as f:
                 cell_features = CellType('Phase').get_features_xr(f, features=self.features)
-                print(type(cell_features))
                 cell_features = cell_features.to_dataarray(dim='Feature')
                 cell_features = cell_features.transpose('Cell Index', 'Frame', 'Feature').to_numpy()  # shape: (num_cells, num_frames, num_features)
                 all_data.append(cell_features)

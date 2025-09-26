@@ -7,7 +7,7 @@
 # from PhagoPred.prediction.decision_tree import model
 
 # from PhagoPred.survival_analysis.models import losses
-from PhagoPred.survival_analysis import train
+from PhagoPred.survival_analysis import train, validate
 if __name__ == '__main__':
     # segment.main()
     # trackpy.main()
@@ -21,3 +21,4 @@ if __name__ == '__main__':
     # eval.main()
     # losses.main()
     train.main()
+    # validate.main()
