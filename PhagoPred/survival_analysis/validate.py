@@ -94,9 +94,13 @@ def validate(model, model_dir, val_hdf5_paths):
     model.load_state_dict(torch.load(model_dir / 'model.pth', map_location=device))
     model.to(device)
 
+    normalisation_means = model_params['normalization_means']
+    normalization_stds = model_params['normalization_stds']
     validate_dataset = CellDataset(
         hdf5_paths=val_hdf5_paths,
-        features=features
+        features=features,
+        means=normalisation_means,
+        stds=normalization_stds,
     )
 
     validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size=32, shuffle=False, collate_fn=collate_fn)

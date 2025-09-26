@@ -238,13 +238,15 @@ class AllCellsViewer(QMainWindow):
 
             self.viewer.add_image(images, name="Phase Images")
 
+            #swap 0 and -1 so bakground is displayed transparent
+            masks = np.where(masks == 0 , -1, np.where(masks == -1, 0, masks))
             self.labels_layer = self.viewer.add_labels(
                 masks.astype(np.uint16),
                 name="Cell Masks",
-                opacity=1.0,
+                opacity=0.5,
                 blending='additive',
             )
-            self.labels_layer.contour = 5
+            self.labels_layer.contour = 0
             self.labels_layer.outline_colour = 'm'
 
             if points:

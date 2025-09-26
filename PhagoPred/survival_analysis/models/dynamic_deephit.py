@@ -80,7 +80,7 @@ def estimated_cif(outputs: torch.Tensor,
         t_last: (batch_size,) - last observed times (as indices of time bins)
     """
     batch_size, num_bins = outputs.size()
-    time_index = torch.arange(num_bins).unsqueeze(0).expand(batch_size, -1)  # (batch_size, num_time_bins)
+    time_index = torch.arange(num_bins, device=outputs.device).unsqueeze(0).expand(batch_size, -1)  # (batch_size, num_time_bins)
     
     numerator_mask = (time_index > t_last.unsqueeze(1)) & (time_index <= t.unsqueeze(1))  # (batch_size, num_time_bins)
     numerator = torch.cumsum(outputs * numerator_mask.float(), dim=1)  # (batch_size, time_bins)
@@ -114,7 +114,7 @@ def compute_loss(
     
     frame_mask = mask.any(dim=-1)
     
-    t_last = (torch.arange(frame_mask.size(1)).unsqueeze(0).expand(frame_mask.size(0), -1) * frame_mask).max(dim=1).values  # (batch_size,)
+    t_last = (torch.arange(frame_mask.size(1), device=frame_mask.device).unsqueeze(0).expand(frame_mask.size(0), -1) * frame_mask).max(dim=1).values  # (batch_size,)
     
     cif = estimated_cif(outputs, t, t_last)  # (batch_size, num_time_bins)
 
