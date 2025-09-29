@@ -51,6 +51,10 @@ class DynamicDeepHit(torch.nn.Module):
         self.attention = build_fc_layers(input_size=lstm_hidden_size, output_size=1, layer_sizes=attention_layers)
 
         self.fc = build_fc_layers(input_size=lstm_hidden_size, output_size=output_size, layer_sizes=fc_layers)
+        
+        num_trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        print(f"MModel loaded. Trainable parameters: {num_trainable_params}")
+
 
 
     def forward(self, x):
