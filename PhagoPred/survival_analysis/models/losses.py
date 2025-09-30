@@ -23,6 +23,17 @@ def negative_log_likelihood(outputs: torch.Tensor,
     
     uncensored_outputs = outputs[e == 1]  # (num_events, num_time_bins)
     uncensored_times = t[e == 1]  # (num_events,)
+    
+    assert uncensored_times.max().item() < uncensored_outputs.size(1), \
+    f"Max uncensored_time {uncensored_times.max().item()} >= num_time_bins {uncensored_outputs.size(1)}"
+
+    assert uncensored_times.min().item() >= 0, \
+    f"Negative index in uncensored_times: min={uncensored_times.min().item()}"
+    
+    assert not torch.isnan(uncensored_outputs).any(), "NaNs found in uncensored_outputs"
+    assert not torch.isinf(uncensored_outputs).any(), "Infs found in uncensored_outputs"
+    assert not torch.isnan(uncensored_times).any(), "NaNs found in uncensored_times"
+    assert not torch.isinf(uncensored_times).any(), "Infs found in uncensored_times"
 
     o_t = uncensored_outputs[torch.arange(uncensored_outputs.size(0)), uncensored_times] + epsilon  # predicted probability of event occuring at time t (num_events,)
     o_t = o_t.clamp(min=epsilon, max=1.0)  # Clamp to avoid log(0)
@@ -96,9 +107,13 @@ def prediction_loss(y: torch.Tensor, x: torch.Tensor, mask: torch.Tensor) -> tor
         y: (batch_size, seq_length, num_features) - true features 
         x: (batch_size, seq_length, num_features) - predicted features 
     """
-    mse_loss = torch.nn.functional.mse_loss(x, y, reduction='none')
-    masked_loss = mse_loss * mask
-    return masked_loss.sum() / (mask.sum() + 1e-8)
+    x_shift = x[:, :-1, :]  # (batch_size, seq_length-1, num_features)
+    y_shift = y[:, 1:, :]   # (batch_size, seq_length-1, num_features)
+    mask_shift = mask[:, 1:, :]      # (batch_size, seq_length-1, num_features)
+    
+    mse_loss = torch.nn.functional.mse_loss(x_shift, y_shift, reduction='none')
+    masked_loss = mse_loss * mask_shift
+    return masked_loss.sum() / (mask_shift.sum() + 1e-8)
 
 
 def test(num_samples=10, num_time_bins=20):

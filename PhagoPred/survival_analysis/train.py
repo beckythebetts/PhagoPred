@@ -21,15 +21,15 @@ def train_step(model, dataloader, optimiser, loss_fn, device):
     losses = defaultdict(float)
     
     for batch in dataloader:
-        cell_features, lengths, observation_times, event_indicators = batch
+        cell_features, lengths, observation_time_bins, event_indicators, observation_times = batch
         cell_features = cell_features.to(device)
         lengths = lengths.to(device)
-        observation_times = observation_times.to(device)
+        observation_time_bins = observation_time_bins.to(device)
         event_indicators = event_indicators.to(device)
 
         optimiser.zero_grad()
         outputs, y = model(cell_features)
-        loss_values = loss_fn(outputs, cell_features, y, observation_times, event_indicators)
+        loss_values = loss_fn(outputs, cell_features, y, observation_time_bins, event_indicators)
         
         loss = loss_values[0]
         loss.backward()
@@ -134,12 +134,15 @@ def train_single_dataset(
         hdf5_paths=[hdf5_path],
         features=features,
         specified_cell_idxs=train_idxs.tolist(),
+        num_bins=model_params['output_size']
     )
     train_dataset.plot_event_vs_censoring_hist(save_path=save_dir / 'train_event_censoring_histogram.png', title='Training Set Event vs Censoring Histogram')
+    bins = train_dataset.get_bins()
 
     normalisation_means, normalization_stds = train_dataset.get_normalization_stats()
     model_params['normalization_means'] = normalisation_means.tolist()
     model_params['normalization_stds'] = normalization_stds.tolist()
+    model_params['event_time_bins'] = bins.tolist()
     normalisation_means = torch.tensor(normalisation_means, dtype=torch.float32)
     normalization_stds = torch.tensor(normalization_stds, dtype=torch.float32)
 
@@ -147,6 +150,8 @@ def train_single_dataset(
         hdf5_paths=[hdf5_path],
         features=features,
         specified_cell_idxs=val_idxs.tolist(),
+        num_bins =model_params['output_size'],
+        event_time_bins=bins,
     )
     validate_dataset.plot_event_vs_censoring_hist(save_path=save_dir / 'val_event_censoring_histogram.png', title='Validation Set Event vs Censoring Histogram')
 
@@ -155,27 +160,27 @@ def train_single_dataset(
     validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size, shuffle=False, collate_fn=lambda x: collate_fn(x, means=normalisation_means, stds=normalization_stds, device=device), num_workers=0)
 
     # # --- Step 5: Save model params ---
-    # with open(save_dir / 'model_params.json', 'w') as f:
-    #     json.dump(model_params, f)
+    with open(save_dir / 'model_params.json', 'w') as f:
+        json.dump(model_params, f)
 
-    # # --- Step 6: Train loop ---
-    # optimiser = optimiser(model.parameters(), lr=lr)
-    # training_json = save_dir / 'training.jsonl'
+    # --- Step 6: Train loop ---
+    optimiser = optimiser(model.parameters(), lr=lr)
+    training_json = save_dir / 'training.jsonl'
 
-    # with open(training_json, 'w') as f:
-    #     for epoch in tqdm(range(1, num_epochs + 1), desc="Training"):
-    #         train_losses = train_step(model, train_loader, optimiser, loss_fn, device)
-    #         validate_losses = validate_step(model, validate_loader, loss_fn, device)
-    #         losses_dict = {'epoch': epoch, 'train': train_losses, 'validate': validate_losses}
-    #         print(losses_dict)
-    #         f.write(json.dumps(losses_dict) + '\n')
+    with open(training_json, 'w') as f:
+        for epoch in tqdm(range(1, num_epochs + 1), desc="Training"):
+            train_losses = train_step(model, train_loader, optimiser, loss_fn, device)
+            validate_losses = validate_step(model, validate_loader, loss_fn, device)
+            losses_dict = {'epoch': epoch, 'train': train_losses, 'validate': validate_losses}
+            print(losses_dict)
+            f.write(json.dumps(losses_dict) + '\n')
 
-    # # --- Step 7: Save model and plot ---
-    # torch.save(model.state_dict(), save_dir / 'model.pth')
-    # plot_training_losses(training_json, save_dir / 'loss_plot.png')
-    # print(f"Training complete. Model saved to {save_dir}")
+    # --- Step 7: Save model and plot ---
+    torch.save(model.state_dict(), save_dir / 'model.pth')
+    plot_training_losses(training_json, save_dir / 'loss_plot.png')
+    print(f"Training complete. Model saved to {save_dir}")
 
-    visualize_validation_predictions(model, validate_loader, device, num_examples=5, save_path=save_dir)
+    visualize_validation_predictions(model, validate_loader, device, num_examples=5, save_path=save_dir , bin_edges=bins)
 
 
 def plot_training_losses(losses_json_path: Path, output_path: Path = None):
@@ -255,12 +260,12 @@ def main():
     
     model_params = {
         'input_size': len(features)*2,  # Features + mask
-        'output_size': 6000,  # Number of time bins
-        'lstm_hidden_size': 64,
+        'output_size': 8,  # Number of time bins
+        'lstm_hidden_size': 32,
         'lstm_dropout': 0.0,
         'predictor_layers': [32],
-        'attention_layers': [64, 64],
-        'fc_layers': [64, 64],
+        'attention_layers': [32, 32],
+        'fc_layers': [32, 32],
         'features': features,
     }
     
@@ -289,7 +294,7 @@ def main():
         features=features,
         optimiser=torch.optim.Adam,
         loss_fn=dynamic_deephit.compute_loss,
-        num_epochs=20,
+        num_epochs=10,
         save_dir=Path('PhagoPred') / 'survival_analysis' / 'models' / 'dynamic_deephit' / 'test_run_13_06',
         batch_size=128,
         lr=1e-3,
