@@ -62,12 +62,12 @@ class DynamicDeepHit(torch.nn.Module):
         Args:
             x: [Sequence length, batch_size, num_features]
         """
-        lstm_out, (lstm_hidden, _) = self.lstm(x)  # lstm_hidden(seq_length, batch_size, lstm_hidden_size)
-        y = self.predictor(lstm_out)  # (batch_size, seq_length, num_features)
-        lstm_hidden = lstm_hidden.permute(1, 0, 2)  # (batch_size, seq_length, lstm_hidden_size)
-        attn_weights = self.attention(lstm_hidden).squeeze(-1) # (batch, seq_len)
+        lstm_out, (h_n, c_n) = self.lstm(x)  # lstm_out (batch_size, seq_len, lstm_hidden_size)
+        y = self.predictor(lstm_out)  # y (batch_size, seq_length, num_features//2)
+        # lstm_hidden = lstm_hidden.permute(1, 0, 2)  # (batch_size, seq_length, lstm_hidden_size)
+        attn_weights = self.attention(lstm_out).squeeze(-1) # (batch, seq_len)
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=1)  # (batch, seq_len)
-        context_vector = torch.sum(attn_weights.unsqueeze(-1) * lstm_hidden, dim=1)  # (batch, lstm_hidden_size)
+        context_vector = torch.sum(attn_weights.unsqueeze(-1) * lstm_out, dim=1)  # (batch, lstm_hidden_size)
         output = self.fc(context_vector)  # (batch, output_size)
         output = torch.nn.functional.softmax(output, dim=-1)  # (batch, output_size)
         return output, y

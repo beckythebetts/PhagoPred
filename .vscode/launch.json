@@ -19,7 +19,10 @@
             // "module": "PhagoPred.tracking.tracker",
             "module": "PhagoPred.run_all",
             "justMyCode": false,
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "env": {
+                "CUDA_LAUNCH_BLOCKING": "1"
+            }
         }
     ]
 }
