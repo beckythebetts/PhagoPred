@@ -12,7 +12,7 @@ class CellDataset(torch.utils.data.Dataset):
     def __init__(self,
                  hdf5_paths: list[Path],
                  features: list[str],
-                 pre_death_frames: int=0,
+                #  pre_death_frames: int=0,
                  interpolate_nan: bool=False,
                  means: np.ndarray=None,
                  stds: np.ndarray=None,
@@ -33,7 +33,7 @@ class CellDataset(torch.utils.data.Dataset):
         """
         self.hdf5_paths = hdf5_paths
         self.features = features
-        self.pre_death_frames = pre_death_frames
+        # self.pre_death_frames = pre_death_frames
         self.interpolate_nan = interpolate_nan
         self.specified_cell_idxs = specified_cell_idxs if specified_cell_idxs and len(self.hdf5_paths) == 1 else None
         self.num_bins = num_bins
@@ -71,7 +71,8 @@ class CellDataset(torch.utils.data.Dataset):
     
     def _compute_bins(self):
         obs_times = self.cell_metadata['End Frames'] - self.cell_metadata['Start Frames'] + 1
-        bins = np.quantile(obs_times, np.linspace(0, 1, self.num_bins + 1))
+        # bins = np.quantile(obs_times, np.linspace(0, 1, self.num_bins + 1))
+        bins = np.linspace(np.min(obs_times), np.max(obs_times), self.num_bins + 1)
         return bins
     
     def get_bins(self):
@@ -154,15 +155,25 @@ class CellDataset(torch.utils.data.Dataset):
         all_cell_features = self._get_features_xr(cell_metadata['File Idxs'])
         
         observation_time = cell_metadata['End Frames'] - cell_metadata['Start Frames'] + 1
-        event_indicator = 0 if np.isnan(cell_metadata['Death Frames']) else 1
+        # event_indicator = 0 if np.isnan(cell_metadata['Death Frames']) else 1
+
+        landmark_frame = np.random.randint(cell_metadata['Start Frames'], cell_metadata['End Frames'])
 
         cell_features = all_cell_features.isel({'Cell Index': cell_metadata['Local Cell Idxs']})
-        cell_features = cell_features.sel(Frame=slice(cell_metadata['Start Frames'], cell_metadata['End Frames'] - self.pre_death_frames if event_indicator == 1 else cell_metadata['End Frames']))
+        cell_features = cell_features.sel(Frame=slice(cell_metadata['Start Frames'], landmark_frame))
         cell_features = cell_features.to_dataarray(dim='Feature')
         cell_features = cell_features.transpose('Frame', 'Feature').values # [num_frames, num_features]
-
-        observation_time_bin = np.digitize(observation_time, self.get_bins()) - 1  # Bin the observation time
-        observation_time_bin = np.clip(observation_time_bin, 0, self.num_bins - 1)
+        
+        death_frame = cell_metadata['Death Frames']
+        if np.isnan(death_frame):
+            event_indicator = 0
+            time_to_event = cell_metadata['End Frames'] - landmark_frame
+        else:
+            event_indicator = 1
+            time_to_event = death_frame - landmark_frame
+            
+        time_to_event_bin = np.digitize(time_to_event, self.get_bins()) - 1  # Bin the observation time
+        time_to_event_bin = np.clip(time_to_event_bin, 0, self.num_bins - 1)
 
         # # Create mask of non-NaNs using torch.isnan
         # nan_mask = ~np.isnan(cell_features)
@@ -177,7 +188,7 @@ class CellDataset(torch.utils.data.Dataset):
         # print(self.get_bins())
         # print(observation_time)
 
-        return cell_features, observation_time_bin, event_indicator, observation_time
+        return cell_features, time_to_event_bin, event_indicator, time_to_event
 
     def plot_event_vs_censoring_hist(self, title='Events vs Censored', save_path=None, bins=16, show=False):
         """
@@ -221,12 +232,12 @@ def collate_fn(batch, fixed_length=None, means=None, stds=None, device='cpu'):
     """
     Custom collate function to handle variable-length sequences and padding.
     """
-    cell_features, observation_time_bins, event_indicators, observation_times = zip(*batch)
+    cell_features, time_to_event_bins, event_indicators, time_to_events = zip(*batch)
     # print(observation_times)
 
-    observation_time_bins = torch.tensor(observation_time_bins, dtype=torch.long, device=device)
+    time_to_event_bins = torch.tensor(time_to_event_bins, dtype=torch.long, device=device)
     event_indicators = torch.tensor(event_indicators, dtype=torch.float32, device=device)
-    observation_times = torch.tensor(observation_times, dtype=torch.long, device=device)
+    time_to_events = torch.tensor(time_to_events, dtype=torch.long, device=device)
     # print(observation_times)
 
     cell_features = [torch.tensor(features, dtype=torch.float32, device=device) for features in cell_features]  # List of [num_frames, num_features]
@@ -255,7 +266,7 @@ def collate_fn(batch, fixed_length=None, means=None, stds=None, device='cpu'):
     # Concatenate mask as additional features along last dimension
     cell_features = torch.cat([cell_features, nan_mask.float()], dim=-1)  # shape: [batch, frames, features*2]
 
-    return cell_features, lengths, observation_time_bins, event_indicators, observation_times
+    return cell_features, lengths, time_to_event_bins, event_indicators, time_to_events
 
 
 
