@@ -16,15 +16,15 @@ def validate_step(model, dataloader, loss_fn, device):
 
     with torch.no_grad():
         for batch in dataloader:
-            cell_features, lengths, observation_time_bins, event_indicators, observation_times = batch
+            cell_features, lengths, time_to_event_bins, event_indicators, time_to_events = batch
             cell_features = cell_features.to(device)
             lengths = lengths.to(device)
-            observation_time_bins = observation_time_bins.to(device)
+            time_to_event_bins = time_to_event_bins.to(device)
             event_indicators = event_indicators.to(device)
-            observation_times = observation_times.to(device)
+            time_to_events = time_to_events.to(device)
 
             outputs, y = model(cell_features)
-            loss_values = loss_fn(outputs, cell_features, y, observation_time_bins, event_indicators)
+            loss_values = loss_fn(outputs, cell_features, y, time_to_event_bins, event_indicators)
             for key, value in zip(
                 ['Total Loss', 'NLL Loss', 'Ranking Loss', 'Prediction Loss'], loss_values):
                 losses[key] += value.item() * cell_features.size(0)  # Multiply by batch size
@@ -40,12 +40,12 @@ def visualize_validation_predictions(model, dataloader, device, bin_edges, num_e
 
     with torch.no_grad():
         for batch in dataloader:
-            
-            cell_features, lengths, observation_time_bins, event_indicators, observation_times = batch
+
+            cell_features, lengths, time_to_event_bins, event_indicators, time_to_events = batch
             cell_features = cell_features.to(device)
-            observation_time_bins = observation_time_bins.cpu().numpy()
+            time_to_event_bins = time_to_event_bins.cpu().numpy()
             event_indicators = event_indicators.cpu().numpy()
-            observation_times = observation_times.cpu().numpy()
+            time_to_events = time_to_events.cpu().numpy()
 
             # Get predicted distribution over time bins
             predicted_dists, _ = model(cell_features)  # Shape: (batch_size, time_bins)
@@ -61,7 +61,7 @@ def visualize_validation_predictions(model, dataloader, device, bin_edges, num_e
                     print(f"Distribution difference between {i} and {i-1}: {diff}")
                     print(f"Input difference between {i} and {i-1}: {input_diff}")
                 pred_dist = predicted_dists[i]
-                true_time = observation_times[i]
+                true_time = time_to_events[i]
                 event = event_indicators[i]
 
                 plt.figure(figsize=(10, 4))

@@ -21,15 +21,15 @@ def train_step(model, dataloader, optimiser, loss_fn, device):
     losses = defaultdict(float)
     
     for batch in dataloader:
-        cell_features, lengths, observation_time_bins, event_indicators, observation_times = batch
+        cell_features, lengths, time_to_event_bins, event_indicators, time_to_event = batch
         cell_features = cell_features.to(device)
         lengths = lengths.to(device)
-        observation_time_bins = observation_time_bins.to(device)
+        time_to_event_bins = time_to_event_bins.to(device)
         event_indicators = event_indicators.to(device)
 
         optimiser.zero_grad()
         outputs, y = model(cell_features)
-        loss_values = loss_fn(outputs, cell_features, y, observation_time_bins, event_indicators)
+        loss_values = loss_fn(outputs, cell_features, y, time_to_event_bins, event_indicators)
         
         loss = loss_values[0]
         loss.backward()
