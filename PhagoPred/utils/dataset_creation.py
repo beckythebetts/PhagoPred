@@ -235,6 +235,48 @@ def epi_background_correction(dataset=SETTINGS.DATASET):
             # epi_ds[i] = to_8bit(corrected, np.percentile(corrected, 90), np.percentile(corrected, 99.9))
 
         epi_ds.attrs['Background corrected'] = True
+        
+def create_survival_analysis_dataset(dataset_path: Path) -> None:
+    """Create a new datset with only 'Cells group' and with chunks set to (num_frames, 1)"""
+    new_path = dataset_path.parent / f"{dataset_path.stem}_survival{dataset_path.suffix}"
+    if os.path.exists(new_path):
+        os.remove(new_path)
+    with h5py.File(dataset_path, 'r') as orig:
+        with h5py.File(new_path, 'x') as new:
+            orig_group = orig['Cells']['Phase']
+            new_group = new.create_group('Cells/Phase')
+
+            for name, dataset in tqdm(orig_group.items(), desc='Copying datasets'):
+                if isinstance(dataset, h5py.Dataset):
+                    print(f"Copying dataset '{name}'")
+                    try:
+                        # Get creation properties
+                        kwargs = {
+                            'dtype': dataset.dtype,
+                            'compression': dataset.compression,
+                            'compression_opts': dataset.compression_opts,
+                            'chunks': (dataset.shape[0], 1),
+                            'shuffle': dataset.shuffle,
+                            'fletcher32': dataset.fletcher32,
+                            'maxshape': dataset.maxshape
+                        }
+
+                        # Create dataset in destination
+                        new_group.create_dataset(
+                            name,
+                            data=dataset[...],
+                            shape=dataset.shape,
+                            **{k: v for k, v in kwargs.items() if v is not None}
+                            )
+                        new.flush()
+
+                    except Exception as e:
+                        print(e)
+
+            for attr_name, attr_value in orig_group.attrs.items():
+                        new_group.attrs[attr_name] = attr_value
+                    
+            new.flush()
 
 if __name__ == '__main__':
     # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_500_seg.h5")
@@ -244,7 +286,8 @@ if __name__ == '__main__':
     #                 phase_channel=1,
     #                 epi_channel=2,
     #                 )
-    epi_background_correction()
+    # epi_background_correction()
+    create_survival_analysis_dataset(SETTINGS.DATASET)
     # make_short_test_copy(Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05.h5"),
     #                      Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05_500.h5"),
     #                      start_frame=3000,
