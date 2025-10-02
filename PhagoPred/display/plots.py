@@ -9,6 +9,7 @@ from tqdm import tqdm
 import pandas as pd
 
 from PhagoPred import SETTINGS
+from PhagoPred.feature_extraction.extract_features import CellType
 
 plt.rcParams["font.family"] = 'serif'
 
@@ -291,7 +292,139 @@ def plot_death_frame(death_frames_txt: Path, save_as: Path):
     avg_error = np.sum(np.abs(valid_rows['True'] - valid_rows['Predicted'])) / len(valid_rows['True'])
     print(f"\nAverage error in cell death estimation is {avg_error} frames.\n")
 
+def km_plot(hdf5_files: list[Path], labels: list[str], save_as: Path, time_steps: tuple[int] = (1, 1)):
+    """Plot the Kaplan Meier estimator for hdf5_file/s."""
+    
+    if isinstance(hdf5_files, Path):
+        hdf5_files = [hdf5_files]
+        
+    cmap = plt.get_cmap('Set1')
+    colours = [cmap(i) for i in range(len(hdf5_files))]
+    def survival_estimator(d_is: np.ndarray, n_is:np.ndarray):
+        """Estimate surival funciotn at each time t_i.
+        args:
+            d_is = number of events(death) at each time t_i
+            n_is = number of samples still alive at each time t_i.
+        returns:
+            S [float]
+        """
+        return np.cumprod(1 - (d_is)/(n_is))
+    
+    for hdf5_file, label, colour, time_step in zip(hdf5_files, labels, colours, time_steps):
+        
+        with h5py.File(hdf5_file, 'r') as f:
+            cell_deaths_arr = f['Cells']['Phase']['CellDeath']
+            num_frames = cell_deaths_arr.shape[0]
+            
+            print(num_frames)
+            cell_deaths = cell_deaths_arr[0]
+            
+            # Load only 'Area' to compute start/end frames
+            area_data = CellType('Phase').get_features_xr(f, features=['Area'])['Area'].transpose('Cell Index', 'Frame').values  # shape: (num_cells, num_frames)
 
+            # Use numpy vectorization for speed
+            not_nan_mask = ~np.isnan(area_data)
+            # First valid frame (start frame)
+            # Last valid frame (end frame)
+            reversed_mask = not_nan_mask[:, ::-1]
+            last_frames = area_data.shape[1] - 1 - reversed_mask.argmax(axis=1)
+        ds, ns = np.zeros(shape=num_frames), np.zeros(shape=num_frames)
+        for cell_death, last_frame in zip(cell_deaths, last_frames):
+            if np.isnan(cell_death):
+                ns[np.arange(0, last_frame).astype(int)] += 1
+            else:
+                ns[np.arange(0, cell_death).astype(int)] += 1
+                ds[cell_death.astype(int)] += 1
+        mask = ds > 0
+        ds = ds[mask]
+        ns = ns[mask]
+        ts = np.nonzero(mask)[0]
+        ts = ts * time_step
+        print(ts)
+        print(mask.shape, ds.shape, ns.shape, ts.shape)
+        plt.step(ts, survival_estimator(ds, ns), where='post', label=label, color=colour)
+    
+    plt.xlabel('Time / minutes')
+    plt.ylabel('Survival Probability')
+    plt.legend()
+    plt.grid()
+    plt.savefig(save_as)
+    
+def compare_cell_features(hdf5_files: list[Path], labels: list[str], feature: str, save_as: Path) -> None:
+    """Compare the histograms of a given cell feature between two datasets.
+    If compare_dead = true, plot separate histograms for cells which die during observation vs those that dont."""
+    
+    if isinstance(hdf5_files, Path):
+        hdf5_files = [hdf5_files]
+        
+    cmap = plt.get_cmap('Set1')
+    num_colours = len(hdf5_files)
+    colours = [cmap(i) for i in range(len(hdf5_files))]
+        
+    for hdf5_file, label, colour in zip(hdf5_files, labels, colours):
+        with h5py.File(hdf5_file, 'r') as f:
+            features_ds = f['Cells']['Phase'][feature][:]
+            cell_deaths_arr = f['Cells']['Phase']['CellDeath']
+            num_frames = cell_deaths_arr.shape[0]
+            
+            print(num_frames)
+            cell_deaths = cell_deaths_arr[0]
+            for i, cell_death in enumerate(cell_deaths):
+                if not np.isnan(cell_death):
+                    features_ds[int(cell_death):, i] = np.nan
+            
+            
+            plt.hist(features_ds.ravel(), bins=50, alpha=0.5, color=colour, label=label, density=True)
+    
+    plt.xlabel(feature)
+    plt.ylabel('frequency')
+    plt.legend()
+    plt.grid()
+    plt.savefig(save_as)
+
+def plot_alive_vs_dead_feature(hdf5_file: Path, feature: str, save_as: Path) -> None:
+    """Plot histograms of a given feature for cells that survive vs cells that die."""
+    
+    with h5py.File(hdf5_file, 'r') as f:
+        features_ds = f['Cells']['Phase'][feature][:]          # shape: (num_frames, num_cells)
+        cell_deaths = f['Cells']['Phase']['CellDeath'][0]      # shape: (num_cells,)
+        
+        num_frames, num_cells = features_ds.shape
+
+        alive_values = []
+        dead_values = []
+
+        for cell_idx in range(num_cells):
+            death_frame = cell_deaths[cell_idx]
+
+            if np.isnan(death_frame):
+                # Alive — include all frames
+                alive_values.append(features_ds[:, cell_idx])
+            else:
+                # Dead — include up to death frame (exclude death frame itself)
+                dead_values.append(features_ds[:int(death_frame), cell_idx])
+
+        # Flatten all values
+        alive_values_flat = np.concatenate(alive_values) if alive_values else np.array([])
+        dead_values_flat = np.concatenate(dead_values) if dead_values else np.array([])
+        
+        alive_values_flat = alive_values_flat[~np.isnan(alive_values_flat)]
+        dead_values_flat = dead_values_flat[~np.isnan(dead_values_flat)]
+        alive_values_flat = alive_values_flat[alive_values_flat <= np.percentile(alive_values_flat, 99)]
+        dead_values_flat = dead_values_flat[dead_values_flat <= np.percentile(dead_values_flat, 99)]
+        print(np.nanmax(alive_values_flat), np.nanmax(dead_values_flat))
+        # Plot
+        plt.hist(alive_values_flat, bins=50, alpha=0.6, color='green', label='Healthy cells', density=True)
+        plt.hist(dead_values_flat, bins=50, alpha=0.6, color='red', label='Dying cells', density=True)
+
+        plt.xlabel(feature)
+        plt.ylabel('Frequency Density')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(save_as)
+    
+    
 def main():
     feature_names=[
         # 'Area',
@@ -314,13 +447,13 @@ def main():
         'Fluorescence Distance Mean', 
         'Fluorescence Distance Variance'
     ]
-    plot_two_death_frame_hists(
-        Path('temp') / 'death_frames_fine_tuned.txt',
-        Path('temp') / 'cell_deaths_24_06.txt',
-        label1='Fine Tuned',
-        label2='Original',
-        save_as=Path('temp') / 'death_frame_comparison.png'
-    )
+    # plot_two_death_frame_hists(
+    #     Path('temp') / 'death_frames_fine_tuned.txt',
+    #     Path('temp') / 'cell_deaths_24_06.txt',
+    #     label1='Fine Tuned',
+    #     label2='Original',
+    #     save_as=Path('temp') / 'death_frame_comparison.png'
+    # )
     # plot_cell_features(1, 0, 50, Path('temp') / 'plot.png', feature_names=feature_names)
     # plot_average_cell_features(Path('temp') / 'plot.png', feature_names=feature_names)
     # plot_feature_correlations(Path('temp') / 'correlations_plot.png', feature_names=feature_names)
@@ -336,6 +469,19 @@ def main():
     #     'Mode 3',
     #     'Speed'
     # ])
+    # km_plot([Path('PhagoPred') / 'Datasets' / '16_09_1.h5',
+    #         Path('PhagoPred') / 'Datasets' / '13_06_survival.h5',
+    #         Path('PhagoPred') / 'Datasets' / '24_06_survival.h5'], 
+    #         ['16_09', '13_06', '24_06'],
+    #         Path('temp') / 'km_curve.png',
+    #         (5, 1, 1))
+    
+    # compare_cell_features([Path('PhagoPred') / 'Datasets' / '13_06_survival.h5',
+    #             Path('PhagoPred') / 'Datasets' / '24_06_survival.h5'], 
+    #             ['13_06', '24_06'], 'Area',
+    #             Path('temp') / 'features_plot.png')
+    
+    plot_alive_vs_dead_feature(Path('PhagoPred') / 'Datasets' / '24_06_survival.h5', 'Circularity',Path('temp') / 'features_plot.png')
 
 if __name__ == '__main__':
     main()

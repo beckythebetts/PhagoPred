@@ -6,6 +6,7 @@ try:
     # DATASET = Path('PhagoPred')/'Datasets'/'secondwithlight - Copy.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_short_seg_test.h5'
     DATASET = Path('PhagoPred')/'Datasets'/'24_06.h5'
+    DATASET = Path('PhagoPred')/'Datasets'/'16_09_1.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_500.h5'
 
     with h5py.File(DATASET, 'r') as f:

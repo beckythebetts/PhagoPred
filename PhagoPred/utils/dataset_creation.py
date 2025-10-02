@@ -236,9 +236,10 @@ def epi_background_correction(dataset=SETTINGS.DATASET):
 
         epi_ds.attrs['Background corrected'] = True
         
-def create_survival_analysis_dataset(dataset_path: Path) -> None:
+def create_survival_analysis_dataset(dataset_path: Path, new_path: Path = None) -> None:
     """Create a new datset with only 'Cells group' and with chunks set to (num_frames, 1)"""
-    new_path = dataset_path.parent / f"{dataset_path.stem}_survival{dataset_path.suffix}"
+    if new_path is None:
+        new_path = dataset_path.parent / f"{dataset_path.stem}_survival{dataset_path.suffix}"
     if os.path.exists(new_path):
         os.remove(new_path)
     with h5py.File(dataset_path, 'r') as orig:
@@ -287,7 +288,7 @@ if __name__ == '__main__':
     #                 epi_channel=2,
     #                 )
     # epi_background_correction()
-    create_survival_analysis_dataset(SETTINGS.DATASET)
+    create_survival_analysis_dataset(Path('~/thor_server/24_06.h5').expanduser(), Path('PhagoPred') / 'Datasets' / '24_06_survival.h5')
     # make_short_test_copy(Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05.h5"),
     #                      Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05_500.h5"),
     #                      start_frame=3000,
