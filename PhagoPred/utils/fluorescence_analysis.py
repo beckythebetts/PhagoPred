@@ -423,7 +423,11 @@ def plot_results_line(directory: Union[Path, str], x_positions: list[float]) -> 
         means = np.array(means)
         stds = np.array(stds)
         spreads = np.transpose(np.array(spreads))
-
+        print(spreads)
+        spreads[0] = means - spreads[0]
+        spreads[1] = spreads[1] - means
+        print(means)
+        print(spreads)
         ax.errorbar(x_positions, means, yerr=spreads, marker='o', color='k', capsize=5, label=metric)
         # ax.fill_between(x_positions, means - stds, means + stds, color='tab:red', alpha=0.5)
         ax.set_title(metric)
@@ -448,6 +452,13 @@ def plot_results_line(directory: Union[Path, str], x_positions: list[float]) -> 
     #     cell_stds.append(df.at[cell_size_std[0], cell_size_std[1]])
 
     cell_spreads = np.transpose(np.array(cell_spreads))
+    print(cell_means)
+    print(cell_spreads)
+    
+    cell_spreads[0] = cell_means - cell_spreads[0]
+    cell_spreads[1] = cell_spreads[1] - cell_means
+    print(cell_spreads)
+    
     bars = cell_ax.bar(x, cell_means, yerr=cell_spreads, capsize=5, color=colors)
     cell_ax.set_xticks(x)
     cell_ax.set_xticklabels(strains, rotation=45)
