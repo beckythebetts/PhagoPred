@@ -211,7 +211,6 @@ class DensityPhase(BaseFeature):
         """Compute number of other phase cells within self.radii pixels (centroid based).
         Manual batching becuase of probelms with O(n^2) batching with Dask arrays
         """
-        # print("Calculating macropahge densities...")
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         positions = xr.concat([phase_xr[feat] for feat in ['X', 'Y']], dim='Feature')
         positions = positions.transpose('Frame', 'Cell Index', 'Feature').chunk({})

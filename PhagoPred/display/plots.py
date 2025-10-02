@@ -248,7 +248,7 @@ def plot_two_death_frame_hists(
     all_errors = pd.concat([errors1, errors2])
     min_edge = all_errors.min()
     max_edge = all_errors.max()
-    bins = 7  # or any number you choose
+    bins = 30  # or any number you choose
     bin_edges = np.linspace(min_edge, max_edge, bins + 1)
 
     plt.figure(figsize=(8, 6))
