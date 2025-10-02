@@ -4,6 +4,7 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import torch
 import json
+import numpy as np
 
 from PhagoPred.survival_analysis.data.dataset import CellDataset, collate_fn
 from PhagoPred.survival_analysis.models import dynamic_deephit
@@ -15,14 +16,15 @@ def validate_step(model, dataloader, loss_fn, device):
 
     with torch.no_grad():
         for batch in dataloader:
-            cell_features, lengths, observation_times, event_indicators = batch
+            cell_features, lengths, time_to_event_bins, event_indicators, time_to_events = batch
             cell_features = cell_features.to(device)
             lengths = lengths.to(device)
-            observation_times = observation_times.to(device)
+            time_to_event_bins = time_to_event_bins.to(device)
             event_indicators = event_indicators.to(device)
+            time_to_events = time_to_events.to(device)
 
             outputs, y = model(cell_features)
-            loss_values = loss_fn(outputs, cell_features, y, observation_times, event_indicators)
+            loss_values = loss_fn(outputs, cell_features, y, time_to_event_bins, event_indicators)
             for key, value in zip(
                 ['Total Loss', 'NLL Loss', 'Ranking Loss', 'Prediction Loss'], loss_values):
                 losses[key] += value.item() * cell_features.size(0)  # Multiply by batch size
@@ -30,7 +32,7 @@ def validate_step(model, dataloader, loss_fn, device):
     avg_losses = {key: value / len(dataloader.dataset) for key, value in losses.items()}
     return avg_losses
 
-def visualize_validation_predictions(model, dataloader, device, num_examples=5, save_path=None):
+def visualize_validation_predictions(model, dataloader, device, bin_edges, num_examples=5, save_path=None):
     model.eval()
     model.to(device)
 
@@ -38,10 +40,12 @@ def visualize_validation_predictions(model, dataloader, device, num_examples=5, 
 
     with torch.no_grad():
         for batch in dataloader:
-            cell_features, lengths, observation_times, event_indicators = batch
+
+            cell_features, lengths, time_to_event_bins, event_indicators, time_to_events = batch
             cell_features = cell_features.to(device)
-            observation_times = observation_times.cpu().numpy()
+            time_to_event_bins = time_to_event_bins.cpu().numpy()
             event_indicators = event_indicators.cpu().numpy()
+            time_to_events = time_to_events.cpu().numpy()
 
             # Get predicted distribution over time bins
             predicted_dists, _ = model(cell_features)  # Shape: (batch_size, time_bins)
@@ -51,13 +55,17 @@ def visualize_validation_predictions(model, dataloader, device, num_examples=5, 
             for i in range(len(cell_features)):
                 if examples_plotted >= num_examples:
                     break
-
+                if i >= 1:
+                    diff = np.abs(predicted_dists[i] - predicted_dists[i - 1]).sum()
+                    input_diff = np.abs(cell_features[i].cpu().numpy() - cell_features[i - 1].cpu().numpy()).sum()
+                    print(f"Distribution difference between {i} and {i-1}: {diff}")
+                    print(f"Input difference between {i} and {i-1}: {input_diff}")
                 pred_dist = predicted_dists[i]
-                true_time = observation_times[i]
+                true_time = time_to_events[i]
                 event = event_indicators[i]
 
                 plt.figure(figsize=(10, 4))
-                plt.plot(pred_dist, label='Predicted Distribution')
+                plt.step(bin_edges[:-1], pred_dist, label='Predicted Distribution')
                 if event == 1:
                     plt.axvline(x=true_time, color='red', linestyle='--', label=f'True Death @ {true_time}')
                 else:
