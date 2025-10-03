@@ -93,6 +93,17 @@ class TrackerWithTrackpy:
         self.track_id_map[mask] = -1
         self.remap_track_id_map()
 
+    # def remove_nan_tracks(self, max_nan_amount: float = 0.3) -> None:
+    #     """Remove tracks where greater than max_nan_amount proprortion of frames are nan valued (missing)."""
+    #     self.feature_extractor = extract_features.FeaturesExtraction(self.file)
+        
+    #     self.feature_extractor.add_feature(features.FirstLastFrame(), cell_type=self.channel)
+    #     self.feature_extractor.set_up()
+    #     self.feature_extractor.extract_features()
+        
+        
+        
+        
     
     def remap_track_id_map(self):
         """Reindex the track_id_map so all track_ids are consecutive"""
