@@ -444,12 +444,14 @@ class ClassifierHeadFineTuner(train.MyTrainer):
     
     @classmethod
     def build_optimizer(cls, cfg, model):
-        """Freezes everything but classification head."""
+        """Freezes everything but classification head
+        Freezes only RPN."""
         for name, param in model.named_parameters():
-            if 'proposal_generator' in name:
-                param.requires_grad = False
-            else:
-                param.requires_grad = True
+            param.requires_grad = True
+            # if 'proposal_generator' in name:
+            #     param.requires_grad = False
+            # else:
+            #     param.requires_grad = True
             # if "roi_heads.box_predictor.cls_score" in name:
             # # if "roi_heads.box_predictor" in name:
             #     param.requires_grad = True

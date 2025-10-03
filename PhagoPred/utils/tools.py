@@ -306,21 +306,148 @@ def standardise(image):
     standardized_image = (image - mean) / std
 
     return standardized_image
-                                      
-def show_segmentation(image_array, mask_array, true_mask_array=None):
-    if len(image_array.shape) == 2:
-        image_array = torch.tensor(np.stack((image_array, image_array, image_array), axis=-1))
-    else:
-        image_array = torch.tensor(image_array)
-    mask_array = torch.tensor(mask_array)
-    outline = mask_funcs.mask_outline(torch.where(mask_array>0, 1, 0), thickness=2)
 
-    image_array[:,:,0][outline] = torch.max(image_array)
+# def show_segmentation(image_array, mask_array, true_mask_array=None):
+#     # Ensure RGB format
+#     if len(image_array.shape) == 2:
+#         image_array = np.stack((image_array,) * 3, axis=-1)
+    
+#     # Convert to torch tensor
+#     image_array = torch.tensor(image_array).clone()
+#     mask_array = torch.tensor(mask_array)
+    
+#     # Create predicted outline
+#     pred_outline = mask_funcs.mask_outline((mask_array > 0).int(), thickness=2)
+    
+#     if true_mask_array is not None:
+#         true_mask_array = torch.tensor(true_mask_array)
+#         true_outline = mask_funcs.mask_outline((true_mask_array > 0).int(), thickness=2)
+
+#         # Compute overlap
+#         overlap = pred_outline & true_outline
+#         only_pred = pred_outline & ~overlap
+#         only_true = true_outline & ~overlap
+
+#         # Make sure image is in uint8 range
+#         if image_array.dtype != torch.uint8:
+#             image_array = image_array.clamp(0, 255).byte()
+
+#         # Apply colors:
+#         # Yellow for overlap (255, 255, 0)
+#         image_array[overlap] = torch.tensor([255, 255, 0], dtype=torch.uint8)
+
+#         # Red for predicted only (255, 0, 0)
+#         image_array[only_pred] = torch.tensor([255, 0, 0], dtype=torch.uint8)
+
+#         # Green for true only (0, 255, 0)
+#         image_array[only_true] = torch.tensor([0, 255, 0], dtype=torch.uint8)
+
+#     else:
+#         # No true mask, only show predicted outline in red
+#         image_array[pred_outline] = torch.tensor([255, 0, 0], dtype=torch.uint8)
+
+#     return image_array.cpu().numpy()    
+
+def show_segmentation(image_array, mask_array, true_mask_array=None, thickness=3):
+    if len(image_array.shape) == 2:
+        image_array = np.stack((image_array,) * 3, axis=-1)
+
+    image_tensor = torch.tensor(image_array).clone()
+    if image_tensor.dtype != torch.uint8:
+        image_tensor = image_tensor.clamp(0, 255).byte()
+
+    # Handle multiple predicted masks: [N, H, W] or [H, W]
+    mask_tensor = torch.tensor(mask_array)
+    if mask_tensor.ndim == 3:
+        mask_tensor = mask_tensor.sum(dim=0).int()
+    else:
+        mask_tensor = mask_tensor.int()
+
+    pred_outline = mask_funcs.mask_outlines(mask_tensor, thickness=thickness)
+
     if true_mask_array is not None:
-        true_mask_array = torch.tensor(true_mask_array)
-        true_outline = mask_funcs.mask_outline(torch.where(true_mask_array>0, 1, 0), thickness=2)
-        image_array[:, :, 1][true_outline] = torch.max(image_array)
-    return image_array.cpu().numpy()
+        true_tensor = torch.tensor(true_mask_array)
+        if true_tensor.ndim == 3:
+            true_tensor = true_tensor.sum(dim=0).int()
+        else:
+            true_tensor = true_tensor.int()
+
+        true_outline = mask_funcs.mask_outlines(true_tensor, thickness=thickness)
+
+        # Create masks for outline positions
+        overlap = (pred_outline > 0) & (true_outline > 0)
+        only_pred = (pred_outline > 0) & (~overlap)
+        only_true = (true_outline > 0) & (~overlap)
+
+        # Draw order: green (true), red (pred), yellow (overlap)
+        image_tensor[only_true] = torch.tensor([0, 255, 0], dtype=torch.uint8)       # Green
+        image_tensor[only_pred] = torch.tensor([255, 0, 0], dtype=torch.uint8)       # Red
+        image_tensor[overlap]    = torch.tensor([255, 255, 0], dtype=torch.uint8)    # Yellow
+
+    else:
+        # Only predicted outline
+        image_tensor[pred_outline > 0] = torch.tensor([255, 0, 0], dtype=torch.uint8)
+
+    return image_tensor.cpu().numpy()
+# def show_segmentation(image_array, mask_array, true_mask_array=None):
+#     if len(image_array.shape) == 2:
+#         image_array = np.stack((image_array,) * 3, axis=-1)
+
+#     image_tensor = torch.tensor(image_array).clone()
+#     if image_tensor.dtype != torch.uint8:
+#         image_tensor = image_tensor.clamp(0, 255).byte()
+
+#     mask_tensor = torch.tensor(mask_array).int()
+
+#     # Get predicted outline
+#     pred_outline = mask_funcs.mask_outline((mask_tensor > 0), thickness=2)
+
+#     if true_mask_array is not None:
+#         true_tensor = torch.tensor(true_mask_array).int()
+#         true_outline = mask_funcs.mask_outline((true_tensor > 0), thickness=2)
+
+#         # Keep all outline pixels (don't remove overlaps yet)
+#         full_pred_outline = pred_outline.clone()
+#         full_true_outline = true_outline.clone()
+
+#         # Compute overlap AFTER outlines have full thickness
+#         overlap = full_pred_outline & full_true_outline
+
+#         # Areas unique to each
+#         only_pred = full_pred_outline & ~overlap
+#         only_true = full_true_outline & ~overlap
+
+#         # Draw order: true (green), pred (red), then overlap (yellow) to overwrite shared pixels
+
+#         # Green for true outline
+#         image_tensor[only_true] = torch.tensor([0, 255, 0], dtype=torch.uint8)
+
+#         # Red for predicted outline
+#         image_tensor[only_pred] = torch.tensor([255, 0, 0], dtype=torch.uint8)
+
+#         # Yellow for overlap
+#         image_tensor[overlap] = torch.tensor([255, 255, 0], dtype=torch.uint8)
+
+#     else:
+#         # Only predicted outline
+#         image_tensor[pred_outline] = torch.tensor([255, 0, 0], dtype=torch.uint8)
+
+#     return image_tensor.cpu().numpy()
+                                  
+# def show_segmentation(image_array, mask_array, true_mask_array=None):
+#     if len(image_array.shape) == 2:
+#         image_array = torch.tensor(np.stack((image_array, image_array, image_array), axis=-1))
+#     else:
+#         image_array = torch.tensor(image_array)
+#     mask_array = torch.tensor(mask_array)
+#     outline = mask_funcs.mask_outline(torch.where(mask_array>0, 1, 0), thickness=2)
+
+#     image_array[:,:,0][outline] = torch.max(image_array)
+#     if true_mask_array is not None:
+#         true_mask_array = torch.tensor(true_mask_array)
+#         true_outline = mask_funcs.mask_outline(torch.where(true_mask_array>0, 1, 0), thickness=2)
+#         image_array[:, :, 1][true_outline] = torch.max(image_array)
+#     return image_array.cpu().numpy()
 
 def show_semantic_segmentation(image_array, mask_array, true_mask_array=None):
     if len(image_array.shape) == 2:
