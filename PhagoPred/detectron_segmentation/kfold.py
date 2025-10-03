@@ -203,7 +203,40 @@ class KFold:
 
                     results = self.prec_recall_curve(true_masks[category], pred_masks[category])
                     results.to_csv(str(file / f'{im_name.stem}_{category}_results.txt'), sep='\t')
-                
+    
+    def fine_tune_eval_clusters(self, plot_title: str):
+        """Plot precision recall curves of clusters."""
+        results = []
+        for file in self.directory.glob('split_*'):
+            metric_evaluator = Evaluator(file / 'Fine_Tuning_Data', file / 'Model', eval_mode='metrics')
+            metric_evaluator.eval()
+            for results_file in (file / 'Evaluation').glob("*_results.txt"):
+                results.append(pd.read_csv(results_file, sep = '\t', index_col = 0))
+        results = pd.concat(results, axis=0)
+        means, stds = results.groupby(level=0).mean(), results.groupby(level=0).std()
+        percentiles = results.groupby(level=0).quantile([0.05, 0.5, 0.95]).unstack(level=1)
+        metrics = means.columns.values
+        thresholds = means.index.values
+        
+        plt.rcParams["font.family"] = 'serif'
+        fig, axs = plt.subplots(1, 3, figsize=(12, 4))
+        for ax, metric in zip(axs, metrics):
+            p5 = percentiles[(metric, 0.05)]
+            median = percentiles[(metric, 0.5)]
+            p95 = percentiles[(metric, 0.95)]
+            
+            # ax.plot(thresholds, means[metric], color=colour, label=label)
+            # ax.fill_between(thresholds, means[metric]-stds[metric], means[metric]+stds[metric], color=colour, alpha=0.5, edgecolor='none')
+            
+            ax.plot(thresholds, median)
+            ax.fill_between(thresholds, p5, p95, alpha=0.5, edgecolor='none')
+            ax.set_xlabel('IOU Threshold')
+            ax.set_ylabel(metric.capitalize())
+            ax.grid(True)
+        plt.title(plot_title)
+        # plt.legend()
+        plt.savefig(self.directory / 'cluster_results.png')
+        
     def fine_tune_eval(self, cm_title: str):
         cms = []
         accs = []
@@ -216,17 +249,22 @@ class KFold:
         cms = np.array(cms)
         mean_cm = np.mean(cms, axis=0)
         std_cm = np.std(cms, axis=0)
+        
+        median_cm = np.median(cms, axis=0)
+        p5_cm = np.percentile(cms, 5, axis=0)
+        p95_cm = np.percentile(cms, 95, axis=0)
 
         # Create annotation strings like "0.85±0.02"
         annotations = np.empty_like(mean_cm, dtype=object)
         for i in range(mean_cm.shape[0]):
             for j in range(mean_cm.shape[1]):
-                annotations[i, j] = f"{mean_cm[i, j]:.2f}±{std_cm[i, j]:.2f}"
+                # annotations[i, j] = f"{mean_cm[i, j]:.2f}±{std_cm[i, j]:.2f}"
+                annotations[i, j] = f"{median_cm[i, j]:.2f} ({p5_cm[i, j]:.2f}–{p95_cm[i, j]:.2f})"
 
         labels = ['Macrophage', 'Dead Macrophage', 'No Cell']
         # Plot
         plt.figure(figsize=(6, 6))
-        sns.heatmap(mean_cm, annot=annotations, fmt='', cmap='Blues', xticklabels=labels, yticklabels=labels, cbar=False)
+        sns.heatmap(median_cm, annot=annotations, fmt='', cmap='Blues', xticklabels=labels, yticklabels=labels, cbar=False)
         plt.xlabel("Predicted label")
         plt.ylabel("True label")
         plt.title(cm_title)
@@ -599,17 +637,57 @@ def split_masks_by_area(true_masks, pred_masks, n_groups=4):
             true_idxs = np.where((true_areas >= lower_threshold) & (true_areas < upper_threshold)) 
             pred_ixs = np.where((true_areas >= lower_threshold) & (true_areas < upper_threshold))                                     
 
+def compare_prec_recall_curves(directories: list, save_as: Path, labels: list) -> None:
+    cmap = plt.cm.get_cmap('Set1')
+    plt.rcParams["font.family"] = 'serif'
+    colours = [cmap(i) for i in range(len(labels))]
+    fig, axs = plt.subplots(1, 3, figsize=(12, 4))
+    for i, directory in enumerate(directories):
+        results = []
+        for file in directory.glob('split_*'):
+            # metric_evaluator = Evaluator(file / 'Fine_Tuning_Data', file / 'Model', eval_mode='metrics')
+            # metric_evaluator.eval()
+            for results_file in (file / 'Evaluation').glob("*_results.txt"):
+                results.append(pd.read_csv(results_file, sep = '\t', index_col = 0))
+        results = pd.concat(results, axis=0)
+        means, stds = results.groupby(level=0).mean(), results.groupby(level=0).std()
+        percentiles = results.groupby(level=0).quantile([0.05, 0.5, 0.95]).unstack(level=1)
+        metrics = means.columns.values
+        thresholds = means.index.values
     
+        for ax, metric in zip(axs, metrics):
+            p5 = percentiles[(metric, 0.05)]
+            median = percentiles[(metric, 0.5)]
+            p95 = percentiles[(metric, 0.95)]
+            
+            # ax.plot(thresholds, means[metric], color=colour, label=label)
+            # ax.fill_between(thresholds, means[metric]-stds[metric], means[metric]+stds[metric], color=colour, alpha=0.5, edgecolor='none')
+            
+            ax.plot(thresholds, median, color=colours[i], label=labels[i])
+            ax.fill_between(thresholds, p5, p95, color=colours[i], alpha=0.5, edgecolor='none')
+            ax.set_xlabel('IOU Threshold')
+            ax.set_ylabel(metric.capitalize())
+            ax.grid(True)
+    plt.legend()
+    plt.tight_layout()#
+    plt.savefig(save_as)
 
 def main():
     faulthandler.enable()
     # merge_jsons(Path('PhagoPred')/ 'detectron_segmentation' / 'models' / 'toumai_01_05' / 'labels')
+    # compare_prec_recall_curves([
+    #     Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_merge_no_fine_tune',
+    #     Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_merge_fine_tune'
+    # ],
+    #                            Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'comparison_plot.png',
+    #                            ['No Fine Tune', 'Fine Tune'])
+    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_merge_no_fine_tune', fine_tune=True)
+    # # my_kfold.split_all()
+    # # my_kfold.train()
+    # # my_kfold.eval()
 
-    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_fine_tune', fine_tune=True)
-    # my_kfold.split_all()
-    my_kfold.eval()
-    # my_kfold.train()
-    # my_kfold.fine_tune_eval('Fine Tuned')
+    # my_kfold.fine_tune_eval(' Not Fine Tuned')
+    my_kfold.fine_tune_eval_clusters('Not Fine Tuned')
     # my_kfold.train()
     # my_kfold.eval()
     # my_kfold.plot()
