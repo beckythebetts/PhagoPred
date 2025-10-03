@@ -45,6 +45,10 @@ class CellType:
         self.num_cells = None
 
 
+    def set_start_end_death_frames(self):
+        """Add atributes  to self.features_group consisting of lists of frames of first appearnance, last appearance and death for each cell.
+        For no cell death observecm dell death will be -1."""
+
     def add_feature(self, feature):
         if feature.primary_feature:
             if feature.derived_feature:
@@ -150,12 +154,15 @@ class CellType:
 
     def get_features_xr(self, h5py_file: h5py.File, features: list = None) -> xr.Dataset:
         """
-        h5py file is open file, returns x_array (chunked like h5py). If features not specified, reads all features.
+        h5py file is open file, returns x_array (chunked like h5py). If features not specified, reads all features iwth both cell index and time dimensions.
         """
         data_dict = {}
         for feature_name, feature_data in h5py_file[self.features_group].items():
             if features:
                 if feature_name not in features:
+                    continue
+            else:
+                if feature_data.shape[0] == 1:
                     continue
             # read as dask array, preserving chunks
             data = da.from_array(feature_data, chunks=feature_data.chunks)
@@ -219,6 +226,7 @@ class FeaturesExtraction:
                 self.extract_primary_features(f, cell_type)
                 self.extract_primary_derived_features(f, cell_type)
                 self.extract_derived_features(f, cell_type)
+            
 
     def extract_primary_features(self, f: h5py.File, cell_type: CellType) -> None:
         if len(cell_type.primary_features) > 0:
@@ -327,8 +335,10 @@ class FeaturesExtraction:
 
                 if result.ndim == 2:
                     result = result[:, :, np.newaxis]
-
+                
                 for i, feature_name in enumerate(feature.get_names()):
+                    if result.shape[cell_type.FRAME_DIM] == 1:
+                        f[cell_type.features_group][feature_name].resize(1, cell_type.FRAME_DIM)
                     f[cell_type.features_group][feature_name][:] = result[:, :, i]
 
 
@@ -336,15 +346,16 @@ def main():
     feature_extractor = FeaturesExtraction()
 
     phase_features = [
-        features.Fluorescence(),
+        # features.Fluorescence(),
         # features.MorphologyModes(), 
-        features.Speed(),
-        features.DensityPhase(),
-        features.Displacement(),
-        features.Perimeter(),
-        features.Circularity(),
+        # features.Speed(),
+        # features.DensityPhase(),
+        # features.Displacement(),
+        # features.Perimeter(),
+        # features.Circularity(),
         # features.GaborScale(),
-        features.CellDeath()
+        features.CellDeath(),
+        features.FirstLastFrame(),
         ]
     
     for feature in phase_features:

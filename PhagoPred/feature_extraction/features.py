@@ -24,6 +24,10 @@ class BaseFeature:
         return self.name
     
     def compute(self):
+        """
+        returns:
+            np.array [num_frames, num_cells, num_features]
+        """
         raise NotImplementedError(f"{self.get_name()} has no compute method implemented")
     
     # def set_index_positions(self, start: int, end: int = None) -> None:
@@ -67,10 +71,29 @@ class CellDeath(BaseFeature):
         has_death = np.any(death_possible, axis=0)
 
         # Output array
-        death_frames = np.full(smoothed_cell_state.shape, np.nan)
+        death_frames = np.full((1, smoothed_cell_state.shape[1]), np.nan)
         death_frames[0, has_death] = first_death_idx[has_death]
 
         return death_frames
+
+class FirstLastFrame(BaseFeature):
+    """Computes frame of each cells first and last appearances."""
+    derived_feature = True
+
+    def get_names(self):
+        return ['First Frame', 'Last Frame']
+
+    def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
+        # Use areas dataset to find nan frames
+        areas = phase_xr['Area']
+
+        not_nan_mask = ~np.isnan(areas)
+        start = not_nan_mask.argmax(axis=0)
+        reversed_mask = not_nan_mask[::-1, :]
+        last = areas.shape[0] - 1 - reversed_mask.argmax(axis=0)
+
+        return np.stack([start, last], axis=1)[np.newaxis, :, :]
+
 
 class Coords(BaseFeature):
     """
