@@ -191,12 +191,21 @@ class AllCellsViewer(QMainWindow):
                 self.start_frame = 0
             if self.end_frame is None:
                 self.end_frame = phase_data.shape[0]
+            
+            # ========TESTING=============
+            # Load per-cell metadata (you need to create these arrays beforehand and save to HDF5)
+            first_appearance = f['Cells']['Phase']['First Frame'][0]  # shape: (num_cells,)
+            last_appearance = f['Cells']['Phase']['Last Frame'][0]    # shape: (num_cells,)
 
+            num_cells = first_appearance.shape[0]
+            last_known_masks = {}  # Cache: cell_id → binary mask
+
+            filled_masks = []  # New mask list with outlines filled
             display_frames = np.arange(start=self.start_frame, stop=self.end_frame, step=self.interval)
-
+            
             loading_bar = LoadingBarDialog(len(display_frames), message="Loading images...")
             loading_bar.show()
-
+            
             images = []
             labels = []
             masks = [] 
@@ -212,29 +221,86 @@ class AllCellsViewer(QMainWindow):
             }
 
             for i, frame in enumerate(display_frames):
-                phase_im = phase_data[frame]
-                images.append(phase_im)
-
+                images.append(phase_data[frame])
                 mask = mask_data[frame]
-                masks.append(mask)
+                filled_mask = mask.copy()
 
-                # === Gather points for this frame ===
-                track_ids = np.where(~np.isnan(X_centers[frame]))[0]
+                present_ids = np.unique(mask)
+                present_ids = present_ids[present_ids > 0]  # Ignore background
 
-                for cell_idx in track_ids:
-                    x = X_centers[frame, cell_idx]
-                    y = Y_centers[frame, cell_idx]
+                # For each cell ID
+                for cell_id in range(num_cells):
+                    
+                    
+                    # If it's not present in this frame's mask
+                    if cell_id not in present_ids:
+                        if first_appearance[cell_id] <= frame <= last_appearance[cell_id]:
+                            # Try to use last known mask
+                            if cell_id in last_known_masks:
+                                reused_mask = last_known_masks[cell_id]
+
+                                # Overlay reused mask outline (without overwriting actual label)
+                                # You could skip adding it to the full mask and instead visualize separately
+                                filled_mask = np.where(reused_mask, cell_id, filled_mask)
+                    else:
+                        # Update last known mask for this cell
+                        last_known_masks[cell_id] = (mask == cell_id)
+                    
+                    x = X_centers[frame, cell_id]
+                    y = Y_centers[frame, cell_id]
 
                     if np.isnan(x) or np.isnan(y):
                         continue
 
                     points.append([i, x, y])  # Note: napari points are (frame, y, x)
-                    labels.append(str(cell_idx))
+                    labels.append(str(cell_id))
+
+                filled_masks.append(filled_mask)
+            # =============TESTING END=================
+            # display_frames = np.arange(start=self.start_frame, stop=self.end_frame, step=self.interval)
+
+            # loading_bar = LoadingBarDialog(len(display_frames), message="Loading images...")
+            # loading_bar.show()
+
+            # images = []
+            # labels = []
+            # masks = [] 
+
+            # points = []
+
+            # text = {
+            #     'string': '{track_id}',         # match the property name exactly
+            #     'size': 12,
+            #     'anchor': 'center',
+            #     'translation': [0, 0, 0],          # you can keep this or tweak to shift text
+            #     'color': "m",
+            # }
+
+            # for i, frame in enumerate(display_frames):
+            #     phase_im = phase_data[frame]
+            #     images.append(phase_im)
+
+            #     mask = mask_data[frame]
+            #     masks.append(mask)
+
+            #     # === Gather points for this frame ===
+            #     track_ids = np.where(~np.isnan(X_centers[frame]))[0]
+
+            #     for cell_idx in track_ids:
+            #         x = X_centers[frame, cell_idx]
+            #         y = Y_centers[frame, cell_idx]
+
+            #         if np.isnan(x) or np.isnan(y):
+            #             continue
+
+            #         points.append([i, x, y])  # Note: napari points are (frame, y, x)
+            #         labels.append(str(cell_idx))
 
                 loading_bar.update_progress(i)
 
             images = np.stack(images, axis=0)
-            masks = np.stack(masks, axis=0)
+            # masks = np.stack(masks, axis=0)
+            masks = np.stack(filled_masks, axis=0)
 
             self.viewer.add_image(images, name="Phase Images")
 
@@ -421,7 +487,10 @@ class CellViewer(QMainWindow):
         hdf5_file = SETTINGS.DATASET
 
         with h5py.File(hdf5_file, 'r') as f:
-            self.first_frame, self.last_frame = tools.get_cell_end_frames(self.cell_idx, f)
+            # self.first_frame, self.last_frame = tools.get_cell_end_frames(self.cell_idx, f)
+            self.first_frame = f['Cells']['Phase']['First Frame'][0, self.cell_idx]
+            self.last_frame = f['Cells']['Phase']['Last Frame'][0, self.cell_idx]
+            self.first_frame, self.last_frame = int(self.first_frame), int(self.last_frame)
 
         # Show loading dialog with number of frames to load
         n_frames = self.last_frame - self.first_frame

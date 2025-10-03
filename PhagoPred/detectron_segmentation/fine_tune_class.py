@@ -144,7 +144,7 @@ def get_finetuning_dataset(
         wrong_segmentations = death_frames_df[death_frames_df['Death Frame'] == 'Wrong Segmentation']
         wrong_segmentations['Cell Idx'] = wrong_segmentations['Cell Idx'].astype(int)
 
-        merged_cells = death_frames_df['Merged' in death_frames_df['Death Frame']]
+        merged_cells = death_frames_df['Merge' in death_frames_df['Death Frame']]
         merged_cells['Cell Idx'] = merged_cells['Cell Idx'].astype(int)
 
         cell_ids = death_frames['Cell Idx'].unique()
