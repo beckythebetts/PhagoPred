@@ -314,7 +314,7 @@ def km_plot(hdf5_files: list[Path], labels: list[str], save_as: Path, time_steps
         
         with h5py.File(hdf5_file, 'r') as f:
             cell_deaths_arr = f['Cells']['Phase']['CellDeath']
-            num_frames = cell_deaths_arr.shape[0]
+            num_frames = f['Cells']['Phase']['Area'].shape[0]
             
             print(num_frames)
             cell_deaths = cell_deaths_arr[0]
@@ -469,19 +469,20 @@ def main():
     #     'Mode 3',
     #     'Speed'
     # ])
-    # km_plot([Path('PhagoPred') / 'Datasets' / '16_09_1.h5',
-    #         Path('PhagoPred') / 'Datasets' / '13_06_survival.h5',
-    #         Path('PhagoPred') / 'Datasets' / '24_06_survival.h5'], 
-    #         ['16_09', '13_06', '24_06'],
-    #         Path('temp') / 'km_curve.png',
-    #         (5, 1, 1))
+    km_plot([Path('PhagoPred') / 'Datasets' / '16_09_3.h5',
+            # Path('PhagoPred') / 'Datasets' / '13_06_survival.h5',
+            # Path('PhagoPred') / 'Datasets' / '24_06_survival.h5'
+            ], 
+            ['16_03_3'],
+            Path('temp') / 'km_curve.png',
+            [5])
     
     # compare_cell_features([Path('PhagoPred') / 'Datasets' / '13_06_survival.h5',
     #             Path('PhagoPred') / 'Datasets' / '24_06_survival.h5'], 
     #             ['13_06', '24_06'], 'Area',
     #             Path('temp') / 'features_plot.png')
     
-    plot_alive_vs_dead_feature(Path('PhagoPred') / 'Datasets' / '24_06_survival.h5', 'Circularity',Path('temp') / 'features_plot.png')
+    # plot_alive_vs_dead_feature(Path('PhagoPred') / 'Datasets' / '24_06_survival.h5', 'Circularity',Path('temp') / 'features_plot.png')
 
 if __name__ == '__main__':
     main()

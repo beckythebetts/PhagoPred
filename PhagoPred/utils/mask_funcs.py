@@ -13,6 +13,7 @@ from PIL import Image
 import shutil
 import copy
 import cv2
+from concurrent.futures import ThreadPoolExecutor
 # import mahotas
 from scipy.ndimage import binary_erosion
 
@@ -586,37 +587,137 @@ def get_crop_indices_all(centers, side_length, image_size):
 
 #     return cell_contours
 
-def get_border_representation(expanded_mask):
-    crop_idxs = [get_minimum_mask_crop(mask) for mask in expanded_mask]
-    cropped_masks = [mask[crop_idx[0], crop_idx[1]] for mask, crop_idx in zip(expanded_mask, crop_idxs)]
+# def get_border_representation(expanded_mask):
+#     print(expanded_mask.shape)
+#     crop_idxs = [get_minimum_mask_crop(mask) for mask in expanded_mask]
+#     cropped_masks = [mask[crop_idx[0], crop_idx[1]] for mask, crop_idx in zip(expanded_mask, crop_idxs)]
 
-    cell_contours = []
-    for mask in cropped_masks:
-        try:
-            cell_contour = skimage.measure.find_contours(mask, level=0.5, fully_connected='high')
-        except ValueError:
-            cell_contour = []
+#     cell_contours = []
+#     for mask in cropped_masks:
+#         try:
+#             cell_contour = skimage.measure.find_contours(mask, level=0.5, fully_connected='high')
+#             if len(cell_contours) > 1:
+#                 cell_contours = max(cell_contours, key=lambda c: c.shape[0])
+#         except ValueError:
+#             cell_contour = []
         
-        cell_contours.append(cell_contour)
+#         cell_contours.append(cell_contour)
 
-    # cell_contours = [skimage.measure.find_contours(mask, level=0.5, fully_connected='high') for mask in cropped_masks]
-    cell_contours = [cell_contour[0] if len(cell_contour)>0 else np.array([]) for cell_contour in cell_contours]
-    for i, cell_contour in enumerate(cell_contours):
-        if len(cell_contour > 0):
-            if (cell_contour[-1] != cell_contour[0]).any():
-                cell_contours[i] = np.append(cell_contour, cell_contour[0][np.newaxis, :], axis=0)
+#     # cell_contours = [skimage.measure.find_contours(mask, level=0.5, fully_connected='high') for mask in cropped_masks]
+#     cell_contours = [cell_contour[0] if len(cell_contour)>0 else np.array([]) for cell_contour in cell_contours]
+#     for i, cell_contour in enumerate(cell_contours):
+#         if len(cell_contour) > 0:
+#             if (cell_contour[-1] != cell_contour[0]).any():
+#                 cell_contours[i] = np.append(cell_contour, cell_contour[0][np.newaxis, :], axis=0)
 
-    return cell_contours
+#     return cell_contours
+
+# def get_border_representation(expanded_mask):
+#     print(expanded_mask.shape)
+
+#     crop_idxs = [get_minimum_mask_crop(mask) for mask in expanded_mask]
+#     cropped_masks = [mask[crop_idx[0], crop_idx[1]] for mask, crop_idx in zip(expanded_mask, crop_idxs)]
+
+#     cell_contours = []
+#     for mask in cropped_masks:
+#         # Clean mask to improve contour detection
+#         mask = mask.astype(bool)
+#         # mask = remove_small_objects(mask, min_size=20)
+#         # mask = remove_small_holes(mask, area_threshold=50)
+#         # mask = binary_closing(mask)
+
+#         try:
+#             contours = .find_contours(mask.astype(float), level=0.5, fully_connected='high')
+#         except ValueError:
+#             contours = []
+
+#         if contours:
+#             # Pick the largest contour (outer boundary)
+#             contour = max(contours, key=lambda c: c.shape[0])
+
+#             # Ensure contour is closed
+#             if not np.allclose(contour[0], contour[-1]):
+#                 contour = np.vstack([contour, contour[0]])
+
+#             cell_contours.append(contour)
+#         else:
+#             cell_contours.append(np.array([]))
+
+#     return cell_contours
+
+# def get_border_representation(expanded_mask) -> list:
+#     crop_idxs = [get_minimum_mask_crop(mask) for mask in expanded_mask]
+#     cropped_masks = [mask[crop_idx[0], crop_idx[1]] for mask, crop_idx in zip(expanded_mask, crop_idxs)]
+#     all_contours = []
+#     for mask in cropped_masks:
+#         mask = (mask > 0).astype(np.uint8) * 255
+#         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+#         if contours:
+#             contour = max(contours, key=lambda c:c.shape).squeeze(1)
+            
+#             if not np.allclose(contour[0], contour[-1]):
+#                 contour = np.vstack([contour, contour[0]])
+#         all_contours.append(contour)
+#     return all_contours
+def process_mask(mask):
+    """Process a single binary cell mask: crop + find contour."""
+    if not np.any(mask):
+        return np.empty((0, 2), dtype=np.int32)
+
+    # Crop to bounding box
+    crop_yx = get_minimum_mask_crop(mask)
+    cropped = mask[crop_yx[0], crop_yx[1]]
+
+    # Prepare for OpenCV
+    bin_mask = (cropped > 0).astype(np.uint8) * 255
+    bin_mask = np.ascontiguousarray(bin_mask)
+
+    # Find contours
+    contours, _ = cv2.findContours(bin_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+
+    if contours:
+        contour = max(contours, key=lambda c: c.shape[0]).squeeze(1)
+
+        # Ensure closed loop
+        if not np.allclose(contour[0], contour[-1]):
+            contour = np.vstack([contour, contour[0]])
+
+        # Convert (x, y) to (row, col)
+        contour = contour[:, [1, 0]]
+
+        # Shift by crop offset
+        contour[:, 0] += crop_yx[0].start
+        contour[:, 1] += crop_yx[1].start
+
+        return contour
+    else:
+        return np.empty((0, 2), dtype=np.int32)
+
+def get_border_representation(expanded_mask_list):
+    """Process all masks in parallel and return contours."""
+    with ThreadPoolExecutor() as executor:
+        contours = list(executor.map(process_mask, expanded_mask_list))
+    return contours
 
 def get_minimum_mask_crop(mask):
-    """binary mask of one cell"""
-    if mask.any() > 0:
-        rows, cols = np.where(mask > 0)
-        return slice(rows.min(), rows.max()+1), slice(cols.min(), cols.max()+1)
-    
+    """Efficient bounding box for nonzero mask"""
+    if mask.any():
+        coords = np.argwhere(mask)
+        y0, x0 = coords.min(axis=0)
+        y1, x1 = coords.max(axis=0) + 1
+        return slice(y0, y1), slice(x0, x1)
     else:
-        # print('NO MASK?')
-        return slice(0,0), slice(0,0)
+        return slice(0, 0), slice(0, 0)
+# def get_minimum_mask_crop(mask):
+#     """binary mask of one cell"""
+#     if mask.any() > 0:
+#         rows, cols = np.where(mask > 0)
+#         return slice(rows.min(), rows.max()+1), slice(cols.min(), cols.max()+1)
+    
+#     else:
+#         # print('NO MASK?')
+#         return slice(0,0), slice(0,0)
 
 def get_haralick_texture_features(image, mask, distances=[1,3,5, 10, 20], erode_mask=None):
     """mask - binary mask for one cell
