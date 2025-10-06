@@ -41,12 +41,17 @@ class PCAKmeansFit:
 
     def feature_func(self, frame):
         pass
+    
+    def training_preprocess(self, features):
+        """OPtionall yoverwirte to apply a funciton to all trainign features."""
+        return features
 
     def fit_pca(self):
         if self.num_training_images is None:
             self.training_frames = np.arange(0, SETTINGS.NUM_FRAMES)
         else:
             self.training_frames = np.random.randint(0, SETTINGS.NUM_FRAMES, size=self.num_training_images)
+            self.training_frames = np.random.choice(np.arange(0, SETTINGS.NUM_FRAMES), size=self.num_training_images, replace=False)
 
         for i, frame in enumerate(tqdm(self.training_frames)):
             # sys.stdout.write(f'\rProcessing Frame {i+1} / {self.num_training_images}')
@@ -59,6 +64,7 @@ class PCAKmeansFit:
             # features.append(self.feature_func(frame))
         # remove np.nan features
         features = features[~np.isnan(features).any(axis=1)]
+        self.features = self.training_preprocess(features)
         # features = np.array(features)
         print('Fitting PCA ...')
         self.pca = PCA(self.num_pca_componeents, svd_solver='full')
@@ -202,9 +208,10 @@ class PCAKmeansFit:
             fig = plt.figure()
             ax = fig.add_subplot(111, projection='3d')
             # colours = ['blue', 'orange', 'green', 'red']
-            cmap = plt.get_cmap('rainbow')
+            cmap = plt.get_cmap('Set1')
             num_clusters = len(self.kmeans.cluster_centers_)
-            colours = [cmap(i / (num_clusters - 1)) for i in range(num_clusters)]
+            # colours = [cmap(i / (num_clusters - 1)) for i in range(num_clusters)]
+            colours = [cmap(i) for i in range(num_clusters)]
             for cluster in range(self.num_kmeans_clusters):
                 idxs = np.nonzero(clusters==cluster)
                 ax.scatter(pcs[idxs, 0], pcs[idxs, 1], pcs[idxs, 2], label=str(cluster), color=colours[cluster])
@@ -237,6 +244,88 @@ class PCAKmeansFit:
             plt.ylabel('PCs')
         plt.show()
 
+    def plot_explained_variance_ratio(self):
+        plt.plot(np.cumsum(self.pca.explained_variance_ratio_))
+        plt.xlabel('Number of PCs')
+        plt.ylabel('Cumulative Explained Variance')
+        plt.grid(True)
+        plt.show()
+        
+    def umap_embedding(self):
+        import umap.umap_ as umap
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        reducer = umap.UMAP(n_neighbors=15, n_components=2, random_state=42)
+        embedding = reducer.fit_transform(self.features)
+
+        plt.figure(figsize=(10, 8))
+        plt.scatter(embedding[:, 0], embedding[:, 1], c='gray', s=20, alpha=0.1, label='UMAP embeddings')
+        plt.title('UMAP embedding with mean contour overlays')
+        plt.xlabel('UMAP 1')
+        plt.ylabel('UMAP 2')
+
+        def plot_contour_at_xy(ax, contour, x, y, scale=0.1, colour='black', linestyle='-', alpha=1, label=''):
+            contour = contour.reshape(-1, 2)
+            contour = contour * scale
+            contour[:, 0] += x
+            contour[:, 1] += y
+            ax.plot(contour[:, 0], contour[:, 1], color=colour, linewidth=1, linestyle=linestyle, alpha=alpha, label=label)
+
+        ax = plt.gca()
+
+        num_bins_x = 10
+        num_bins_y = 10
+
+        x_bins = np.linspace(np.min(embedding[:, 0]), np.max(embedding[:, 0]), num_bins_x + 1)
+        y_bins = np.linspace(np.min(embedding[:, 1]), np.max(embedding[:, 1]), num_bins_y + 1)
+
+        for i in range(num_bins_x):
+            for j in range(num_bins_y):
+                # Find points in current bin
+                in_bin = np.where(
+                    (embedding[:, 0] >= x_bins[i]) & (embedding[:, 0] < x_bins[i + 1]) &
+                    (embedding[:, 1] >= y_bins[j]) & (embedding[:, 1] < y_bins[j + 1])
+                )[0]
+
+                if len(in_bin) == 0:
+                    continue  # skip empty bins
+                
+                  # Compute bin center for plotting
+                x_centre = (x_bins[i] + x_bins[i + 1]) / 2
+                y_centre = (y_bins[j] + y_bins[j + 1]) / 2
+                
+                # Average PCA scores in bin
+                # mean = np.mean(np.array(self.features)[in_bin], axis=0)
+                bin_features = np.array(self.features)[in_bin]
+                colours = ('b', 'k', 'r')
+                for percentile, colour in zip((5, 50, 95), colours):
+                    percentile_features = np.percentile(bin_features, percentile, axis=0)
+                    # linestyle = '-' if percentile == 50 else '--'
+                    # colour = 'k' if percentile==50 else 'gray'
+                    alpha = 1 if percentile==50 else 0.5
+                    plot_contour_at_xy(ax, percentile_features, x_centre, y_centre, scale=5, colour=colour, alpha=alpha, label=f'{percentile}th pecentile contour in region')
+                    
+                    
+                # Reconstruct mean contour
+                # mean_contour = self.pca.inverse_transform(mean_pca)
+
+                # Compute bin center for plotting
+                # x_center = (x_bins[i] + x_bins[i + 1]) / 2
+                # y_center = (y_bins[j] + y_bins[j + 1]) / 2
+
+                # plot_contour_at_xy(ax, mean, x_center, y_center, scale=2.5, color='k')
+
+        plt.title('UMAP embedding with example shape overlays')
+        plt.xlabel('UMAP 1')
+        plt.ylabel('UMAP 2')
+        plt.axis('equal')
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax.legend(by_label.values(), by_label.keys())
+
+        plt.show()
+        
     def rank_input_features(self, colours=None):
         "rank all input features based on total contribution to PCs, 'coefficients/loadings'"
 

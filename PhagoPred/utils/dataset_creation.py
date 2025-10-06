@@ -6,6 +6,8 @@ import h5py
 from pathlib import Path
 from tqdm import tqdm
 import cv2
+import scipy
+from concurrent.futures import ThreadPoolExecutor
 
 from PhagoPred import SETTINGS
 
@@ -74,7 +76,7 @@ def set_hdf5_metadata(dataset: h5py.Dataset, x_size: int, y_size: int) -> None:
                             "Imaged in DMEM. 1*10**5 cells per dish 1:1 MOI.")
     
 def hdf5_from_tiffs(tiff_files_path: Path, hdf5_file: Path,
-                    phase_channel: int = 1, epi_channel: int = 2) -> None:
+                    phase_channel: int = 1, epi_channel: int = 2, frame_step_size: int=1) -> None:
     """Convert multi-file, multi-page .ome.tif files to HDF5 with batched reading and
     global min/max scaling for quantitative uint8 conversion."""
 
@@ -122,8 +124,12 @@ def hdf5_from_tiffs(tiff_files_path: Path, hdf5_file: Path,
                 num_pages = len(pages)
                 num_frames = num_pages // C
 
-                phase_page_idxs = np.arange(num_frames) * C + phase_channel
-                epi_page_idxs = np.arange(num_frames) * C + epi_channel
+                selected_frames = np.arange(0, num_frames, frame_step_size)
+                
+                num_frames = len(selected_frames)
+                
+                phase_page_idxs = selected_frames * C + phase_channel
+                epi_page_idxs = selected_frames * C + epi_channel
 
                 phase_array = np.stack([pages[i].asarray() for i in phase_page_idxs])
                 epi_array = np.stack([pages[i].asarray() for i in epi_page_idxs])
@@ -235,6 +241,39 @@ def epi_background_correction(dataset=SETTINGS.DATASET):
             # epi_ds[i] = to_8bit(corrected, np.percentile(corrected, 90), np.percentile(corrected, 99.9))
 
         epi_ds.attrs['Background corrected'] = True
+
+# def epi_background_correction_gaussian(dataset=SETTINGS.DATASET, sigma: int = 200) -> None:
+#     """For each frame, aplpy gaussian smoothing to approximate background signal and subtract."""
+#     with h5py.File(dataset, 'r+') as f:
+#         epi_ds = f['Images']['Epi']
+#         for frame in tqdm(range(epi_ds.shape[0])):
+#             epi_im = epi_ds[frame]
+#             bg_estimate = scipy.ndimage.gaussian_filter(epi_im, sigma=sigma)
+#             # epi_ds[frame] = np.clip(epi_im / bg_estimate
+#             epi_im = epi_im - bg_estimate
+#             epi_im = np.clip(epi_im, 0, None)
+#             epi_ds[frame] = epi_im
+
+def epi_background_correction_gaussian(dataset=SETTINGS.DATASET, sigma: int = 100, max_workers: int = 4) -> None:
+    """Apply Gaussian background correction to each Epi frame using multithreading."""
+    
+    with h5py.File(dataset, 'r+') as f:
+        epi_ds = f['Images']['Epi']
+        n_frames, height, width = epi_ds.shape
+
+        def process_frame(i):
+            epi_im = epi_ds[i].astype(np.float32)  # cast once to avoid precision issues
+            bg_estimate = scipy.ndimage.gaussian_filter(epi_im, sigma=sigma)
+            corrected = np.clip(epi_im - bg_estimate, 0, None).astype(np.uint8)
+            return i, corrected
+
+        # Process in parallel
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(process_frame, i) for i in range(n_frames)]
+
+            for future in tqdm(futures, desc="Correcting frames"):
+                i, corrected_frame = future.result()
+                epi_ds[i] = corrected_frame
         
 def create_survival_analysis_dataset(dataset_path: Path, new_path: Path = None) -> None:
     """Create a new datset with only 'Cells group' and with chunks set to (num_frames, 1)"""
@@ -281,14 +320,16 @@ def create_survival_analysis_dataset(dataset_path: Path, new_path: Path = None) 
 
 if __name__ == '__main__':
     # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_500_seg.h5")
-    # hdf5_from_tiffs(Path("~/thor_server/16_09_1").expanduser(), 
+    # hdf5_from_tiffs(Path("~/thor_server/16_09_3").expanduser(), 
     #                 # Path('D:/27_05.h5'),
-    #                 Path("~/PhagoPred/PhagoPred/Datasets/16_09_1.h5").expanduser(),
+    #                 Path("~/PhagoPred/PhagoPred/Datasets/16_09_3.h5").expanduser(),
     #                 phase_channel=1,
     #                 epi_channel=2,
+    #                 frame_step_size=5,
     #                 )
     # epi_background_correction()
-    create_survival_analysis_dataset(Path('~/thor_server/24_06.h5').expanduser(), Path('PhagoPred') / 'Datasets' / '24_06_survival.h5')
+    epi_background_correction_gaussian()
+    # create_survival_analysis_dataset(Path('~/thor_server/24_06.h5').expanduser(), Path('PhagoPred') / 'Datasets' / '24_06_survival.h5')
     # make_short_test_copy(Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05.h5"),
     #                      Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05_500.h5"),
     #                      start_frame=3000,
