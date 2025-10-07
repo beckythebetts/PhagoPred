@@ -614,6 +614,7 @@ def remake_dir(path):
             raise SystemExit(0)
         shutil.rmtree(path)
     path.mkdir(parents=True)
+    return path
 
 def unique_nonzero(array, return_counts=False):
     return np.unique(array[array != 0], return_counts=return_counts)

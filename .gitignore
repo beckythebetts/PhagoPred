@@ -17,6 +17,7 @@ PhagoPred/datasets
 PhagoPred/detectron_segmentation/Models
 PhagoPred/detectron_segmentation/models
 temp/
+PhagoPred/feature_extraction/morphology/UMAP_model_search
 
 logs/
 output/
