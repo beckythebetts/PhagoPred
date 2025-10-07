@@ -229,6 +229,7 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
                 # cells_ds[frame_idx, i+1, class_name] = 1
 
             segmentations_ds[frame_idx] = mask.cpu().numpy()
+        f['Segmentations'].attrs['Model'] = str(cfg_dir.parent())
         
 def main():
     seg_dataset()
