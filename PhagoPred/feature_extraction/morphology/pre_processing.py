@@ -15,8 +15,6 @@ class PreProcessing:
         self.contour=contour
         self.mean_contour = mean_contour
         
-    def cicularity(self):
-        x = self.contour
     def resample_contour(self, num_points=SETTINGS.NUM_CONTOUR_POINTS):
         """
         Set number of coordinates in contour to num_points
@@ -50,6 +48,7 @@ class PreProcessing:
         self.contour = self.contour / R
     
     def procrustes_align_contour(self):
+        """Align contour with mean contour."""
         if self.mean_contour is not None:
             self.contour = np.reshape(self.contour, (-1, 2))
             _, self.contour, _ = procrustes(self.mean_contour, self.contour)
