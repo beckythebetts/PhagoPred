@@ -128,8 +128,8 @@ def generalised_procrustes_analysis(contours, max_iter=20, tol=1e-7):
 
         mean_shape = new_mean_shape
     
-    plt.plot(mean_shape[:,0], mean_shape[:,1])
-    plt.show()
+    # plt.plot(mean_shape[:,0], mean_shape[:,1])
+    # plt.show()
         
     aligned_contours = [aligned_contour.flatten() for aligned_contour in aligned_contours]
     
