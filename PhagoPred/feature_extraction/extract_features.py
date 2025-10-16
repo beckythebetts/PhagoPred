@@ -214,7 +214,8 @@ class FeaturesExtraction:
         Prepare hdf5 file
         """
         with h5py.File(self.h5py_file, 'r+') as f:
-            self.num_frames = SETTINGS.NUM_FRAMES
+            # self.num_frames = SETTINGS.NUM_FRAMES
+            self.num_frames = f['Images']['Phase'].shape[0]
             for cell_type in self.cell_types:
                 cell_type.get_feature_names()
                 cell_type.set_up_features_group(f)
@@ -342,8 +343,8 @@ class FeaturesExtraction:
                     f[cell_type.features_group][feature_name][:] = result[:, :, i]
 
 
-def main():
-    feature_extractor = FeaturesExtraction()
+def extract_features(dataset=SETTINGS.DATASET):
+    feature_extractor = FeaturesExtraction(h5py_file=dataset)
 
     phase_features = [
         features.Fluorescence(),
@@ -363,6 +364,14 @@ def main():
 
     feature_extractor.set_up()
     feature_extractor.extract_features()
+    
+def main():
+    extract_features()
+    # with h5py.File('PhagoPred/Datasets/16_09_1.h5', 'r') as f:
+    #     print(np.nanmax(f['Cells']['Phase']['Circularity'][:]))
+    #     smallest = np.nanargmin(f['Cells']['Phase']['Perimeter'][:])
+    #     frame, cell = np.unravel_index(smallest, f['Cells']['Phase']['Area'].shape)
+    #     print(frame, cell)
 
 if __name__ == '__main__':
     main()
