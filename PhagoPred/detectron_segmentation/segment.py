@@ -97,6 +97,8 @@ def get_model(cfg_dir: Path) -> tuple[dict, detectron2.config.CfgNode]:
 def get_predictor(cfg) -> tuple[object, Union[DefaultPredictor, NoResizePredictor]]:
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5   # set a custom testing threshold
+    cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST = 0.5
+    cfg.TEST.DETECTIONS_PER_IMAGE = 1000
     cfg.MODEL.DEVICE = device_str
     return cfg, NoResizePredictor(cfg)
 
@@ -168,10 +170,10 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
     
     train_metadata, cfg = get_model(cfg_dir)
 
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.7   # set a custom testing threshold
-    cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST = 0.3
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5   # set a custom testing threshold
+    cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST = 0.5
     cfg.MODEL.DEVICE = device_str
-    predictor = DefaultPredictor(cfg)
+    predictor = NoResizePredictor(cfg)
 
     categories = train_metadata["thing_classes"]    
 
@@ -229,10 +231,19 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
                 # cells_ds[frame_idx, i+1, class_name] = 1
 
             segmentations_ds[frame_idx] = mask.cpu().numpy()
-        f['Segmentations'].attrs['Model'] = str(cfg_dir.parent())
-        
+        f['Segmentations'].attrs['Model'] = str(cfg_dir.parent)
+
+
+def test_frame(dataset: Path = SETTINGS.DATASET, frame: int = 999, mask_rcnn_model: Path = SETTINGS.MASK_RCNN_MODEL) -> None:
+    with h5py.File(dataset, 'r') as f:
+        im = f['Images']['Phase'][frame][:]
+        pred_masks = seg_image(mask_rcnn_model / 'Model', np.stack([im]*3, axis=-1))
+        for name, mask in pred_masks.items():
+            plt.imsave(Path('temp') / f'{name}_no_clust.png', tools.show_segmentation(im, mask))
 def main():
-    seg_dataset()
+    # seg_dataset()
+    test_frame()
+    
 
 if __name__ == '__main__':
     main()

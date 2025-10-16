@@ -6,7 +6,10 @@ try:
     # DATASET = Path('PhagoPred')/'Datasets'/'secondwithlight - Copy.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_short_seg_test.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'24_06.h5'
-    DATASET = Path('PhagoPred')/'Datasets'/'16_09_3.h5'
+    # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5'
+    DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '03_10_2500.h5'
+    # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5'
+    # DATASET = Path('PhagoPred')/'Datasets'/ 'Prelims' / '16_09_3.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_500.h5'
 
     with h5py.File(DATASET, 'r') as f:
@@ -37,8 +40,8 @@ REMOVE_EDGE_CELLS = True
 THRESHOLD = 250
 
 # ******* TRACKING *******
-MAXIMUM_DISTANCE_THRESHOLD = 30
-FRAME_MEMORY = 50
+MAXIMUM_DISTANCE_THRESHOLD = 40
+FRAME_MEMORY = 10
 CLEAN_TRACKS = True
 MINIMUM_TRACK_LENGTH = 50
 

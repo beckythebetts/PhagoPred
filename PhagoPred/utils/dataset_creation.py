@@ -67,18 +67,21 @@ def set_hdf5_metadata(dataset: h5py.Dataset, x_size: int, y_size: int) -> None:
     res_um = dataset.attrs['Pixel Size / um'] / dataset.attrs['Objective magnification']
     dataset.attrs['Resolution / um'] = res_um
     dataset.attrs['FOV / um'] = [y_size * res_um, x_size * res_um]
-    dataset.attrs['Phase exposure / ms'] = 1000
-    dataset.attrs['Epi exposure / ms'] = 10000
-    dataset.attrs['Time interval / s'] = 60
+    dataset.attrs['Phase exposure / ms'] = 500
+    dataset.attrs['Epi exposure / ms'] = 0
+    dataset.attrs['Time interval / s'] = 300
     dataset.attrs['Objective NA'] = 0.45
     dataset.attrs['Number of frames'] = 0  # to be updated later
-    dataset.attrs['Notes'] = ("J774 macrophages, SH1000 S.Aureus MCherry, grown in TSB + 0.1% Tet overnight. "
-                            "Imaged in DMEM. 1*10**5 cells per dish 1:1 MOI.")
-    
+    dataset.attrs['Notes'] = ("J774 macrophages, P11. Imaged in Flurobrite. 1*10**5 cells per dish. 07/10/2025")
+
+
 def hdf5_from_tiffs(tiff_files_path: Path, hdf5_file: Path,
-                    phase_channel: int = 1, epi_channel: int = 2, frame_step_size: int=1) -> None:
-    """Convert multi-file, multi-page .ome.tif files to HDF5 with batched reading and
-    global min/max scaling for quantitative uint8 conversion."""
+                    phase_channel: int = 1, epi_channel: int = 2,
+                    frame_step_size: int = 1, batch_size: int = 50) -> None:
+    """
+    Convert multi-file, multi-page .ome.tif files to HDF5 with batched reading and
+    global min/max scaling for quantitative uint8 conversion.
+    """
 
     if os.path.exists(hdf5_file):
         os.remove(hdf5_file)
@@ -100,17 +103,16 @@ def hdf5_from_tiffs(tiff_files_path: Path, hdf5_file: Path,
         series = tif.series[0]
         shape = series.shape
         T, C, Y, X = shape
-    
-    with h5py.File(hdf5_file, 'w') as h:
 
+    with h5py.File(hdf5_file, 'w') as h:
         Images = h.create_group('Images')
         set_hdf5_metadata(Images, X, Y)
 
         phase_ds = Images.create_dataset('Phase', shape=(0, Y, X), maxshape=(None, Y, X),
                                          dtype='uint8', chunks=(1, Y, X))
         epi_ds = Images.create_dataset('Epi', shape=(0, Y, X), maxshape=(None, Y, X),
-                                         dtype='uint8', chunks=(1, Y, X))
-    
+                                       dtype='uint8', chunks=(1, Y, X))
+
         phase_min, phase_max = None, None
         epi_min, epi_max = None, None
 
@@ -119,39 +121,124 @@ def hdf5_from_tiffs(tiff_files_path: Path, hdf5_file: Path,
         for i, file in enumerate(tiff_files):
             sys.stdout.write(f"\rProcessing file {i + 1} / {len(tiff_files)}, {frame_count} frames processed")
             sys.stdout.flush()
+
             with tifffile.TiffFile(str(file)) as tif:
                 pages = tif.pages
                 num_pages = len(pages)
                 num_frames = num_pages // C
 
                 selected_frames = np.arange(0, num_frames, frame_step_size)
-                
-                num_frames = len(selected_frames)
-                
-                phase_page_idxs = selected_frames * C + phase_channel
-                epi_page_idxs = selected_frames * C + epi_channel
 
-                phase_array = np.stack([pages[i].asarray() for i in phase_page_idxs])
-                epi_array = np.stack([pages[i].asarray() for i in epi_page_idxs])
+                for batch_start in tqdm(range(0, len(selected_frames), batch_size), desc=f'Batch {i + 1}'):
+                    batch_end = min(batch_start + batch_size, len(selected_frames))
+                    batch_frames = selected_frames[batch_start:batch_end]
 
-                if phase_min is None:
-                    phase_min, phase_max = compute_percentile_limits(phase_array, 0, 100)
-                if epi_min is None:
-                    epi_min, epi_max = compute_percentile_limits(epi_array, 1, 99)
-                
-                phase_array = to_8bit(phase_array, phase_min, phase_max)
-                epi_array = to_8bit(epi_array, epi_min, epi_max)
+                    phase_page_idxs = batch_frames * C + phase_channel
+                    epi_page_idxs = batch_frames * C + epi_channel
 
-                phase_ds.resize((frame_count+num_frames, Y, X))
-                epi_ds.resize((frame_count + num_frames, Y, X))
+                    # Read one frame at a time to reduce memory usage
+                    phase_batch = np.stack([pages[i].asarray() for i in phase_page_idxs])
+                    epi_batch = np.stack([pages[i].asarray() for i in epi_page_idxs])
 
-                phase_ds[frame_count:frame_count+num_frames] = phase_array
-                epi_ds[frame_count:frame_count+num_frames] = epi_array
+                    # Compute global scaling from first batch
+                    if phase_min is None:
+                        phase_min, phase_max = compute_percentile_limits(phase_batch, 0, 100)
+                    if epi_min is None:
+                        epi_min, epi_max = compute_percentile_limits(epi_batch, 1, 99)
 
-                frame_count += num_frames
-        
+                    phase_batch = to_8bit(phase_batch, phase_min, phase_max)
+                    epi_batch = to_8bit(epi_batch, epi_min, epi_max)
+
+                    # Resize and write to HDF5
+                    batch_len = len(phase_batch)
+                    phase_ds.resize((frame_count + batch_len, Y, X))
+                    epi_ds.resize((frame_count + batch_len, Y, X))
+
+                    phase_ds[frame_count:frame_count + batch_len] = phase_batch
+                    epi_ds[frame_count:frame_count + batch_len] = epi_batch
+
+                    frame_count += batch_len
+
         Images.attrs['Number of frames'] = frame_count
         print(f"\nHDF5 file created: {frame_count} frames")
+
+# def hdf5_from_tiffs(tiff_files_path: Path, hdf5_file: Path,
+#                     phase_channel: int = 1, epi_channel: int = 2, frame_step_size: int=1) -> None:
+#     """Convert multi-file, multi-page .ome.tif files to HDF5 with batched reading and
+#     global min/max scaling for quantitative uint8 conversion."""
+
+#     if os.path.exists(hdf5_file):
+#         os.remove(hdf5_file)
+
+#     print(f'Tiff files found? {tiff_files_path.exists()}')
+#     print(f'HDF5 path found? {hdf5_file.parent.exists()}')
+
+#     def natural_sort_key(s):
+#         import re
+#         return [int(text) if text.isdigit() else text.lower()
+#                 for text in re.split(r'(\d+)', str(s))]
+
+#     tiff_files = sorted(tiff_files_path.glob("*.ome.tif"), key=natural_sort_key)
+#     if not tiff_files:
+#         raise ValueError("No .ome.tif files found.")
+
+#     # Get shape info from first file
+#     with tifffile.TiffFile(str(tiff_files[0])) as tif:
+#         series = tif.series[0]
+#         shape = series.shape
+#         T, C, Y, X = shape
+    
+#     with h5py.File(hdf5_file, 'w') as h:
+
+#         Images = h.create_group('Images')
+#         set_hdf5_metadata(Images, X, Y)
+
+#         phase_ds = Images.create_dataset('Phase', shape=(0, Y, X), maxshape=(None, Y, X),
+#                                          dtype='uint8', chunks=(1, Y, X))
+#         epi_ds = Images.create_dataset('Epi', shape=(0, Y, X), maxshape=(None, Y, X),
+#                                          dtype='uint8', chunks=(1, Y, X))
+    
+#         phase_min, phase_max = None, None
+#         epi_min, epi_max = None, None
+
+#         frame_count = 0
+
+#         for i, file in enumerate(tiff_files):
+#             sys.stdout.write(f"\rProcessing file {i + 1} / {len(tiff_files)}, {frame_count} frames processed")
+#             sys.stdout.flush()
+#             with tifffile.TiffFile(str(file)) as tif:
+#                 pages = tif.pages
+#                 num_pages = len(pages)
+#                 num_frames = num_pages // C
+
+#                 selected_frames = np.arange(0, num_frames, frame_step_size)
+                
+#                 num_frames = len(selected_frames)
+                
+#                 phase_page_idxs = selected_frames * C + phase_channel
+#                 epi_page_idxs = selected_frames * C + epi_channel
+
+#                 phase_array = np.stack([pages[i].asarray() for i in phase_page_idxs])
+#                 epi_array = np.stack([pages[i].asarray() for i in epi_page_idxs])
+
+#                 if phase_min is None:
+#                     phase_min, phase_max = compute_percentile_limits(phase_array, 0, 100)
+#                 if epi_min is None:
+#                     epi_min, epi_max = compute_percentile_limits(epi_array, 1, 99)
+                
+#                 phase_array = to_8bit(phase_array, phase_min, phase_max)
+#                 epi_array = to_8bit(epi_array, epi_min, epi_max)
+
+#                 phase_ds.resize((frame_count+num_frames, Y, X))
+#                 epi_ds.resize((frame_count + num_frames, Y, X))
+
+#                 phase_ds[frame_count:frame_count+num_frames] = phase_array
+#                 epi_ds[frame_count:frame_count+num_frames] = epi_array
+
+#                 frame_count += num_frames
+        
+#         Images.attrs['Number of frames'] = frame_count
+#         print(f"\nHDF5 file created: {frame_count} frames")
 
 def make_short_test_copy(orig_file: Path, short_file: Path, start_frame: int = 0, end_frame: int = 50) -> None:
     """
@@ -319,16 +406,16 @@ def create_survival_analysis_dataset(dataset_path: Path, new_path: Path = None) 
             new.flush()
 
 if __name__ == '__main__':
-    # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_500_seg.h5")
-    # hdf5_from_tiffs(Path("~/thor_server/16_09_3").expanduser(), 
+    keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/03_10_2500.h5")
+    # hdf5_from_tiffs(Path("~/thor_server/10_10_no_staph_1").expanduser(), 
     #                 # Path('D:/27_05.h5'),
-    #                 Path("~/PhagoPred/PhagoPred/Datasets/16_09_3.h5").expanduser(),
+    #                 Path("~/PhagoPred/PhagoPred/Datasets/ExposureTest/10_10_5000.h5").expanduser(),
     #                 phase_channel=1,
-    #                 epi_channel=2,
-    #                 frame_step_size=5,
+    #                 epi_channel=0,
+    #                 frame_step_size=1,
     #                 )
     # epi_background_correction()
-    epi_background_correction_gaussian()
+    # epi_background_correction_gaussian()
     # create_survival_analysis_dataset(Path('~/thor_server/24_06.h5').expanduser(), Path('PhagoPred') / 'Datasets' / '24_06_survival.h5')
     # make_short_test_copy(Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05.h5"),
     #                      Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05_500.h5"),

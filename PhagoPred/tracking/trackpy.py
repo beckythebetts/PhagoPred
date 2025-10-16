@@ -7,6 +7,9 @@ import pandas as pd
 from PhagoPred import SETTINGS
 from PhagoPred.feature_extraction import extract_features, features
 
+tp.linking.Linker.MAX_SUB_NET_SIZE = 35 # Only include for datasets with many cells
+# tp.link()
+
 class TrackerWithTrackpy:
     def __init__(self, file_path, channel='Phase'):
         self.file = file_path
@@ -15,6 +18,7 @@ class TrackerWithTrackpy:
         self.cells_group = f'Cells/{self.channel}'
         self.max_track_id = 0
         self.track_id_map = None  # will be a 2D array: frames x max_cells
+        self.min_cell_size = 500
 
         self.feature_extractor = extract_features.FeaturesExtraction(self.file)
 
@@ -24,15 +28,27 @@ class TrackerWithTrackpy:
         with h5py.File(self.file, 'r') as f:
             coords = []
             num_frames = f[self.masks_ds].shape[0]
-            for frame in range(num_frames):
+            for frame in tqdm(range(num_frames), desc='Gathering cell coords: '):
                 # Load cell coordinates for current frame
                 X = f[f'{self.cells_group}/X'][frame]
                 Y = f[f'{self.cells_group}/Y'][frame]
+                areas = f[f'{self.cells_group}/Area'][frame]
                 # Filter out NaNs or invalid points (assuming nan means missing)
-                valid = ~np.isnan(X) & ~np.isnan(Y)
-                frame_coords = np.vstack((X[valid], Y[valid])).T
-                for idx, (x, y) in enumerate(frame_coords):
-                    coords.append({'frame': frame, 'x': x, 'y': y, 'cell_index': idx})
+                valid_idxs = np.nonzero(~np.isnan(X) & ~np.isnan(Y) & (areas > self.min_cell_size))[0]
+                # print(valid_idxs)
+                # frame_coords = np.vstack((X, Y)).T
+                for idx in valid_idxs:
+                    coords.append({'frame': frame, 'x': X[idx], 'y': Y[idx], 'cell_index': idx})
+                # for idx(valid_cell, (x, y)) in zip(valid, frame_coords)
+                # frame_coords = np.vstack((X[valid], Y[valid])).T
+                # for idx, (x, y) in enumerate(frame_coords):
+                #     coords.append({'frame': frame, 'x': x, 'y': y, 'cell_index': idx})
+                # try:
+                #     test = pd.DataFrame(coords)
+                #     print(test)
+                # except:
+                #     print(coords)
+                #     raise 'Error'
         return coords, num_frames
 
     def track(self, search_range=10, memory=3):
@@ -41,6 +57,7 @@ class TrackerWithTrackpy:
         """
         coords, num_frames = self.extract_features_for_tracking()
 
+        tp.linking.utils.MAX_SUB_NET_SIZE = 35
         # Run trackpy linking
         df = tp.link_df(pd.DataFrame(coords), search_range=search_range, memory=memory)
 
@@ -101,9 +118,6 @@ class TrackerWithTrackpy:
     #     self.feature_extractor.set_up()
     #     self.feature_extractor.extract_features()
         
-        
-        
-        
     
     def remap_track_id_map(self):
         """Reindex the track_id_map so all track_ids are consecutive"""
@@ -122,15 +136,27 @@ class TrackerWithTrackpy:
         """
         Add each cells centroid cooridnates and areas to cells dataset
         """
-        self.feature_extractor.add_feature(features.Coords(), cell_type=self.channel)
-        self.feature_extractor.set_up()
-        self.feature_extractor.extract_features()
-
-def main():
-    tracker = TrackerWithTrackpy(SETTINGS.DATASET, 'Phase')
+        found_features = True
+        with h5py.File(self.file, 'r') as f:
+            for feature_name in features.Coords().get_names():
+                if feature_name not in f[self.cells_group].keys():
+                    found_features = False
+        if not found_features:
+            self.feature_extractor.add_feature(features.Coords(), cell_type=self.channel)
+            self.feature_extractor.set_up()
+            self.feature_extractor.extract_features()
+        else:
+            print('Features already found, skipping to tracking.')
+        
+def run_tracking(dataset=SETTINGS.DATASET):
+    tracker = TrackerWithTrackpy(dataset, 'Phase')
+    
     tracker.get_cell_info()
     tracker.track(search_range=SETTINGS.MAXIMUM_DISTANCE_THRESHOLD, memory=SETTINGS.FRAME_MEMORY)  # tune these params as needed
     tracker.apply_track_id_map()
+    
+def main():
+    run_tracking()
 
 if __name__ == "__main__":
     main()

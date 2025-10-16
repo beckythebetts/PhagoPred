@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 import sys
 
 from pathlib import Path
@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 import pandas as pd
+import seaborn as sns
 
 from PhagoPred import SETTINGS
 from PhagoPred.feature_extraction.extract_features import CellType
@@ -82,6 +83,85 @@ def plot_average_cell_features(save_as: Path, first_frame: Optional[int] = None,
 
     return fig
 
+def plot_percentile_cell_features_multi(
+    save_as: Path,
+    hdf5_files: list[Union[str, Path]],
+    first_frame: Optional[int] = None,
+    last_frame: Optional[int] = None,
+    feature_names: Optional[list[str]] = None,
+    labels: Optional[list[str]] = None,
+) -> plt.Figure:
+    """Plot time series of features showing 5th, 50th (median), and 95th percentiles over multiple datasets."""
+
+    plt.rcParams["font.family"] = 'serif'
+    num_files = len(hdf5_files)
+
+    # Basic validation
+    if labels is not None and len(labels) != num_files:
+        raise ValueError("Length of labels must match number of HDF5 files")
+
+    # Colors for plotting
+    cmap = plt.get_cmap('Set1')
+    colors = [cmap(i) for i in range(num_files)]
+
+    # Determine feature names from the first file if not given
+    if feature_names is None:
+        with h5py.File(hdf5_files[0], 'r') as f:
+            feature_names = list(f['Cells']['Phase'].keys())
+
+    # Determine frames to plot from the first file if not given
+    if first_frame is None or last_frame is None:
+        with h5py.File(hdf5_files[0], 'r') as f:
+            total_frames = f['Cells']['Phase']['Area'].shape[0]
+            if first_frame is None:
+                first_frame = 0
+            if last_frame is None:
+                last_frame = total_frames
+
+    fig, axs = plt.subplots(len(feature_names), sharex=True, figsize=(12, 3 * len(feature_names)))
+
+    for i, feature_name in enumerate(tqdm(feature_names)):
+        ax = axs[i] if len(feature_names) > 1 else axs
+
+        for file_idx, file_path in enumerate(hdf5_files):
+            with h5py.File(file_path, 'r') as f:
+                feature_values = f['Cells']['Phase'][feature_name][first_frame:last_frame]
+
+                # Initialize arrays for percentiles
+                p5 = np.full(feature_values.shape[0], np.nan)
+                p50 = np.full(feature_values.shape[0], np.nan)
+                p95 = np.full(feature_values.shape[0], np.nan)
+
+                p5 = np.nanpercentile(feature_values, 25, axis=1)
+                p50 = np.nanpercentile(feature_values, 50, axis=1)
+                p95 = np.nanpercentile(feature_values, 75, axis=1)
+                # for t in range(feature_values.shape[0]):
+                #     data_t = feature_values[t]
+                #     if np.isnan(data_t).all():
+                #         continue
+                #     p5[t] = np.nanpercentile(data_t, 5)
+                #     p50[t] = np.nanpercentile(data_t, 50)
+                #     p95[t] = np.nanpercentile(data_t, 95)
+            print(feature_name, p50.shape)
+            # Plot median line
+            ax.plot(range(first_frame, last_frame), p50, color=colors[file_idx], label=labels[file_idx] if labels else f'Dataset {file_idx+1}')
+            # Fill between 5th and 95th percentiles
+            ax.fill_between(range(first_frame, last_frame), p5, p95, color=colors[file_idx], edgecolor='none', alpha=0.3)
+
+        ax.set_ylabel(feature_name, rotation=45, labelpad=20)
+        ax.grid(True)
+        ax.set_xlim(left=first_frame, right=last_frame-1)
+
+    axs[-1].set_xlabel('Frame')
+
+    # Add legend to the top plot
+    axs[0].legend(loc='upper right', fontsize=12, frameon=False)
+
+    plt.tight_layout()
+    plt.savefig(save_as)
+    return fig
+
+
 def plot_feature_correlations(save_as: Path, feature_names: Optional[list] = None) -> 'matplotlib.figure.Figure':
     """Show scatter plots and correlations between each feature, and histograms of each feature."""
     with h5py.File(SETTINGS.DATASET, 'r') as f:
@@ -135,29 +215,140 @@ def plot_feature_correlations(save_as: Path, feature_names: Optional[list] = Non
                     axs[i, j].axis('off')  
     plt.savefig(save_as)
 
-    return fig#
+    return fig
 
-def plot_num_dead_cells(save_as: Optional[Path]=None, first_frame: Optional[int] = None, last_frame: Optional[int] = None) -> 'matplotlib.figure.Figure':
-    """Plot number of dead cells over time."""
+def plot_random_subset(ax, x, y, color, label, subset_size=1000, marker='o', alpha=0.6, s=10):
+    # Ensure subset_size does not exceed data size
+    n = len(x)
+    if subset_size < n:
+        indices = np.random.choice(n, subset_size, replace=False)
+        x_sub = x[indices]
+        y_sub = y[indices]
+    else:
+        x_sub = x
+        y_sub = y
+
+    ax.scatter(x_sub, y_sub, s=s, color=color, alpha=alpha, label=label, marker=marker)
+    
+def plot_feature_correlations_multi(
+    save_as: Path,
+    hdf5_files: list[Union[str, Path]],
+    feature_names: Optional[list[str]] = None,
+    labels: Optional[list[str]] = None,
+) -> plt.Figure:
+    """Plot scatter plots and histograms for features across multiple datasets."""
+
+    # Validate inputs
+    num_files = len(hdf5_files)
+    if labels is not None and len(labels) != num_files:
+        raise ValueError("Length of labels must match number of HDF5 files")
+    # if colors is not None and len(colors) != num_files:
+    #     raise ValueError("Length of colors must match number of HDF5 files")
+
+    # Set default colors if not provided
+    # default_colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown']
+    # if colors is None:
+    #     colors = default_colors[:num_files]
+    
+    cmap = plt.get_cmap('Set1')
+    colors = [cmap(i) for i in range(len(hdf5_files))]
+
+    # Load all features from all files
+    all_data = []
+    for idx, file_path in enumerate(hdf5_files):
+        with h5py.File(file_path, 'r') as f:
+            if feature_names is None:
+                feature_names = list(f['Cells']['Phase'].keys())
+
+            data_dict = {}
+            for feat in feature_names:
+                raw_data = f['Cells']['Phase'][feat][:]
+                flat = raw_data.flatten()
+                cleaned = remove_outliers(flat)
+                data_dict[feat] = cleaned
+            all_data.append(data_dict)
+
+    num_features = len(feature_names)
+    fig, axs = plt.subplots(num_features, num_features, figsize=(num_features * 3, num_features * 3))
     plt.rcParams["font.family"] = 'serif'
 
-    with h5py.File(SETTINGS.DATASET, 'r') as f:
-        if first_frame is None:
-            first_frame = 0
-        if last_frame is None:
-            last_frame = f['Cells']['Phase']['CellDeath'].shape[0]
+    for i, feature_i in enumerate(tqdm(feature_names)):
+        for j, feature_j in enumerate(feature_names):
 
-        # num_dead_cells = np.sum(f['Cells']['Phase']['CellDeath'][first_frame:last_frame], axis=1)
-        num_alive_cells = np.nansum(f['Cells']['Phase']['Macrophage'][first_frame:last_frame], axis=1)
-        num_dead_cells = np.nansum(f['Cells']['Phase']['Dead Macrophage'][first_frame:last_frame], axis=1)
-        total_cells = num_alive_cells + num_dead_cells
+            ax = axs[i, j]
+            if i == 0:
+                ax.set_title(feature_j, rotation=45, fontsize=20)
+            if j == 0:
+                ax.set_ylabel(feature_i, rotation=45, labelpad=30, fontsize=20)
 
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(range(first_frame, last_frame), num_dead_cells, label='Dead Cells', color='red')
-        ax.plot(range(first_frame, last_frame), num_alive_cells, label='Alive Cells', color='blue')
-        ax.plot(range(first_frame, last_frame), total_cells, label='Total Cells', color='black', linestyle='--')
-        ax.set_xlabel('Frame')
-        ax.set_ylabel('Number of Cells')
+            # Hide x/y ticks as appropriate
+            if i != num_features - 1:
+                ax.set_xticklabels([])
+            if j != 0 and i != j:
+                ax.set_yticklabels([])
+
+            if i > j:
+                # Scatter plot: each dataset in different color
+                for k in range(num_files):
+                    x = all_data[k][feature_j]
+                    y = all_data[k][feature_i]
+                    # ax.scatter(x, y, s=0.1, color=colors[k], label=labels[k] if i == 1 and j == 0 else None, alpha=0.3)
+                    # sns.kdeplot(x=x, y=y, ax=ax, color=colors[k], levels=5, fill=True, alpha=0.3)
+                    # ax.hexbin(x, y, gridsize=50, facecolors=colors[k], edgecolors='none', alpha=0.4)
+                    plot_random_subset(ax, x, y, colors[k], labels[k], 100000, alpha=0.1, s=1)
+
+                if i == num_features - 1 and j == 0 and labels:
+                    # ax.legend(fontsize=8)
+                    pass
+            elif i == j:
+                # Diagonal: histogram for each dataset
+                for k in range(num_files):
+                    ax.hist(all_data[k][feature_i], bins=100, color=colors[k], alpha=0.5, label=labels[k] if i == 0 else None)
+            else:
+                # Upper triangle: show correlation of first dataset only (for consistency)
+                r = corr_coefficient(all_data[0][feature_j], all_data[0][feature_i])
+                ax.text(0.5, 0.5, f'R =\n{r:.2f}', ha='center', va='center', transform=ax.transAxes,
+                        fontsize=20, fontweight='bold', color='black')
+                ax.axis('off')
+
+    # plt.legend()
+    plt.tight_layout()
+    # Collect legend handles from the last diagonal plot
+    handles = []
+    for k in range(num_files):
+        handles.append(plt.Line2D([], [], marker='o', color=colors[k], linestyle='None', markersize=5, label=labels[k]))
+
+    # Add a single legend outside the plot grid
+    fig.legend(handles=handles, labels=labels, loc='upper right', fontsize=20, frameon=False)
+    plt.savefig(save_as)
+    return fig
+
+def plot_num_alive_cells(files: list = [SETTINGS.DATASET], save_as: Optional[Path]=None, first_frame: Optional[int] = None, last_frame: Optional[int] = None, time_step: int = 5, labels: list = []) -> 'matplotlib.figure.Figure':
+    """Plot number of dead cells over time."""
+    plt.rcParams["font.family"] = 'serif'
+    cmap = plt.get_cmap('Set1')
+    colours = [cmap(i) for i in range(len(files))]
+    fig, ax = plt.subplots(figsize=(10, 5))
+    for file, colour, label in zip(files, colours, labels):
+        # first_frame, last_frame = None, None
+        with h5py.File(file, 'r') as f:
+            if first_frame is None:
+                first_frame = 0
+            if last_frame is None:
+                last_frame = f['Cells']['Phase']['Area'].shape[0]
+
+            # num_dead_cells = np.sum(f['Cells']['Phase']['CellDeath'][first_frame:last_frame], axis=1)
+            num_alive_cells = np.nansum(f['Cells']['Phase']['Macrophage'][first_frame:last_frame], axis=1)
+            num_dead_cells = np.nansum(f['Cells']['Phase']['Dead Macrophage'][first_frame:last_frame], axis=1)
+            total_cells = num_alive_cells + num_dead_cells
+
+            
+            # ax.plot(range(first_frame, last_frame), num_dead_cells, label='Dead Cells', color='red')
+            times = np.arange(first_frame, last_frame) * time_step
+            ax.plot(times, num_alive_cells, label=label, color=colour)
+        # ax.plot(range(first_frame, last_frame), total_cells, label='Total Cells', color='black', linestyle='--')
+        ax.set_xlabel('Time / minutes')
+        ax.set_ylabel('Number of Detected Alive Cells')
         ax.legend()
         ax.grid()
     if save_as is not None:
@@ -292,7 +483,7 @@ def plot_death_frame(death_frames_txt: Path, save_as: Path):
     avg_error = np.sum(np.abs(valid_rows['True'] - valid_rows['Predicted'])) / len(valid_rows['True'])
     print(f"\nAverage error in cell death estimation is {avg_error} frames.\n")
 
-def km_plot(hdf5_files: list[Path], labels: list[str], save_as: Path, time_steps: tuple[int] = (1, 1)):
+def km_plot(hdf5_files: list[Path], labels: list[str], save_as: Path, time_steps: tuple[int] = (1, 1), initial_cells_only: bool = True, num_frames=None):
     """Plot the Kaplan Meier estimator for hdf5_file/s."""
     
     if isinstance(hdf5_files, Path):
@@ -314,13 +505,15 @@ def km_plot(hdf5_files: list[Path], labels: list[str], save_as: Path, time_steps
         
         with h5py.File(hdf5_file, 'r') as f:
             cell_deaths_arr = f['Cells']['Phase']['CellDeath']
-            num_frames = f['Cells']['Phase']['Area'].shape[0]
+            max_frames = f['Cells']['Phase']['Area'].shape[0]
+            this_num_frames = min(num_frames, max_frames) if num_frames is not None else max_frames
             
             print(num_frames)
             cell_deaths = cell_deaths_arr[0]
             
             # Load only 'Area' to compute start/end frames
             area_data = CellType('Phase').get_features_xr(f, features=['Area'])['Area'].transpose('Cell Index', 'Frame').values  # shape: (num_cells, num_frames)
+            area_data = area_data[:, :this_num_frames]
 
             # Use numpy vectorization for speed
             not_nan_mask = ~np.isnan(area_data)
@@ -328,13 +521,23 @@ def km_plot(hdf5_files: list[Path], labels: list[str], save_as: Path, time_steps
             # Last valid frame (end frame)
             reversed_mask = not_nan_mask[:, ::-1]
             last_frames = area_data.shape[1] - 1 - reversed_mask.argmax(axis=1)
+            if initial_cells_only:
+                initial_cells_mask = f['Cells']['Phase']['First Frame'][0] == 0.0
+                cell_deaths = cell_deaths[initial_cells_mask]
+                last_frames = last_frames[initial_cells_mask]
         ds, ns = np.zeros(shape=num_frames), np.zeros(shape=num_frames)
         for cell_death, last_frame in zip(cell_deaths, last_frames):
             if np.isnan(cell_death):
                 ns[np.arange(0, last_frame).astype(int)] += 1
             else:
-                ns[np.arange(0, cell_death).astype(int)] += 1
-                ds[cell_death.astype(int)] += 1
+                death_frame = int(cell_death)
+                if death_frame < this_num_frames:
+                    # Valid death event
+                    ns[np.arange(0, death_frame)] += 1
+                    ds[death_frame] += 1
+                else:
+                    # Died after truncation → treat as censored
+                    ns[np.arange(0, this_num_frames)] += 1
         mask = ds > 0
         ds = ds[mask]
         ns = ns[mask]
@@ -351,8 +554,7 @@ def km_plot(hdf5_files: list[Path], labels: list[str], save_as: Path, time_steps
     plt.savefig(save_as)
     
 def compare_cell_features(hdf5_files: list[Path], labels: list[str], feature: str, save_as: Path) -> None:
-    """Compare the histograms of a given cell feature between two datasets.
-    If compare_dead = true, plot separate histograms for cells which die during observation vs those that dont."""
+    """Compare the histograms of a given cell feature between two datasets."""
     
     if isinstance(hdf5_files, Path):
         hdf5_files = [hdf5_files]
@@ -427,25 +629,25 @@ def plot_alive_vs_dead_feature(hdf5_file: Path, feature: str, save_as: Path) -> 
     
 def main():
     feature_names=[
-        # 'Area',
-        # 'Circularity',
-        # 'Perimeter',
-        # 'Displacement',
+        'Area',
+        'Circularity',
+        'Perimeter',
+        'Displacement',
         # 'Mode 0',
         # 'Mode 1',
         # 'Mode 2',
         # 'Mode 3',
         # 'Mode 4',
-        # 'Speed',
+        'Speed',
         # 'Phagocytes within 100 pixels',
         # 'Phagocytes within 250 pixels',
         # 'Phagocytes within 500 ',
         # 'X',
         # 'Y',
-        'CellDeath',
-        'Total Fluorescence', 
-        'Fluorescence Distance Mean', 
-        'Fluorescence Distance Variance'
+        # 'CellDeath',
+        # 'Total Fluorescence', 
+        # 'Fluorescence Distance Mean', 
+        # 'Fluorescence Distance Variance'
     ]
     # plot_two_death_frame_hists(
     #     Path('temp') / 'death_frames_fine_tuned.txt',
@@ -469,14 +671,39 @@ def main():
     #     'Mode 3',
     #     'Speed'
     # ])
-    km_plot([Path('PhagoPred') / 'Datasets' / '16_09_3.h5',
-            # Path('PhagoPred') / 'Datasets' / '13_06_survival.h5',
-            # Path('PhagoPred') / 'Datasets' / '24_06_survival.h5'
-            ], 
-            ['16_03_3'],
-            Path('temp') / 'km_curve.png',
-            [5])
-    
+   
+    files = [
+        Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5',
+        # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '03_10_2500.h5',
+        Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5',
+    ]
+    labels = ['0s exposure', 
+            #   '2.5s exposure', 
+              '5s exposure']
+    # km_plot(files,
+    #         labels,
+    #         Path('temp') / 'km_curve.png',
+    #         [5, 5, 5],
+    #         num_frames = 600)
+    # plot_num_alive_cells(files, Path('temp') / 'dead_cells.png', labels=labels, last_frame=600)
+    # compare_cell_features(files,
+    #                       labels,
+    #                       'Area',
+    #                       Path('temp') / 'speed_plt.png')
+    # plot_feature_correlations_multi(
+    #     Path('temp') / 'corr_plt.png',
+    #     files,
+    #     feature_names,
+    #     labels,
+    # )
+    plot_percentile_cell_features_multi(
+        Path('temp') / 'features.png',
+        files,
+        0,
+        600,
+        labels=labels,
+        feature_names=feature_names
+    )
     # compare_cell_features([Path('PhagoPred') / 'Datasets' / '13_06_survival.h5',
     #             Path('PhagoPred') / 'Datasets' / '24_06_survival.h5'], 
     #             ['13_06', '24_06'], 'Area',
