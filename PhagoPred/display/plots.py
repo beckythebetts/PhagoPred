@@ -303,7 +303,7 @@ def plot_feature_correlations_multi(
             elif i == j:
                 # Diagonal: histogram for each dataset
                 for k in range(num_files):
-                    ax.hist(all_data[k][feature_i], bins=100, color=colors[k], alpha=0.5, label=labels[k] if i == 0 else None)
+                    ax.hist(all_data[k][feature_i], bins=100, color=colors[k], alpha=0.5, label=labels[k] if i == 0 else None, density=True)
             else:
                 # Upper triangle: show correlation of first dataset only (for consistency)
                 r = corr_coefficient(all_data[0][feature_j], all_data[0][feature_i])
@@ -323,30 +323,32 @@ def plot_feature_correlations_multi(
     plt.savefig(save_as)
     return fig
 
+
 def plot_num_alive_cells(files: list = [SETTINGS.DATASET], save_as: Optional[Path]=None, first_frame: Optional[int] = None, last_frame: Optional[int] = None, time_step: int = 5, labels: list = []) -> 'matplotlib.figure.Figure':
-    """Plot number of dead cells over time."""
+    """PLot number of alive cells at each frame."""
     plt.rcParams["font.family"] = 'serif'
     cmap = plt.get_cmap('Set1')
     colours = [cmap(i) for i in range(len(files))]
     fig, ax = plt.subplots(figsize=(10, 5))
+    
     for file, colour, label in zip(files, colours, labels):
-        # first_frame, last_frame = None, None
         with h5py.File(file, 'r') as f:
-            if first_frame is None:
-                first_frame = 0
-            if last_frame is None:
-                last_frame = f['Cells']['Phase']['Area'].shape[0]
-
-            # num_dead_cells = np.sum(f['Cells']['Phase']['CellDeath'][first_frame:last_frame], axis=1)
-            num_alive_cells = np.nansum(f['Cells']['Phase']['Macrophage'][first_frame:last_frame], axis=1)
-            num_dead_cells = np.nansum(f['Cells']['Phase']['Dead Macrophage'][first_frame:last_frame], axis=1)
-            total_cells = num_alive_cells + num_dead_cells
-
+            file_first_frame = 0 if first_frame is None else first_frame
+            file_last_frame = f['Cells']['Phase']['Area'].shape[0] if last_frame is None else last_frame
             
-            # ax.plot(range(first_frame, last_frame), num_dead_cells, label='Dead Cells', color='red')
-            times = np.arange(first_frame, last_frame) * time_step
-            ax.plot(times, num_alive_cells, label=label, color=colour)
-        # ax.plot(range(first_frame, last_frame), total_cells, label='Total Cells', color='black', linestyle='--')
+            first_frames = f['Cells']['Phase']['First Frame'][0]
+            last_frames = f['Cells']['Phase']['CellDeath'][0]
+            last_frames = np.where(np.isnan(last_frames), f['Cells']['Phase']['Last Frame'][0], last_frames)
+            
+            print(first_frames, last_frames)
+            
+            frames = np.arange(file_first_frame, file_last_frame)
+            alive_mask = (first_frames[np.newaxis, :] <= frames[:, np.newaxis]) & (last_frames[np.newaxis, :] > frames[:, np.newaxis])
+            
+            num_alive = alive_mask.sum(axis=1)
+            times = np.arange(file_first_frame, file_last_frame) * time_step
+            ax.plot(times, num_alive, label=label, color=colour)
+            # ax.plot(range(first_frame, last_frame), total_cells, label='Total Cells', color='black', linestyle='--')
         ax.set_xlabel('Time / minutes')
         ax.set_ylabel('Number of Detected Alive Cells')
         ax.legend()
@@ -356,6 +358,7 @@ def plot_num_alive_cells(files: list = [SETTINGS.DATASET], save_as: Optional[Pat
 
     return fig
 
+        
 def remove_outliers(arr):
     """
     Using interquartile range (+/- 1.5*q)
@@ -685,7 +688,7 @@ def main():
     #         Path('temp') / 'km_curve.png',
     #         [5, 5, 5],
     #         num_frames = 600)
-    # plot_num_alive_cells(files, Path('temp') / 'dead_cells.png', labels=labels, last_frame=600)
+    plot_num_alive_cells(files, Path('temp') / 'dead_cells.png', labels=labels, last_frame=600)
     # compare_cell_features(files,
     #                       labels,
     #                       'Area',
@@ -696,15 +699,15 @@ def main():
     #     feature_names,
     #     labels,
     # )
-    plot_percentile_cell_features_multi(
-        Path('temp') / 'features.png',
-        files,
-        0,
-        600,
-        labels=labels,
-        feature_names=feature_names
-    )
-    # compare_cell_features([Path('PhagoPred') / 'Datasets' / '13_06_survival.h5',
+    # plot_percentile_cell_features_multi(
+    #     Path('temp') / 'features.png',
+    #     files,
+    #     0,
+    #     600,
+    #     labels=labels,
+    #     feature_names=feature_names
+    # )
+    # # compare_cell_features([Path('PhagoPred') / 'Datasets' / '13_06_survival.h5',
     #             Path('PhagoPred') / 'Datasets' / '24_06_survival.h5'], 
     #             ['13_06', '24_06'], 'Area',
     #             Path('temp') / 'features_plot.png')

@@ -46,6 +46,7 @@ def visualize_validation_predictions(model, dataloader, device, bin_edges, num_e
             time_to_event_bins = time_to_event_bins.cpu().numpy()
             event_indicators = event_indicators.cpu().numpy()
             time_to_events = time_to_events.cpu().numpy()
+            lengths = lengths.cpu().numpy()  # Convert lengths to numpy for plotting
 
             # Get predicted distribution over time bins
             predicted_dists, _ = model(cell_features)  # Shape: (batch_size, time_bins)
@@ -63,9 +64,14 @@ def visualize_validation_predictions(model, dataloader, device, bin_edges, num_e
                 pred_dist = predicted_dists[i]
                 true_time = time_to_events[i]
                 event = event_indicators[i]
+                seq_len = lengths[i]  # sequence length for this sample
 
                 plt.figure(figsize=(10, 4))
                 plt.step(bin_edges[:-1], pred_dist, label='Predicted Distribution')
+
+                # Shade region up to seq_len to show where features were observed
+                plt.axvspan(0, seq_len, color='gray', alpha=0.2, label='Observed Feature Window')
+
                 if event == 1:
                     plt.axvline(x=true_time, color='red', linestyle='--', label=f'True Death @ {true_time}')
                 else:
@@ -89,7 +95,6 @@ def visualize_validation_predictions(model, dataloader, device, bin_edges, num_e
 
             if examples_plotted >= num_examples:
                 break
-
 
 def validate(model, model_dir, val_hdf5_paths):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

@@ -147,6 +147,7 @@ class TrackerWithTrackpy:
             self.feature_extractor.extract_features()
         else:
             print('Features already found, skipping to tracking.')
+            
         
 def run_tracking(dataset=SETTINGS.DATASET):
     tracker = TrackerWithTrackpy(dataset, 'Phase')

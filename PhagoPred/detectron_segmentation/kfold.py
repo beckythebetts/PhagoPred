@@ -676,18 +676,18 @@ def main():
     faulthandler.enable()
     # merge_jsons(Path('PhagoPred')/ 'detectron_segmentation' / 'models' / 'toumai_01_05' / 'labels')
     # compare_prec_recall_curves([
-    #     Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_merge_no_fine_tune',
-    #     Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_merge_fine_tune'
+    #     Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_no_fine_tune_16_10',
+    #     Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_fine_tune_16_10'
     # ],
     #                            Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'comparison_plot.png',
     #                            ['No Fine Tune', 'Fine Tune'])
-    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_merge_no_fine_tune', fine_tune=True)
-    # # my_kfold.split_all()
-    # # my_kfold.train()
+    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_no_fine_tune_16_10', fine_tune=True)
+    # my_kfold.split_all()
+    # my_kfold.train()
     # # my_kfold.eval()
 
-    # my_kfold.fine_tune_eval(' Not Fine Tuned')
-    my_kfold.fine_tune_eval_clusters('Not Fine Tuned')
+    my_kfold.fine_tune_eval('Not Fine Tuned')
+    # my_kfold.fine_tune_eval_clusters('Fine Tuned')
     # my_kfold.train()
     # my_kfold.eval()
     # my_kfold.plot()

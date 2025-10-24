@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 
 import h5py
 import numpy as np
@@ -7,6 +8,7 @@ import pandas as pd
 import xarray as xr
 import dask.array as da
 from tqdm import tqdm
+from sklearn.metrics import precision_score, recall_score, f1_score
 
 from PhagoPred import SETTINGS
 from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
@@ -257,6 +259,7 @@ class FeaturesExtraction:
 
                     for feature in cell_type.primary_features:
                         result = feature.compute(mask=expanded_mask, image=image)
+                        # print(result.shape)
                         if result.ndim == 1:
                             result = result[:, np.newaxis]
                         for i, feature_name in enumerate(feature.get_names()):
@@ -342,31 +345,182 @@ class FeaturesExtraction:
                         f[cell_type.features_group][feature_name].resize(1, cell_type.FRAME_DIM)
                     f[cell_type.features_group][feature_name][:] = result[:, :, i]
 
-
-def extract_features(dataset=SETTINGS.DATASET):
-    feature_extractor = FeaturesExtraction(h5py_file=dataset)
-
-    phase_features = [
-        features.Fluorescence(),
-        # features.MorphologyModes(), 
-        features.Speed(),
-        features.DensityPhase(),
-        features.Displacement(),
-        features.Perimeter(),
-        features.Circularity(),
-        # features.GaborScale(),
-        features.CellDeath(),
-        features.FirstLastFrame(),
-        ]
+# def cell_death_hyperparamter_search(dataset: Path = SETTINGS.DATASET, true_deaths_txt: Path = None) -> None:
+#     # with open(true_deaths_txt, 'r') as f:
+#     true_deaths = np.genfromtxt(true_deaths_txt, delimiter=', ', usecols=1)
     
+#     thresholds = np.arange(0.2, 0.7, 0.1)
+#     min_frames_deads = np.arange(5, 50, 5)
+#     smoothed_frames = np.arange(3, 20, 2)
+#     for threshold in thresholds:
+#         for min_frames_dead in min_frames_deads:
+#             for smoothed_frame in smoothed_frames:
+#                 extract_features(dataset, phase_features=features.CellDeath(threshold, min_frames_dead, smoothed_frame))
+#                 with h5py.File(dataset, 'r') as f:
+#                     estimated_deaths = f['Cells']['Phase']['CellDeath'][0, :len(true_deaths)]
+                
+#     accuracy = 
+#     print(true_deaths, estimated_deaths)
+def cell_death_hyperparameter_search(dataset: Path, true_deaths_txt: Path, save_csv: bool = False, csv_path: Path = None) -> pd.DataFrame:
+    # Load true deaths (NaNs preserved)
+    true_deaths = np.genfromtxt(true_deaths_txt, delimiter=',', usecols=1)
+
+    thresholds = np.arange(0.01, 0.3, 0.05)
+    smoothed_frames = np.array([1, 2, 3])
+    min_frames_deads = np.arange(5, 30, 5)
+
+    results = []
+
+    # Optional: show progress bar
+    total_iters = len(thresholds) * len(min_frames_deads) * len(smoothed_frames)
+    pbar = tqdm(total=total_iters, desc="Hyperparam search")
+
+    for threshold in thresholds:
+        for min_frames_dead in min_frames_deads:
+            for smoothed_frame in smoothed_frames:
+                # Call your extraction function that updates the dataset with the predicted deaths
+                extract_features(dataset, phase_features=[features.CellDeath(threshold, min_frames_dead, smoothed_frame)])
+
+                with h5py.File(dataset, 'r') as f:
+                    estimated_deaths = f['Cells']['Phase']['CellDeath'][0, :len(true_deaths)]
+
+                has_death_mask = ~np.isnan(true_deaths)
+                no_death_mask = np.isnan(true_deaths)
+
+                # Compute MAE on cells with true death frames and predicted death frames
+                valid_mask = has_death_mask & ~np.isnan(estimated_deaths)
+                mae = np.nan
+                if np.any(valid_mask):
+                    mae = np.mean(np.abs(estimated_deaths[valid_mask] - true_deaths[valid_mask]))
+
+                # Compute accuracy for no-death cells (fraction of predicted NaNs)
+                no_death_accuracy = np.nan
+            
+
+                # Create binary labels
+                true_labels = ~np.isnan(true_deaths)           # True = death, False = no-death
+                pred_labels = ~np.isnan(estimated_deaths)      # True = predicted death
+
+                # Check if there are any labels at all to evaluate
+                if np.any(true_labels) or np.any(~true_labels):
+                    precision = precision_score(true_labels, pred_labels, zero_division=0)
+                    recall = recall_score(true_labels, pred_labels, zero_division=0)
+                    f1 = f1_score(true_labels, pred_labels, zero_division=0)
+                else:
+                    precision = recall = f1 = np.nan  # No data to compute on
+
+                results.append({
+                    'threshold': threshold,
+                    'min_frames_dead': min_frames_dead,
+                    'smoothed_frame': smoothed_frame,
+                    'mae_death_cells': mae,
+                    'precision': precision,
+                    'recall': recall,
+                    'f1_score': f1
+                })
+                print(mae, f1)
+
+                pbar.update(1)
+
+    pbar.close()
+
+    results_df = pd.DataFrame(results)
+
+    if save_csv:
+        if csv_path is None:
+            csv_path = Path("cell_death_hyperparam_search_results.csv")
+        results_df.to_csv(csv_path, index=False)
+        print(f"Results saved to {csv_path}")
+
+    return results_df
+
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+from itertools import combinations
+from pathlib import Path
+
+def plot_hyperparam_heatmaps(results_path_or_df, save_dir='hyperparam_heatmaps'):
+    # Load results
+    if isinstance(results_path_or_df, pd.DataFrame):
+        df = results_path_or_df
+    else:
+        df = pd.read_csv(results_path_or_df)
+
+    print(df.dtypes)
+    # Ensure save directory exists
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    # Print best rows for each metric
+    print("Best row by MAE (lowest):")
+    print(df.loc[df['mae_death_cells'].idxmin()])
+    print("\nBest row by No-death F1-Score (highest):")
+    print(df.loc[df['f1_score'].idxmax()])
+
+    # List of hyperparameters (exclude performance columns)
+    # param_cols = [c for c in df.columns if c not in ['mae_death_cells', 'accuracy_no_death_cells']]
+    param_cols = [c for c in df.columns if c not in ['mae_death_cells', 'f1_score', 'precision', 'recall']]
+    # For every pair of hyperparameters, plot heatmaps for MAE and Accuracy
+    for x_param, y_param in combinations(param_cols, 2):
+        # Pivot tables for heatmaps (mean if multiple entries)
+        mae_pivot = df.pivot_table(index=y_param, columns=x_param, values='mae_death_cells', aggfunc='mean')
+        acc_pivot = df.pivot_table(index=y_param, columns=x_param, values='f1_score', aggfunc='mean')
+
+        # Plot MAE heatmap (lower is better)
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(mae_pivot, annot=True, fmt=".3f", cmap='viridis_r', cbar_kws={'label': 'MAE Death Cells'})
+        plt.title(f'MAE Death Cells: {y_param} vs {x_param}')
+        plt.xlabel(x_param)
+        plt.ylabel(y_param)
+        plt.tight_layout()
+        plt.savefig(save_dir / f'mae_{y_param}_vs_{x_param}.png')
+        plt.close()
+
+        # Plot No-Death Accuracy heatmap (higher is better)
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(acc_pivot, annot=True, fmt=".3f", cmap='viridis', cbar_kws={'label': 'Accuracy No-Death Cells'})
+        plt.title(f'Accuracy No-Death Cells: {y_param} vs {x_param}')
+        plt.xlabel(x_param)
+        plt.ylabel(y_param)
+        plt.tight_layout()
+        plt.savefig(save_dir / f'accuracy_{y_param}_vs_{x_param}.png')
+        plt.close()
+
+    print(f"Heatmaps saved to {save_dir.resolve()}")
+    
+    
+def extract_features(dataset=SETTINGS.DATASET, 
+                     phase_features = [
+                        features.Fluorescence(), 
+                        # features.MorphologyModes(), 
+                        features.Speed(),
+                        features.DensityPhase(),
+                        features.Displacement(),
+                        features.Perimeter(),
+                        features.Circularity(),
+                        # features.GaborScale(),
+                        features.CellDeath(),
+                        features.FirstLastFrame(),
+                        ]):
+    
+    feature_extractor = FeaturesExtraction(h5py_file=dataset)
     for feature in phase_features:
         feature_extractor.add_feature(feature, 'Phase')
 
     feature_extractor.set_up()
     feature_extractor.extract_features()
+
+# def extract_and_clean(dataset=SETTINGS.DATASET):
+#     extract_features(dataset, features.Perimeter())
+#     clean_features.remove_bad_frames(dataset, use_features=['Area', 'Perimeter'])
+#     extract_features(dataset)
     
 def main():
-    extract_features()
+    # cell_death_hyperparamter_search(true_deaths_txt='/home/ubuntu/PhagoPred/temp/03_10_deaths.txt')
+    cell_death_hyperparameter_search(dataset=SETTINGS.DATASET, true_deaths_txt='/home/ubuntu/PhagoPred/temp/03_10_deaths.txt', save_csv=True, csv_path = '/home/ubuntu/PhagoPred/temp/death_hyperparamters.txt')
+    plot_hyperparam_heatmaps('/home/ubuntu/PhagoPred/temp/death_hyperparamters.txt', '/home/ubuntu/PhagoPred/temp/death_hyperparamters')
+    # extract_features(phase_features=[features.CellDeath()])
     # with h5py.File('PhagoPred/Datasets/16_09_1.h5', 'r') as f:
     #     print(np.nanmax(f['Cells']['Phase']['Circularity'][:]))
     #     smallest = np.nanargmin(f['Cells']['Phase']['Perimeter'][:])
