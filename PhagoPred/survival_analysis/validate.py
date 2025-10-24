@@ -54,6 +54,7 @@ def visualize_validation_predictions(model, dataloader, device, bin_edges, num_e
             predicted_dists = predicted_dists.cpu().numpy()
 
             for i in range(len(cell_features)):
+               
                 if examples_plotted >= num_examples:
                     break
                 if i >= 1:
@@ -66,16 +67,19 @@ def visualize_validation_predictions(model, dataloader, device, bin_edges, num_e
                 event = event_indicators[i]
                 seq_len = lengths[i]  # sequence length for this sample
 
+                abs_bin_edges = bin_edges + seq_len
+                
                 plt.figure(figsize=(10, 4))
-                plt.step(bin_edges[:-1], pred_dist, label='Predicted Distribution')
+                plt.step(abs_bin_edges[:-1], pred_dist, label='Predicted Distribution')
 
                 # Shade region up to seq_len to show where features were observed
-                plt.axvspan(0, seq_len, color='gray', alpha=0.2, label='Observed Feature Window')
-
+                plt.axvspan(0, seq_len, color='gray', alpha=0.5, label='Observed Feature Window')
+                
+                abs_event_time = true_time + seq_len
                 if event == 1:
-                    plt.axvline(x=true_time, color='red', linestyle='--', label=f'True Death @ {true_time}')
+                    plt.axvline(x=abs_event_time, color='red', linestyle='--', label=f'True Death @ {abs_event_time}')
                 else:
-                    plt.axvline(x=true_time, color='orange', linestyle='--', label=f'Censored @ {true_time}')
+                    plt.axvline(x=abs_event_time, color='orange', linestyle='--', label=f'Censored @ {abs_event_time}')
 
                 plt.xlabel('Time Frame')
                 plt.ylabel('Probability')
@@ -123,7 +127,7 @@ def validate(model, model_dir, val_hdf5_paths):
     val_loss = validate_step(model, validate_loader, loss_fn, device)
     print(f"Validation Loss: {val_loss:.4f}")
 
-    visualize_validation_predictions(model, validate_loader, device, num_examples=5, save_path=model_dir)
+    visualize_validation_predictions(model, validate_loader, device, num_examples=50, save_path=model_dir)
     
 def main():
     validate(
