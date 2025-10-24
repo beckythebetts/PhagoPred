@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import time
 from sklearn.decomposition import PCA
 from scipy.spatial import procrustes
+from scipy import interpolate
 from tqdm import tqdm
 
 from PhagoPred import SETTINGS
@@ -14,8 +15,9 @@ class PreProcessing:
     def __init__(self, contour, mean_contour=None):
         self.contour=contour
         self.mean_contour = mean_contour
-        
-    def resample_contour(self, num_points=SETTINGS.NUM_CONTOUR_POINTS):
+    
+    # def smooth_contour(self, 
+    def resample_contour(self, num_points=SETTINGS.NUM_CONTOUR_POINTS, smooth=0):
         """
         Set number of coordinates in contour to num_points
         """
@@ -26,9 +28,13 @@ class PreProcessing:
         # Create equally spaced arc length values
         target_lengths = np.linspace(0, cumulative_lengths[-1], num_points)
 
+        if smooth > 0:
+            tck, _ = interpolate.splprep([self.contour[:, 0], self.contour[:, 1]], s=smooth, per=True)
+            x_resampled, y_resampled = interpolate.splev(np.linspace(0, 1, num_points), tck)
+        else:
         # Interpolate contour points
-        x_resampled = np.interp(target_lengths, cumulative_lengths, self.contour[:, 0])
-        y_resampled = np.interp(target_lengths, cumulative_lengths, self.contour[:, 1])
+            x_resampled = np.interp(target_lengths, cumulative_lengths, self.contour[:, 0])
+            y_resampled = np.interp(target_lengths, cumulative_lengths, self.contour[:, 1])
 
         self.contour = np.column_stack((x_resampled, y_resampled))
 
@@ -85,9 +91,9 @@ class PreProcessing:
         first_coord = np.nanargmin(np.abs(potential_start_coords[:, 1]))
         self.contour = np.append(self.contour[first_coord:], self.contour[:first_coord], axis=0)
 
-    def pre_process(self):
+    def pre_process(self, smoothing=0):
         if len(self.contour) > 0:
-            self.resample_contour()
+            self.resample_contour(smooth=smoothing)
             self.centre_contour()
             self.normalise_contour_size()
             self.align_contour()

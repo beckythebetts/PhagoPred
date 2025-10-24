@@ -4,8 +4,14 @@ import numpy as np
 from tqdm import tqdm
 from shapely.geometry import Point, box
 from scipy.signal import convolve
+from scipy import ndimage
+from skimage.morphology import skeletonize
+import pickle
+from skimage.measure import label, regionprops
+import time
 
 from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
+from PhagoPred.feature_extraction.morphology.UMAP import load_UMAP, UMAP_embedding
 from PhagoPred.feature_extraction.texture.gabor import Gabor
 from PhagoPred import SETTINGS
 
@@ -43,8 +49,11 @@ class CellDeath(BaseFeature):
     """
     derived_feature = True
 
-    threshold = 0.5
-    min_frames_dead = 10
+    def __init__(self, threshold: float = 0.1, min_frames_dead: int = 5, smoothed_frames: float = 2):
+        super().__init__()
+        self.threshold = threshold
+        self.min_frames_dead = min_frames_dead
+        self.smoothed_frames = smoothed_frames
 
     def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
         dead = phase_xr['Dead Macrophage']
@@ -56,7 +65,7 @@ class CellDeath(BaseFeature):
         cell_state = cell_state.where(dead != 1, 0)
 
         # smooth
-        smoothed_cell_state = cell_state.rolling(Frame=5, center=True).reduce(np.nanmean).values
+        smoothed_cell_state = cell_state.rolling(Frame=self.smoothed_frames, center=True).reduce(np.nanmean).values
 
         below_threshold = smoothed_cell_state < self.threshold
 
@@ -154,7 +163,95 @@ class MorphologyModes(BaseFeature):
         """
         expanded_frame_mask = mask.cpu().numpy()
         results = self.morphology_model.apply_expanded_mask(expanded_frame_mask)
+        # print(results, results.shape)
         return results
+    
+class UmapEmbedding(BaseFeature):
+    
+    primary_feature = True
+    
+    def __init__(self):
+        super().__init__()
+        self.umap_embedding = load_UMAP(SETTINGS.UMAP_MODEL)
+        # with open(SETTINGS.UMAP_MODEL, 'rb') as f:
+        #     self.umap_embedding = pickle.load(f)
+    
+    def get_names(self):
+        return ['UMAP 1', 'UMAP 2']
+    
+    def compute(self, mask: torch.tensor, image: torch.tensor) -> np.ndarray:
+        """
+        return [num_cells, num_features]"""
+        expanded_frame_mask = mask.cpu().numpy()
+        embeddings = self.umap_embedding.apply(expanded_frame_mask)
+        return embeddings
+        
+class Skeleton(BaseFeature):
+    
+    primary_feature = True
+    
+    def get_names(self):
+        return [
+            'Skeleton Length', 
+            'Skeleton Branch Points', 
+            'Skeleton End Points', 
+            'Skeleton Branch Length Mean', 
+            'Skeleton Branch Length Std',
+            'Skeleton Branch Length Max'
+        ]
+    
+    def compute(self, mask: torch.tensor, image: torch.tensor) -> np.ndarray:
+        """
+        return [num_cells, num_features]
+        """
+        expanded_mask = mask.cpu().numpy()
+        feature_names = self.get_names()
+        
+        results = {name: [] for name in feature_names}
+        
+        kernel = np.array([[1,1,1],
+                           [1,10,1],
+                           [1,1,1]])
+        
+        n = expanded_mask.shape[0]
+        
+        for i, cell_mask in enumerate(expanded_mask, 1):
+            if not cell_mask.any():
+                for feature in results.keys():
+                    results[feature].append(np.nan)
+
+            coords = np.argwhere(cell_mask)
+            min_row, min_col = coords.min(axis=0)
+            max_row, max_col = coords.max(axis=0)
+            cell_mask = cell_mask[min_row:max_row+1, min_col:max_col+1]
+            cell_mask = np.ascontiguousarray(cell_mask.astype(bool))
+            
+            skeleton = skeletonize(cell_mask)
+            
+            length = np.sum(skeleton)
+
+            neighbor_count = ndimage.convolve(skeleton.astype(int), kernel, mode='constant', cval=0)
+            
+            branch_points = np.sum((neighbor_count >= 13) & skeleton)
+            end_points = np.sum((neighbor_count == 11) & skeleton)
+            
+            labeled_skel = label(skeleton, connectivity=2)
+            
+            regions = regionprops(labeled_skel)
+            branch_lengths = np.array([r.area for r in regions])
+            
+            branch_len_mean = branch_lengths.mean() if branch_lengths.size > 0 else np.nan
+            branch_len_std = branch_lengths.std() if branch_lengths.size > 0 else np.nan
+            branch_len_max = branch_lengths.max() if branch_lengths.size > 0 else np.nan
+            
+            results['Skeleton Length'].append(length)
+            results['Skeleton Branch Points'].append(branch_points)
+            results['Skeleton End Points'].append(end_points)
+            results['Skeleton Branch Length Mean'].append(branch_len_mean)
+            results['Skeleton Branch Length Std'].append(branch_len_std)
+            results['Skeleton Branch Length Max'].append(branch_len_max)
+        
+        return np.stack([results[feature] for feature in feature_names], axis=1)
     
 class Speed(BaseFeature):
 

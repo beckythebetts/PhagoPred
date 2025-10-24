@@ -53,14 +53,14 @@ class DynamicDeepHit(torch.nn.Module):
         self.fc = build_fc_layers(input_size=lstm_hidden_size, output_size=output_size, layer_sizes=fc_layers)
         
         num_trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        print(f"MModel loaded. Trainable parameters: {num_trainable_params}")
+        print(f"Model loaded. Trainable parameters: {num_trainable_params}")
 
 
 
     def forward(self, x):
         """
         Args:
-            x: [Sequence length, batch_size, num_features]
+            x: [batch_size, sequence length, num_features]
         """
         lstm_out, (h_n, c_n) = self.lstm(x)  # lstm_out (batch_size, seq_len, lstm_hidden_size)
         y = self.predictor(lstm_out)  # y (batch_size, seq_length, num_features//2)
@@ -126,7 +126,7 @@ def compute_loss(
     ranking_loss = losses.ranking_loss(cif, t, t_last, e)   
     prediction_loss = losses.prediction_loss(y, features, mask)
     
-    loss = negative_log_likelihood + ranking_loss + prediction_loss
+    loss = negative_log_likelihood + ranking_loss + 0.1*prediction_loss
     if torch.isnan(loss) or torch.isinf(loss):
         print("NaN or inf loss encountered:")
         print(f"  Negative Log Likelihood: {negative_log_likelihood.item()}")

@@ -17,42 +17,55 @@ def negative_log_likelihood(outputs: torch.Tensor,
     Returns:
         loss: scalar tensor - negative log-likelihood loss
     """
-    epsilon = 1e-8  # small constant to avoid log(0)
+    batch_size, num_bins = outputs.shape
+    eps = 1e-8
 
-    # Uncensored loss
-    
-    uncensored_outputs = outputs[e == 1]  # (num_events, num_time_bins)
-    uncensored_times = t[e == 1]  # (num_events,)
-    
-    assert uncensored_times.max().item() < uncensored_outputs.size(1), \
-    f"Max uncensored_time {uncensored_times.max().item()} >= num_time_bins {uncensored_outputs.size(1)}"
+    # --- Uncensored samples (events occurred) ---
+    uncensored_mask = e == 1
+    if uncensored_mask.any():
+        unc_outputs = outputs[uncensored_mask]
+        unc_t = t[uncensored_mask]
 
-    assert uncensored_times.min().item() >= 0, \
-    f"Negative index in uncensored_times: min={uncensored_times.min().item()}"
-    
-    assert not torch.isnan(uncensored_outputs).any(), "NaNs found in uncensored_outputs"
-    assert not torch.isinf(uncensored_outputs).any(), "Infs found in uncensored_outputs"
-    assert not torch.isnan(uncensored_times).any(), "NaNs found in uncensored_times"
-    assert not torch.isinf(uncensored_times).any(), "Infs found in uncensored_times"
+        # Event probability at event time
+        o_t = unc_outputs[torch.arange(unc_outputs.size(0)), unc_t]
 
-    o_t = uncensored_outputs[torch.arange(uncensored_outputs.size(0)), uncensored_times] + epsilon  # predicted probability of event occuring at time t (num_events,)
-    o_t = o_t.clamp(min=epsilon, max=1.0)  # Clamp to avoid log(0)
-    
-    s_t = 1 - torch.cumsum(uncensored_outputs, dim=1)[torch.arange(uncensored_outputs.size(0)), uncensored_times]  # predicted probabilities of surviving up to each time bin (num_events,)
-    s_t = s_t.clamp(min=epsilon, max=1.0)  # Clamp to avoid division by zero
-    
-    uncensored_loss = -torch.sum(torch.log(o_t / s_t))  # sum over all uncensored samples
+        # Cumulative probability up to each time bin
+        F_t = torch.cumsum(unc_outputs, dim=1)
+        F_t = torch.clamp(F_t, max=1.0 - eps)
 
-    # Censored loss
-    censored_cif = cif[e == 0]  # (num_censored, num_time_bins)
-    censored_times = t[e == 0]  # (num_censored,)
+        # Survival probability at time t (must be >= event prob)
+        s_t = 1.0 - F_t[torch.arange(F_t.size(0)), unc_t]
 
-    censored_cif_t  = censored_cif[torch.arange(censored_cif.size(0)), censored_times]  # predicted CIF at time t (num_censored,)
-    censored_cif_t = censored_cif_t.clamp(min=0.0, max=1.0 - epsilon)  # Clamp to avoid log(0) or log(negative)
-    censored_loss = -torch.sum(torch.log(1 - censored_cif_t))  # sum over all censored samples (num_censored,)
+        # Ensure ordering: o_t <= s_t
+        # If violated slightly due to rounding, cap ratio to 1
+        ratio = (o_t / torch.clamp(s_t, min=eps)).clamp(min=eps, max=1.0)
 
-    loss = (uncensored_loss + censored_loss) / outputs.size(0)  # average over batch size
-    return loss
+        uncensored_loss = -torch.log(ratio)
+        uncensored_loss = torch.sum(uncensored_loss)
+    else:
+        uncensored_loss = torch.tensor(0.0, device=outputs.device)
+
+    # --- Censored samples (no event) ---
+    censored_mask = e == 0
+    if censored_mask.any():
+        cens_cif = cif[censored_mask]
+        cens_t = t[censored_mask]
+
+        # CIF value at censoring time
+        cens_cif_t = cens_cif[torch.arange(cens_cif.size(0)), cens_t]
+
+        # Clamp to [0, 1)
+        cens_cif_t = torch.clamp(cens_cif_t, min=0.0, max=1.0 - eps)
+
+        censored_loss = -torch.log(1.0 - cens_cif_t)
+        censored_loss = torch.sum(censored_loss)
+    else:
+        censored_loss = torch.tensor(0.0, device=outputs.device)
+
+    # --- Combine and normalize ---
+    total_loss = (uncensored_loss + censored_loss) / batch_size
+    total_loss = torch.clamp(total_loss, min=0.0)  # never negative
+    return total_loss
 
 def ranking_loss(
     cif: torch.Tensor,

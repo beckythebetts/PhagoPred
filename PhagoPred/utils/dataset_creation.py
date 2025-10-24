@@ -406,17 +406,19 @@ def create_survival_analysis_dataset(dataset_path: Path, new_path: Path = None) 
             new.flush()
 
 if __name__ == '__main__':
-    keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/03_10_2500.h5")
-    # hdf5_from_tiffs(Path("~/thor_server/10_10_no_staph_1").expanduser(), 
+    # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/07_10_0.h5")
+    # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/10_10_5000.h5")
+    # hdf5_from_tiffs(Path("~/thor_server/21_10_no_staph_1").expanduser(), 
     #                 # Path('D:/27_05.h5'),
-    #                 Path("~/PhagoPred/PhagoPred/Datasets/ExposureTest/10_10_5000.h5").expanduser(),
-    #                 phase_channel=1,
-    #                 epi_channel=0,
+    #                 Path("~/PhagoPred/PhagoPred/Datasets/ExposureTest/21_10_2500.h5").expanduser(),
+    #                 phase_channel=2,
+    #                 epi_channel=1,
     #                 frame_step_size=1,
     #                 )
     # epi_background_correction()
     # epi_background_correction_gaussian()
-    # create_survival_analysis_dataset(Path('~/thor_server/24_06.h5').expanduser(), Path('PhagoPred') / 'Datasets' / '24_06_survival.h5')
+    # create_survival_analysis_dataset(Path('PhagoPred') / 'Datasets' / 'ExposureTest'/ '10_10_5000.h5', Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '10_10_5000_survival.h5')
+    create_survival_analysis_dataset(Path('PhagoPred') / 'Datasets' / 'ExposureTest'/ '07_10_0.h5', Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0_survival.h5')
     # make_short_test_copy(Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05.h5"),
     #                      Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05_500.h5"),
     #                      start_frame=3000,

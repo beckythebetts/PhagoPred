@@ -52,48 +52,57 @@ def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list, fea
     model = model(**model_params)
     model = model.to(device)
     
+    os.makedirs(save_dir, exist_ok=True)
+    
     train_dataset = CellDataset(
         hdf5_paths=train_hdf5_paths,
         features=features,
+        num_bins=model_params['output_size'],
     )
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size, shuffle=True, collate_fn=collate_fn)
-    
+    bins = train_dataset.get_bins()
+    train_dataset.plot_event_vs_censoring_hist(save_path=save_dir / 'train_event_censoring_histogram.png', title='Training Set Event vs Censoring Histogram')
     normalisation_means, normalization_stds = train_dataset.get_normalization_stats()
     model_params['normalization_means'] = normalisation_means.tolist()
     model_params['normalization_stds'] = normalization_stds.tolist()
+    model_params['event_time_bins'] = bins.tolist()
+    normalisation_means = torch.tensor(normalisation_means, dtype=torch.float32)
+    normalization_stds = torch.tensor(normalization_stds, dtype=torch.float32)
 
     validate_dataset = CellDataset(
         hdf5_paths=val_hdf5_paths,
         features=features,
         means=normalisation_means,
         stds=normalization_stds,
+        num_bins=model_params['output_size'],
+        event_time_bins=bins,
     )
 
-    validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size, shuffle=False, collate_fn=collate_fn)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size, shuffle=True, collate_fn=lambda x: collate_fn(x, means=normalisation_means, stds=normalization_stds, device=device), num_workers=0)
+    validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size, shuffle=False, collate_fn=lambda x: collate_fn(x, means=normalisation_means, stds=normalization_stds, device=device), num_workers=0)
 
     with open(save_dir / 'model_params.json', 'w') as f:
         json.dump(model_params, f)
         
     optimiser = optimiser(model.parameters(), lr=lr)
-    os.makedirs(save_dir, exist_ok=True)
+    training_json = save_dir / 'training.jsonl'
     
     training_json  = save_dir / 'training.jsonl'
     with open(training_json, 'w') as f:
-        f.write('')
-    # f.write('\t'.join(['Epoch', 'Train Loss', 'Validate Loss']) + '\n')
-    for epoch in tqdm(range(1, num_epochs + 1), desc="Training"):
-        train_losses = train_step(model, train_loader, optimiser, loss_fn, device)
-        validate_losses = validate_step(model, validate_loader, loss_fn, device)
-        losses_dict = {'epoch': epoch, 'train': train_losses, 'validate': validate_losses}
-        with open(training_json, 'a') as f:
-            f.write(json.dumps(losses_dict) + '\n')
+            for epoch in tqdm(range(1, num_epochs + 1), desc="Training"):
+                train_losses = train_step(model, train_loader, optimiser, loss_fn, device)
+                validate_losses = validate_step(model, validate_loader, loss_fn, device)
+                losses_dict = {'epoch': epoch, 'train': train_losses, 'validate': validate_losses}
+                print(losses_dict)
+                f.write(json.dumps(losses_dict) + '\n')
 
+    # --- Step 7: Save model and plot ---
     torch.save(model.state_dict(), save_dir / 'model.pth')
-
     plot_training_losses(training_json, save_dir / 'loss_plot.png')
-
     print(f"Training complete. Model saved to {save_dir}")
+
+    visualize_validation_predictions(model, validate_loader, device, num_examples=5, save_path=save_dir , bin_edges=bins)
+
     
 
 def train_single_dataset(
@@ -156,8 +165,8 @@ def train_single_dataset(
     validate_dataset.plot_event_vs_censoring_hist(save_path=save_dir / 'val_event_censoring_histogram.png', title='Validation Set Event vs Censoring Histogram')
 
     # --- Step 4: Create data loaders ---
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size, shuffle=True, collate_fn=lambda x: collate_fn(x, means=normalisation_means, stds=normalization_stds, device=device), num_workers=0)
-    validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size, shuffle=False, collate_fn=lambda x: collate_fn(x, means=normalisation_means, stds=normalization_stds, device=device), num_workers=0)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size, shuffle=True, collate_fn=lambda x: collate_fn(x, means=normalisation_means, stds=normalization_stds, device=device), num_workers=4, pin_memory=True)
+    validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size, shuffle=False, collate_fn=lambda x: collate_fn(x, means=normalisation_means, stds=normalization_stds, device=device), num_workers=4, pin_memory=True)
 
     # # --- Step 5: Save model params ---
     with open(save_dir / 'model_params.json', 'w') as f:
@@ -244,6 +253,14 @@ def main():
             'Circularity',
             'Perimeter',
             'Displacement',
+            'Skeleton Length', 
+            'Skeleton Branch Points', 
+            'Skeleton End Points', 
+            'Skeleton Branch Length Mean', 
+            'Skeleton Branch Length Std',
+            'Skeleton Branch Length Max',
+            'UMAP 1',
+            'UMAP 2',
             # 'Mode 0',
             # 'Mode 1',
             # 'Mode 2',
@@ -269,38 +286,41 @@ def main():
         'features': features,
     }
     
-    # train(
-    #     model=dynamic_deephit.DynamicDeepHit,
-    #     model_params=model_params,
-    #     train_hdf5_paths=[
-    #         Path('PhagoPred') / 'Datasets' / '27_05_500.h5',
-    #     ],
-    #     val_hdf5_paths=[
-    #         Path('PhagoPred') / 'Datasets' / '27_05_500.h5',
-    #     ],
-    #     features=features,
-    #     optimiser=torch.optim.Adam,
-    #     loss_fn=dynamic_deephit.compute_loss,
-    #     num_epochs=5,
-    #     save_dir=Path('PhagoPred') / 'survival_analysis' / 'models' / 'dynamic_deephit' / 'test_run',
-    #     batch_size=32,
-    #     lr=1e-3
-    # )
-    
-    train_single_dataset(
+    train(
         model=dynamic_deephit.DynamicDeepHit,
         model_params=model_params,
-        hdf5_path=Path('PhagoPred') / 'Datasets' / '13_06_survival.h5',
+        train_hdf5_paths=[
+            # Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0.h5',
+            Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '10_10_5000.h5',
+            
+        ],
+        val_hdf5_paths=[
+            Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0.h5',
+            Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '10_10_5000.h5',
+        ],
         features=features,
         optimiser=torch.optim.Adam,
         loss_fn=dynamic_deephit.compute_loss,
-        num_epochs=10,
-        save_dir=Path('PhagoPred') / 'survival_analysis' / 'models' / 'dynamic_deephit' / 'test_run_13_06',
-        batch_size=128,
-        lr=1e-3,
-        val_split=0.2,
-        seed=42
+        num_epochs=50,
+        save_dir=Path('PhagoPred') / 'survival_analysis' / 'models' / 'dynamic_deephit' / 'test_run',
+        batch_size=256,
+        lr=1e-3
     )
+    
+    # train_single_dataset(
+    #     model=dynamic_deephit.DynamicDeepHit,
+    #     model_params=model_params,
+    #     hdf5_path=Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0.h5',
+    #     features=features,
+    #     optimiser=torch.optim.Adam,
+    #     loss_fn=dynamic_deephit.compute_loss,
+    #     num_epochs=10,
+    #     save_dir=Path('PhagoPred') / 'survival_analysis' / 'models' / 'dynamic_deephit' / 'test_run_13_06',
+    #     batch_size=128,
+    #     lr=1e-3,
+    #     val_split=0.2,
+    #     seed=42
+    # )
     
 if __name__ == '__main__':
     main()

@@ -6,8 +6,8 @@ try:
     # DATASET = Path('PhagoPred')/'Datasets'/'secondwithlight - Copy.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_short_seg_test.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'24_06.h5'
-    # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5'
-    DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '03_10_2500.h5'
+    DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5'
+    # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / 'old' / '03_10_2500.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/ 'Prelims' / '16_09_3.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_500.h5'
@@ -27,12 +27,13 @@ except:
 # DATASET = Path('PhagoPred')/'Datasets'/'mac_short_seg.h5'
 # MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'mac_20x'
 
-MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / '27_05_mac_fine_tuned_clusters'
+MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / '27_05_mac_fine_tuned_16_10'
 CELLPOSE_MODEL = Path("PhagoPred") / 'cellpose_segmentation' / 'Models' / 'ash'
 UNET_MODEL = Path("PhagoPred") / 'unet_segmentation' / 'models' / '20x_flir_8'
 TRAINING_DATA = Path("PhagoPred") / 'segmentation' / 'models' / '20x_flir_8'
 CLASSES = {'phase': 'Amoeba', 'epi': 'Yeast'}
 REMOVE_EDGE_CELLS = True
+UMAP_MODEL = Path('PhagoPred') / 'feature_extraction' / 'morphology' / 'UMAP_model.pickle'
 
 # MODEL_IMAGE_SIZE = [5472, 3648]
 
@@ -40,7 +41,7 @@ REMOVE_EDGE_CELLS = True
 THRESHOLD = 250
 
 # ******* TRACKING *******
-MAXIMUM_DISTANCE_THRESHOLD = 40
+MAXIMUM_DISTANCE_THRESHOLD = 30
 FRAME_MEMORY = 10
 CLEAN_TRACKS = True
 MINIMUM_TRACK_LENGTH = 50
@@ -51,7 +52,7 @@ NUM_FRAMES_TO_VIEW = 50 # Set as None to view all (slow)
 
 # ******* FEATURE EXTRACTION *******
 NUM_TRAINING_FRAMES = 50
-NUM_CONTOUR_POINTS = 100
+NUM_CONTOUR_POINTS = 50
 PCA_COMPONENTS = 10
 KMEANS_CLUSTERS = 12
 
