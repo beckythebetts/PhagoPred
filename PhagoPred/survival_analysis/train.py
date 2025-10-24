@@ -101,7 +101,7 @@ def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list, fea
     plot_training_losses(training_json, save_dir / 'loss_plot.png')
     print(f"Training complete. Model saved to {save_dir}")
 
-    visualize_validation_predictions(model, validate_loader, device, num_examples=5, save_path=save_dir , bin_edges=bins)
+    visualize_validation_predictions(model, validate_loader, device, num_examples=20, save_path=save_dir , bin_edges=bins)
 
     
 
