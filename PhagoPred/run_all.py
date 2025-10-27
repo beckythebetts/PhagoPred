@@ -14,14 +14,14 @@ from PhagoPred.survival_analysis import train, validate
 
 if __name__ == '__main__':
     for dataset in (
-        # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '03_10_2500.h5',
-        Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5',
-        Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5',
+        Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '21_10_2500.h5',
+        # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5',
+        # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5',
     ):
         # segment.seg_dataset(dataset=dataset)
         # trackpy.run_tracking(dataset=dataset)
-        extract_features.extract_features(dataset=dataset, phase_features=[features.Skeleton()])
-        # clean_features.remove_bad_frames(dataset=dataset)
+        extract_features.extract_features(dataset=dataset)
+        clean_features.remove_bad_frames(dataset=dataset)
         
     # trackpy.run_tracking()
     # extract_features.extract_features()
