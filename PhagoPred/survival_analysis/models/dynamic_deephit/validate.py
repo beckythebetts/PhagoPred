@@ -7,7 +7,7 @@ import json
 import numpy as np
 
 from PhagoPred.survival_analysis.data.dataset import CellDataset, collate_fn
-from PhagoPred.survival_analysis.models import dynamic_deephit
+from PhagoPred.survival_analysis.models.dynamic_deephit import model
 
 def validate_step(model, dataloader, loss_fn, device):
     model.eval()
@@ -122,7 +122,7 @@ def validate(model, model_dir, val_hdf5_paths):
 
     validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size=32, shuffle=False, collate_fn=collate_fn)
 
-    loss_fn = dynamic_deephit.compute_loss
+    loss_fn = model.compute_loss
 
     val_loss = validate_step(model, validate_loader, loss_fn, device)
     print(f"Validation Loss: {val_loss:.4f}")
@@ -131,7 +131,7 @@ def validate(model, model_dir, val_hdf5_paths):
     
 def main():
     validate(
-        model=dynamic_deephit.DynamicDeepHit,
+        model=model.DynamicDeepHit,
         model_dir=Path('PhagoPred') / 'survival_analysis' / 'models' / 'dynamic_deephit' / 'test_run',
         val_hdf5_paths=[
             Path('PhagoPred') / 'Datasets' / '27_05_500.h5',

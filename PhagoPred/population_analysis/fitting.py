@@ -24,7 +24,7 @@ def logistic_model(t, N0, r, K):
 def fit_logistic(t_data, N_data):
         # Avoid log of zero by filtering out zero or negative counts
         
-    relative_error = 0.1
+    relative_error = 0.2
     sigma = relative_error * N_data
     sigma = np.maximum(sigma, 10)
     # sigma = [20]*len(t_data)
