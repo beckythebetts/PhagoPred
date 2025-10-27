@@ -58,6 +58,7 @@ def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list, fea
         hdf5_paths=train_hdf5_paths,
         features=features,
         num_bins=model_params['output_size'],
+        # uncensored_only=True,
     )
 
     bins = train_dataset.get_bins()
@@ -76,6 +77,7 @@ def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list, fea
         stds=normalization_stds,
         num_bins=model_params['output_size'],
         event_time_bins=bins,
+        uncensored_only=True,
     )
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size, shuffle=True, collate_fn=lambda x: collate_fn(x, means=normalisation_means, stds=normalization_stds, device=device), num_workers=0)
@@ -224,11 +226,12 @@ def plot_training_losses(losses_json_path: Path, output_path: Path = None):
 
     plt.figure(figsize=(12, 8))
 
-    cmap = plt.get_cmap('tab10')
+    cmap = plt.get_cmap('Set1')
     # Plot each loss type: train solid line, val dashed line
     for i, loss_type in enumerate(loss_types):
-        plt.plot(epochs, train_losses[loss_type], label=f'Train {loss_type}', linestyle='-', color=cmap(i))
-        plt.plot(epochs, val_losses[loss_type], label=f'Validation {loss_type}', linestyle='--', color=cmap(i))
+        colour = cmap(i) if loss_type != 'Total Loss' else 'k'
+        plt.plot(epochs, train_losses[loss_type], label=f'Train {loss_type}', linestyle='-', color=colour)
+        plt.plot(epochs, val_losses[loss_type], label=f'Validation {loss_type}', linestyle='--', color=colour)
 
     plt.xlabel('Epoch')
     plt.ylabel('Loss')

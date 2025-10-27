@@ -124,9 +124,9 @@ def compute_loss(
 
     negative_log_likelihood = losses.negative_log_likelihood(outputs, cif, t, e)
     ranking_loss = losses.ranking_loss(cif, t, t_last, e)   
-    prediction_loss = losses.prediction_loss(y, features, mask)
+    prediction_loss = losses.prediction_loss(y, features, mask) * 0.1
     
-    loss = negative_log_likelihood + ranking_loss + 0.1*prediction_loss
+    loss = negative_log_likelihood + ranking_loss + prediction_loss
     if torch.isnan(loss) or torch.isinf(loss):
         print("NaN or inf loss encountered:")
         print(f"  Negative Log Likelihood: {negative_log_likelihood.item()}")
