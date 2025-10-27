@@ -219,6 +219,7 @@ class Skeleton(BaseFeature):
             if not cell_mask.any():
                 for feature in results.keys():
                     results[feature].append(np.nan)
+                continue
 
             coords = np.argwhere(cell_mask)
             min_row, min_col = coords.min(axis=0)

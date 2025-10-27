@@ -405,6 +405,48 @@ def create_survival_analysis_dataset(dataset_path: Path, new_path: Path = None) 
                     
             new.flush()
 
+def split_by_radius(hdf5_file: Path) -> None:
+    """Split cell dataset into two groups according to distance from image centre.
+    Threshold radius will be $\frac{L}{\sqrt(2 \pi)}$, where L is height/width of image. (Assuming square image)."""
+    with h5py.File(hdf5_file, 'r') as f:
+        features_group = f['Cells']['Phase']
+        frames, h, w =f['Images']['Phase'].shape
+        centre_coord = np.array([w//2, w//2])
+        threshold_radius = w / np.sqrt(2*np.pi)
+        cell_positions = np.stack((features_group['X'], features_group['Y']), axis=-1)
+        dist_from_centre = np.linalg.norm(cell_positions - centre_coord[np.newaxis, np.newaxis, :], axis=-1)
+        inner_region_mask = np.nanmax(dist_from_centre, axis=0) < threshold_radius
+        outer_region_mask = np.nanmin(dist_from_centre, axis=0) > threshold_radius
+        
+        def copy_dataset(src_group, dst_group, cell_mask):
+            for feature in src_group.keys():
+                src_dset = src_group[feature]
+                # Preserve chunks, compression, dtype
+                dst_dset = dst_group.create_dataset(
+                    feature,
+                    shape=(src_dset.shape[0], np.sum(cell_mask)),
+                    dtype=src_dset.dtype,
+                    chunks=True,
+                    compression=src_dset.compression,
+                    compression_opts=src_dset.compression_opts
+                )
+                # Copy data selectively
+                dst_dset[:] = src_dset[:, cell_mask]
+
+        # Save inner region
+        inner_file = hdf5_file.parent / f'{hdf5_file.stem}_inner{hdf5_file.suffix}'
+        with h5py.File(inner_file, 'w') as f_inner:
+            inner_group = f_inner.create_group('Cells/Phase')
+            copy_dataset(features_group, inner_group, inner_region_mask)
+
+        # Save outer region
+        outer_file = hdf5_file.parent / f'{hdf5_file.stem}_outer{hdf5_file.suffix}'
+        with h5py.File(outer_file, 'w') as f_outer:
+            outer_group = f_outer.create_group('Cells/Phase')
+            copy_dataset(features_group, outer_group, outer_region_mask)
+            
+        # print(cell_positions.shape)
+        
 if __name__ == '__main__':
     # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/07_10_0.h5")
     # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/10_10_5000.h5")
@@ -418,14 +460,14 @@ if __name__ == '__main__':
     # epi_background_correction()
     # epi_background_correction_gaussian()
     # create_survival_analysis_dataset(Path('PhagoPred') / 'Datasets' / 'ExposureTest'/ '10_10_5000.h5', Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '10_10_5000_survival.h5')
-    create_survival_analysis_dataset(Path('PhagoPred') / 'Datasets' / 'ExposureTest'/ '07_10_0.h5', Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0_survival.h5')
+    # create_survival_analysis_dataset(Path('PhagoPred') / 'Datasets' / 'ExposureTest'/ '07_10_0.h5', Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0_survival.h5')
     # make_short_test_copy(Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05.h5"),
     #                      Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05_500.h5"),
     #                      start_frame=3000,
     #                      end_frame=3500)
     # Create dummy data similar to your sliced data
     # data = np.random.randint(0, 256, size=(50, 2048, 2048), dtype=np.uint8)
-
+    split_by_radius(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/10_10_5000.h5"))
     # with h5py.File(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_tets.h5"), "w") as f:
     #     dset = f.create_dataset("Epi", data=data)
     #     f.flush()

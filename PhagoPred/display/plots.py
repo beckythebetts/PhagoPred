@@ -628,7 +628,31 @@ def plot_alive_vs_dead_feature(hdf5_file: Path, feature: str, save_as: Path) -> 
         plt.grid(True)
         plt.tight_layout()
         plt.savefig(save_as)
-    
+ 
+def plot_cell_positions(hdf5_file: Path, title=None, save_as: Path = None) -> None:
+    with h5py.File(hdf5_file, 'r') as f:
+        x = f['Cells']['Phase']['X'][:]  # shape: [frames, cells]
+        y = f['Cells']['Phase']['Y'][:]
+
+    # Flatten for plotting (all time points together)
+    x_flat = x.flatten()
+    y_flat = y.flatten()
+
+    # Optionally remove NaNs (cells missing in some frames)
+    mask = ~np.isnan(x_flat) & ~np.isnan(y_flat)
+    x_flat = x_flat[mask]
+    y_flat = y_flat[mask]
+
+    plt.figure(figsize=(6,6))
+    plt.scatter(x_flat, y_flat, s=10, alpha=0.6)
+    plt.gca().invert_yaxis()  # optional if origin is top-left like images
+    plt.xlabel("X position (pixels)")
+    plt.ylabel("Y position (pixels)")
+    if title is None:
+        title = hdf5_file.stem
+    plt.title(title)
+    plt.axis('equal')
+    plt.savefig(save_as)  
     
 def main():
     feature_names=[
@@ -651,6 +675,12 @@ def main():
         # 'Total Fluorescence', 
         # 'Fluorescence Distance Mean', 
         # 'Fluorescence Distance Variance'
+        # 'Skeleton Length', 
+        # 'Skeleton Branch Points', 
+        # 'Skeleton End Points', 
+        # 'Skeleton Branch Length Mean', 
+        # 'Skeleton Branch Length Std',
+        # 'Skeleton Branch Length Max',
     ]
     # plot_two_death_frame_hists(
     #     Path('temp') / 'death_frames_fine_tuned.txt',
@@ -677,42 +707,51 @@ def main():
    
     files = [
         Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5',
-        # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '03_10_2500.h5',
+        Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '21_10_2500.h5',
+        # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / 'old' / '03_10_2500.h5',
         Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5',
+        # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000_inner.h5',
+        # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000_outer.h5',
     ]
-    labels = ['0s exposure', 
-            #   '2.5s exposure', 
-              '5s exposure']
-    # km_plot(files,
-    #         labels,
-    #         Path('temp') / 'km_curve.png',
-    #         [5, 5, 5],
-    #         num_frames = 600)
-    plot_num_alive_cells(files, Path('temp') / 'dead_cells.png', labels=labels, last_frame=600)
+    labels = [
+        '0s exposure', 
+              '2.5s exposure', 
+            #   '2.5s (old data)',
+              '5s exposure',
+            #   'Inner radius',
+            #   'Outer radius'
+              ]
+    km_plot(files,
+            labels,
+            Path('temp') / 'km_curve.png',
+            [5, 5, 5],
+            num_frames = 900)
+    # plot_num_alive_cells(files, Path('temp') / 'dead_cells.png', labels=labels, last_frame=600)
     # compare_cell_features(files,
     #                       labels,
-    #                       'Area',
+    #                       'Speed',
     #                       Path('temp') / 'speed_plt.png')
-    # plot_feature_correlations_multi(
-    #     Path('temp') / 'corr_plt.png',
-    #     files,
-    #     feature_names,
-    #     labels,
-    # )
-    # plot_percentile_cell_features_multi(
-    #     Path('temp') / 'features.png',
-    #     files,
-    #     0,
-    #     600,
-    #     labels=labels,
-    #     feature_names=feature_names
-    # )
+    plot_feature_correlations_multi(
+        Path('temp') / 'corr_plt.png',
+        files,
+        feature_names,
+        labels,
+    )
+    plot_percentile_cell_features_multi(
+        Path('temp') / 'features.png',
+        files,
+        0,
+        820,
+        labels=labels,
+        feature_names=feature_names
+    )
     # # compare_cell_features([Path('PhagoPred') / 'Datasets' / '13_06_survival.h5',
     #             Path('PhagoPred') / 'Datasets' / '24_06_survival.h5'], 
     #             ['13_06', '24_06'], 'Area',
     #             Path('temp') / 'features_plot.png')
     
     # plot_alive_vs_dead_feature(Path('PhagoPred') / 'Datasets' / '24_06_survival.h5', 'Circularity',Path('temp') / 'features_plot.png')
+    # plot_cell_positions(files[1], save_as=Path('temp') / 'cell_positions_outer.png')
 
 if __name__ == '__main__':
     main()
