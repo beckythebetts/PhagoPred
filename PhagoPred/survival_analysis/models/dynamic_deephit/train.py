@@ -10,8 +10,8 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 
 from PhagoPred.survival_analysis.data.dataset import CellDataset, collate_fn
-from PhagoPred.survival_analysis.models import dynamic_deephit
-from PhagoPred.survival_analysis.validate import validate_step, visualize_validation_predictions
+from PhagoPred.survival_analysis.models.dynamic_deephit import model
+from PhagoPred.survival_analysis.models.dynamic_deephit.validate import validate_step, visualize_validation_predictions
 
 
 def train_step(model, dataloader, optimiser, loss_fn, device):
@@ -290,7 +290,7 @@ def main():
     }
     
     train(
-        model=dynamic_deephit.DynamicDeepHit,
+        model=model.DynamicDeepHit,
         model_params=model_params,
         train_hdf5_paths=[
             # Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0.h5',
@@ -303,7 +303,7 @@ def main():
         ],
         features=features,
         optimiser=torch.optim.Adam,
-        loss_fn=dynamic_deephit.compute_loss,
+        loss_fn=model.compute_loss,
         num_epochs=50,
         save_dir=Path('PhagoPred') / 'survival_analysis' / 'models' / 'dynamic_deephit' / 'test_run',
         batch_size=256,

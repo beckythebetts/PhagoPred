@@ -223,8 +223,12 @@ class CellDataset(torch.utils.data.Dataset):
             landmark_frame = np.random.randint(cell_metadata['Start Frames'], last_frame)
             start_frame = cell_metadata['Start Frames']
         else:
-            landmark_frame = np.random.randint(max(self.fixed_len, cell_metadata['Start Frame']))
-            start_frame = last_frame - landmark_frame
+            # landmark_frame = np.random.randint(max(self.fixed_len, cell_metadata['Start Frames']), last_frame)
+            if cell_metadata['Start Frames'] + self.fixed_len >= last_frame:
+                return None, None, None, None
+            landmark_frame = np.random.randint(cell_metadata['Start Frames'] + self.fixed_len, last_frame)
+            start_frame = int(landmark_frame - self.fixed_len)
+            # start_frame = int(last_frame - landmark_frame)
         # start_frame = cell_metadata['Start Frames'] if self.fixed_len is None else last_frame - self.fixed_len
 
         cell_features = all_cell_features[start_frame:landmark_frame+1, cell_metadata['Local Cell Idxs']] # (num_frames, num_features)
@@ -235,9 +239,11 @@ class CellDataset(torch.utils.data.Dataset):
         time_to_event_bin = np.clip(time_to_event_bin, 0, self.num_bins - 1)
         
         if self.summary_stats:
+            if np.all(np.isnan(cell_features)):
+                return None, None, None, None
             cell_diffs = np.diff(cell_features, axis=0)
             results = []
-            for summary_func in self.summary_funcs:
+            for summary_func in self.summary_funcs.values():
                 results.append(summary_func(cell_features, cell_diffs))
             cell_features = np.stack(results, axis=0)
 
