@@ -435,7 +435,7 @@ def cell_death_hyperparameter_search(dataset: Path, true_deaths_txt: Path, save_
     return results_df
 
 import pandas as pd
-import seaborn as sns
+# import seaborn as sns
 import matplotlib.pyplot as plt
 from itertools import combinations
 from pathlib import Path
@@ -469,7 +469,7 @@ def plot_hyperparam_heatmaps(results_path_or_df, save_dir='hyperparam_heatmaps')
 
         # Plot MAE heatmap (lower is better)
         plt.figure(figsize=(8, 6))
-        sns.heatmap(mae_pivot, annot=True, fmt=".3f", cmap='viridis_r', cbar_kws={'label': 'MAE Death Cells'})
+        # sns.heatmap(mae_pivot, annot=True, fmt=".3f", cmap='viridis_r', cbar_kws={'label': 'MAE Death Cells'})
         plt.title(f'MAE Death Cells: {y_param} vs {x_param}')
         plt.xlabel(x_param)
         plt.ylabel(y_param)
@@ -479,7 +479,7 @@ def plot_hyperparam_heatmaps(results_path_or_df, save_dir='hyperparam_heatmaps')
 
         # Plot No-Death Accuracy heatmap (higher is better)
         plt.figure(figsize=(8, 6))
-        sns.heatmap(acc_pivot, annot=True, fmt=".3f", cmap='viridis', cbar_kws={'label': 'Accuracy No-Death Cells'})
+        # sns.heatmap(acc_pivot, annot=True, fmt=".3f", cmap='viridis', cbar_kws={'label': 'Accuracy No-Death Cells'})
         plt.title(f'Accuracy No-Death Cells: {y_param} vs {x_param}')
         plt.xlabel(x_param)
         plt.ylabel(y_param)
