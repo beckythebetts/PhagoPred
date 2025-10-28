@@ -246,6 +246,8 @@ class CellDataset(torch.utils.data.Dataset):
             for summary_func in self.summary_funcs.values():
                 results.append(summary_func(cell_features, cell_diffs))
             cell_features = np.stack(results, axis=0)
+            # if event_indicator == 1:
+                # print( cell_metadata['Local Cell Idxs'], start_frame, landmark_frame, time_to_event)
 
         return cell_features, time_to_event_bin, event_indicator, time_to_event
 
