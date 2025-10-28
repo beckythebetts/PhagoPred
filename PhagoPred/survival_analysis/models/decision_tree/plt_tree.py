@@ -74,7 +74,7 @@ def plot_tree(decision_tree, max_depth=None, feature_names=None,
               class_names=None, label='all', filled=False,
               impurity=True, node_ids=False,
               proportion=False, rotate=False, rounded=False,
-              precision=3, ax=None, fontsize=None):
+              precision=3, ax=None, fontsize=None, node_info:dict=None):
     """Plot a decision tree.
 
     The sample counts that are shown are weighted with any sample_weights that
@@ -168,7 +168,10 @@ def plot_tree(decision_tree, max_depth=None, feature_names=None,
         class_names=class_names, label=label, filled=filled,
         impurity=impurity, node_ids=node_ids,
         proportion=proportion, rotate=rotate, rounded=rounded,
-        precision=precision, fontsize=fontsize)
+        precision=precision, fontsize=fontsize, node_info=node_info)
+    exporter.decision_tree_ = decision_tree
+    if hasattr(decision_tree, "unique_times_"):
+        exporter.unique_times_ = decision_tree.unique_times_
     return exporter.export(decision_tree, ax=ax)
 
 
@@ -239,111 +242,200 @@ class _BaseTreeExporter(object):
             node_val = -tree.impurity[node_id]
         return self.get_color(node_val)
 
+    # def node_to_str(self, tree, node_id, criterion):
+    #     # Generate the node content string
+    #     if tree.n_outputs == 1:
+    #         value = tree.value[node_id][0, :]
+    #     else:
+    #         value = tree.value[node_id]
+
+    #     # Should labels be shown?
+    #     labels = (self.label == 'root' and node_id == 0) or self.label == 'all'
+
+    #     characters = self.characters
+    #     node_string = characters[-1]
+
+    #     # Write node ID
+    #     if self.node_ids:
+    #         if labels:
+    #             node_string += 'node '
+    #         node_string += characters[0] + str(node_id) + characters[4]
+
+    #     # Write decision criteria
+    #     if tree.children_left[node_id] != _tree.TREE_LEAF:
+    #         # Always write node decision criteria, except for leaves
+    #         if self.feature_names is not None:
+    #             feature = self.feature_names[tree.feature[node_id]]
+    #         else:
+    #             feature = "X%s%s%s" % (characters[1],
+    #                                    tree.feature[node_id],
+    #                                    characters[2])
+    #         node_string += '%s %s %s%s' % (feature,
+    #                                        characters[3],
+    #                                        round(tree.threshold[node_id],
+    #                                              self.precision),
+    #                                        characters[4])
+
+    #     if hasattr(self, "node_events") and hasattr(self, "node_samples"):
+    #         n_samples = self.node_samples[node_id]
+    #         n_events = self.node_events[node_id]
+    #         node_string += f"samples = {n_samples}\n"
+    #         node_string += f"events = {n_events} ({n_events / n_samples:.1%})\n"
+    #     # Write impurity
+    #     if self.impurity:
+    #         if isinstance(criterion, _criterion.FriedmanMSE):
+    #             criterion = "friedman_mse"
+    #         elif not isinstance(criterion, str):
+    #             criterion = "impurity"
+    #         if labels:
+    #             node_string += '%s = ' % criterion
+    #         node_string += (str(round(tree.impurity[node_id], self.precision))
+    #                         + characters[4])
+
+    #     # Write node sample count
+    #     if labels:
+    #         node_string += 'samples = '
+    #     if self.proportion:
+    #         percent = (100. * tree.n_node_samples[node_id] /
+    #                    float(tree.n_node_samples[0]))
+    #         node_string += (str(round(percent, 1)) + '%' +
+    #                         characters[4])
+    #     else:
+    #         node_string += (str(tree.n_node_samples[node_id]) +
+    #                         characters[4])
+
+    #     # Write node class distribution / regression value
+    #     if self.proportion and tree.n_classes[0] != 1:
+    #         # For classification this will show the proportion of samples
+    #         value = value / tree.weighted_n_node_samples[node_id]
+    #     if labels:
+    #         node_string += 'value = '
+    #     if criterion == "logrank":
+    #         # Extract node sample info
+    #         n_samples = tree.n_node_samples[node_id]
+    #         node_val = tree.value[node_id][0]
+            
+    #         # Estimate number of events (observed deaths)
+    #         # Usually survival values start at 1 and drop toward 0.
+    #         # If all 1's, then all censored.
+    #         all_censored = np.allclose(node_val, 1.0)
+    #         n_events = 0 if all_censored else int(np.round((1 - node_val[-1]) * n_samples))
+
+    #         # Estimate median survival time
+    #         try:
+    #             times = getattr(self, "unique_times_", None)
+    #             if times is None and hasattr(self, "decision_tree_"):
+    #                 times = getattr(self.decision_tree_, "unique_times_", None)
+    #             if times is not None:
+    #                 idx_med = np.argmax(node_val <= 0.5)
+    #                 median_surv = times[idx_med] if idx_med > 0 else np.inf
+    #             else:
+    #                 median_surv = np.nan
+    #         except Exception as e:
+    #             print(e)
+    #             median_surv = np.nan
+
+    #         # node_string += f"samples = {n_samples}\\n"
+    #         # node_string += f"events = {n_events} ({n_events / n_samples:.1%})\\n"
+    #         # if np.isfinite(median_surv):
+    #         #     node_string += f"median survival = {median_surv:.1f}\\n"
+    #         # else:
+    #         #     node_string += "median survival = inf\\n"
+
+    #         return node_string
+    #     elif tree.n_classes[0] == 1:
+    #         # Regression
+    #         value_text = np.around(value, self.precision)
+    #     elif self.proportion:
+    #         # Classification
+    #         value_text = np.around(value, self.precision)
+    #     elif np.all(np.equal(np.mod(value, 1), 0)):
+    #         # Classification without floating-point weights
+    #         value_text = value.astype(int)
+    #     else:
+    #         # Classification with floating-point weights
+    #         value_text = np.around(value, self.precision)
+    #     # Strip whitespace
+    #     value_text = str(value_text.astype('S32')).replace("b'", "'")
+    #     value_text = value_text.replace("' '", ", ").replace("'", "")
+    #     if tree.n_classes[0] == 1 and tree.n_outputs == 1:
+    #         value_text = value_text.replace("[", "").replace("]", "")
+    #     value_text = value_text.replace("\n ", characters[4])
+    #     node_string += value_text + characters[4]
+
+    #     # Write node majority class
+    #     if (self.class_names is not None and
+    #             tree.n_classes[0] != 1 and
+    #             tree.n_outputs == 1):
+    #         # Only done for single-output classification trees
+    #         if labels:
+    #             node_string += 'class = '
+    #         if self.class_names is not True:
+    #             class_name = self.class_names[np.argmax(value)]
+    #         else:
+    #             class_name = "y%s%s%s" % (characters[1],
+    #                                       np.argmax(value),
+    #                                       characters[2])
+    #         node_string += class_name
+
+    #     # Clean up any trailing newlines
+    #     if node_string.endswith(characters[4]):
+    #         node_string = node_string[:-len(characters[4])]
+
+    #     return node_string + characters[5]
+
     def node_to_str(self, tree, node_id, criterion):
-        # Generate the node content string
-        if tree.n_outputs == 1:
-            value = tree.value[node_id][0, :]
-        else:
-            value = tree.value[node_id]
+        """
+        Simplified node string for survival trees:
+        prints splitting criterion, logrank, samples, and events.
+        """
+        if hasattr(self, 'node_info'):
+            s = f'Node {node_id}'
+            
+            if tree.children_left[node_id] != -1:
+                feature = f"{self.feature_names[tree.feature[node_id]]}"
+                threshold = tree.threshold[node_id]
+                s += f"\n{feature} <= {threshold:.2f}"
+            
+            n_samples = self.node_info["samples"][node_id]
+            n_events = self.node_info["events"][node_id]
+            s += f"\nsamples={n_samples}, events={n_events}"
+            
+            if node_id in self.node_info["kmf"]:
+                # median = self.node_info["median"][node_id]
+                # lower, upper = self.node_info["ci"][node_id]
+                percentiles = self.node_info['percentiles']
+                perentiles = [f'{p}th percentile={percentiles[p][node_id]:.1f}' for p in percentiles]
+                s +=  "\n" + "\n".join(perentiles)
+                # s += f"\nmedian={median:.1f}\n" + "\n".join(perentiles)
+            
+            return s
+            
+        # s += f"samples={n_samples}, events={n_events}"
+        # node_string = ""
 
-        # Should labels be shown?
-        labels = (self.label == 'root' and node_id == 0) or self.label == 'all'
+        # # Splitting criterion (for internal nodes)
+        # if tree.children_left[node_id] != -1:
+        #     if self.feature_names is not None:
+        #         feature = self.feature_names[tree.feature[node_id]]
+        #     else:
+        #         feature = f"X{tree.feature[node_id]}"
+        #     threshold = round(tree.threshold[node_id], self.precision)
+        #     node_string += f"{feature} <= {threshold}"
 
-        characters = self.characters
-        node_string = characters[-1]
+        # # Logrank statistic (stored in impurity)
+        # logrank = getattr(tree, "impurity", [None])[node_id]
+        # node_string += f"\nlogrank={logrank}"
 
-        # Write node ID
-        if self.node_ids:
-            if labels:
-                node_string += 'node '
-            node_string += characters[0] + str(node_id) + characters[4]
+        # # Samples and events
+        
+            
+        # if hasattr(self, "node_samples") and hasattr(self, "node_events"):
+        #     n_samples = self.node_samples[node_id]
+        #     n_events = self.node_events[node_id]
+        #     node_string += f"\nsamples={n_samples}, events={n_events}"
 
-        # Write decision criteria
-        if tree.children_left[node_id] != _tree.TREE_LEAF:
-            # Always write node decision criteria, except for leaves
-            if self.feature_names is not None:
-                feature = self.feature_names[tree.feature[node_id]]
-            else:
-                feature = "X%s%s%s" % (characters[1],
-                                       tree.feature[node_id],
-                                       characters[2])
-            node_string += '%s %s %s%s' % (feature,
-                                           characters[3],
-                                           round(tree.threshold[node_id],
-                                                 self.precision),
-                                           characters[4])
-
-        # Write impurity
-        if self.impurity:
-            if isinstance(criterion, _criterion.FriedmanMSE):
-                criterion = "friedman_mse"
-            elif not isinstance(criterion, str):
-                criterion = "impurity"
-            if labels:
-                node_string += '%s = ' % criterion
-            node_string += (str(round(tree.impurity[node_id], self.precision))
-                            + characters[4])
-
-        # Write node sample count
-        if labels:
-            node_string += 'samples = '
-        if self.proportion:
-            percent = (100. * tree.n_node_samples[node_id] /
-                       float(tree.n_node_samples[0]))
-            node_string += (str(round(percent, 1)) + '%' +
-                            characters[4])
-        else:
-            node_string += (str(tree.n_node_samples[node_id]) +
-                            characters[4])
-
-        # Write node class distribution / regression value
-        if self.proportion and tree.n_classes[0] != 1:
-            # For classification this will show the proportion of samples
-            value = value / tree.weighted_n_node_samples[node_id]
-        if labels:
-            node_string += 'value = '
-        if criterion == "logrank":
-            value_text = np.array("", dtype="S32")
-        elif tree.n_classes[0] == 1:
-            # Regression
-            value_text = np.around(value, self.precision)
-        elif self.proportion:
-            # Classification
-            value_text = np.around(value, self.precision)
-        elif np.all(np.equal(np.mod(value, 1), 0)):
-            # Classification without floating-point weights
-            value_text = value.astype(int)
-        else:
-            # Classification with floating-point weights
-            value_text = np.around(value, self.precision)
-        # Strip whitespace
-        value_text = str(value_text.astype('S32')).replace("b'", "'")
-        value_text = value_text.replace("' '", ", ").replace("'", "")
-        if tree.n_classes[0] == 1 and tree.n_outputs == 1:
-            value_text = value_text.replace("[", "").replace("]", "")
-        value_text = value_text.replace("\n ", characters[4])
-        node_string += value_text + characters[4]
-
-        # Write node majority class
-        if (self.class_names is not None and
-                tree.n_classes[0] != 1 and
-                tree.n_outputs == 1):
-            # Only done for single-output classification trees
-            if labels:
-                node_string += 'class = '
-            if self.class_names is not True:
-                class_name = self.class_names[np.argmax(value)]
-            else:
-                class_name = "y%s%s%s" % (characters[1],
-                                          np.argmax(value),
-                                          characters[2])
-            node_string += class_name
-
-        # Clean up any trailing newlines
-        if node_string.endswith(characters[4]):
-            node_string = node_string[:-len(characters[4])]
-
-        return node_string + characters[5]
+        # return node_string
 
 
 class _MPLTreeExporter(_BaseTreeExporter):
@@ -351,7 +443,7 @@ class _MPLTreeExporter(_BaseTreeExporter):
                  class_names=None, label='all', filled=False,
                  impurity=True, node_ids=False,
                  proportion=False, rotate=False, rounded=False,
-                 precision=3, fontsize=None):
+                 precision=3, fontsize=None, node_info: dict=None):
 
         super().__init__(
             max_depth=max_depth, feature_names=feature_names,
@@ -359,6 +451,8 @@ class _MPLTreeExporter(_BaseTreeExporter):
             impurity=impurity, node_ids=node_ids, proportion=proportion,
             rotate=rotate, rounded=rounded, precision=precision)
         self.fontsize = fontsize
+        self.node_info = node_info
+        
 
         # validate
         if isinstance(precision, Integral):
