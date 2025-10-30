@@ -188,7 +188,12 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
         segmentations_ds = f.create_dataset(f'Segmentations/{channel}', shape=images_ds.shape,
                                             maxshape=images_ds.shape, dtype='i2')
         cells_group = f.require_group(f'Cells/{channel}')
-
+        cells_group.require_dataset('Confidence Score',
+                                    shape=(images_ds.shape[0], 0),
+                                    maxshape=(images_ds.shape[0], None),
+                                    dtype=np.float32,
+                                    exact=True,
+                                    fillvalue=np.nan)
         for category in categories:
             cells_group.require_dataset(category, 
                                     shape=(images_ds.shape[0], 0),
@@ -197,7 +202,7 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
                                     exact=True,
                                     fillvalue=np.nan)
 
-        for frame_idx in tqdm(range(images_ds.shape[0])):
+        for frame_idx in tqdm(range(images_ds.shape[0]), desc='Segmenting'):
             # sys.stdout.write(f'\rSegmenting image {int(frame_idx)+1} / {f["Images"].attrs["Number of frames"]}')
             # sys.stdout.flush()
 
@@ -215,20 +220,22 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
                 current_max_instances = cells_group[category].shape[1]-1
                 if num_instances > current_max_instances:
                     cells_group[category].resize(num_instances, axis=1)
-
-            for i, pred_class in enumerate(detectron_outputs["instances"].pred_classes):
+            cells_group['Confidence Score'].resize(num_instances, axis=1)
+            
+            instance_idx = 0
+            for i, (pred_class, score) in enumerate(zip(detectron_outputs["instances"].pred_classes, detectron_outputs["instances"].scores)):
                 class_name = train_metadata['thing_classes'][pred_class]
                 instance_mask = detectron_outputs["instances"].pred_masks[i].to(device=device)
 
-                # if SETTINGS.REMOVE_EDGE_CELLS:
-                #     if instance_mask[0, :].any() or instance_mask[-1, :].any() or instance_mask[:, 0].any() or instance_mask[:, -1].any():
-                #         continue
+                if SETTINGS.REMOVE_EDGE_CELLS:
+                    if instance_mask[0, :].any() or instance_mask[-1, :].any() or instance_mask[:, 0].any() or instance_mask[:, -1].any():
+                        continue
 
                 
-                mask = torch.where(instance_mask, i, mask)
-                cells_group[class_name][frame_idx, i] = 1
-                # print(torch.unique(mask))
-                # cells_ds[frame_idx, i+1, class_name] = 1
+                mask = torch.where(instance_mask, instance_idx, mask)
+                cells_group[class_name][frame_idx, instance_idx] = 1
+                cells_group['Confidence Score'][frame_idx, instance_idx] = score
+                instance_idx += 1
 
             segmentations_ds[frame_idx] = mask.cpu().numpy()
         f['Segmentations'].attrs['Model'] = str(cfg_dir.parent)
