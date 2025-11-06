@@ -3,6 +3,9 @@ navigation:
     url: /
   - title: 1. Imaging
     url: /Imaging/
+    children:
+    - title: Imaging Conditions Validity
+      url: /Imaging/ImagingConditionsValidity
   - title: 2. Segmentation
     url: /Segmentation/
     children:

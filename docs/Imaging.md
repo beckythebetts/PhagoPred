@@ -12,7 +12,7 @@ Allows high contrast imaging with low light intensity, minimising photo damage t
 Artefacts such as white halo around objects may help with segmentation of individual cells.
 
 ## Fluorescence
-Bacteria labelled with mCherry fluorescent protein.
+Bacteria labelled with mCherry fluorescent protein (chromsosomal).
 Allows bacteria to be localised during and after engulfment.
 
 ---

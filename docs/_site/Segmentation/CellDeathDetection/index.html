@@ -147,6 +147,12 @@
           
 
           
+          <ul>
+            
+              <li><a href="/PhagoPred/Imaging/ImagingConditionsValidity">Imaging Conditions Validity</a></li>
+            
+          </ul>
+          
         </li>
       
         <li>
@@ -240,7 +246,8 @@ For 50 cells, the exact frame of death was manually identified. Frames [1, 2, 3,
   <li>The whole ROI head</li>
   <li>The entire model
 <img src="/PhagoPred/images/cms.png" alt="Confusion matrices before and after fine tuning" />
-The resulting accuracies are either lower than or the same as when doing no fine tuning, more training data is probably needed.</li>
+The resulting accuracies are either lower than or the same as when doing no fine tuning, more training data is probably needed.
+More cells were added to the training set (total 200 cells). For each cell a random frame between 1 and 10 frames before cell death was selected, a frame 100 frames before cell death and a random frame between1 and 10 frames after cell death. False psitive segmentations and incorrectly merged cells (undersegmentation) were also corrected and added to the dataset.</li>
 </ol>
 
         
