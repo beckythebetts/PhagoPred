@@ -232,19 +232,19 @@ class AllCellsViewer(QMainWindow):
                 for cell_id in range(num_cells):
                     
                     
-                    # # If it's not present in this frame's mask
-                    # if cell_id not in present_ids:
-                    #     if first_appearance[cell_id] <= frame <= last_appearance[cell_id]:
-                    #         # Try to use last known mask
-                    #         if cell_id in last_known_masks:
-                    #             reused_mask = last_known_masks[cell_id]
+                    # If it's not present in this frame's mask
+                    if cell_id not in present_ids:
+                        if first_appearance[cell_id] <= frame <= last_appearance[cell_id]:
+                            # Try to use last known mask
+                            if cell_id in last_known_masks:
+                                reused_mask = last_known_masks[cell_id]
 
-                    #             # Overlay reused mask outline (without overwriting actual label)
-                    #             # You could skip adding it to the full mask and instead visualize separately
-                    #             filled_mask = np.where(reused_mask, cell_id, filled_mask)
-                    # else:
-                    #     # Update last known mask for this cell
-                    #     last_known_masks[cell_id] = (mask == cell_id)
+                                # Overlay reused mask outline (without overwriting actual label)
+                                # You could skip adding it to the full mask and instead visualize separately
+                                filled_mask = np.where(reused_mask, cell_id, filled_mask)
+                    else:
+                        # Update last known mask for this cell
+                        last_known_masks[cell_id] = (mask == cell_id)
                     
                     x = X_centers[frame, cell_id]
                     y = Y_centers[frame, cell_id]
@@ -438,12 +438,13 @@ class CellViewer(QMainWindow):
         self.cell_outline = None
 
         self.feature_names=[
+            # 'Confidence Score',
                 # 'Total Fluorescence', 
                 # 'Fluorescence Distance Mean', 
                 # 'Fluorescence Distance Variance',
-                # 'Area',
-                # 'Circularity',
-                # 'Perimeter',
+                'Area',
+                'Circularity',
+                'Perimeter',
                 # 'Displacement',
                 # 'Speed',
                 # 'UMAP 1',
@@ -456,12 +457,12 @@ class CellViewer(QMainWindow):
                 # 'Phagocytes within 100 pixels',
                 # 'Phagocytes within 250 pixels',
                 # 'Phagocytes within 500 pixels',
-                'Skeleton Length', 
-                'Skeleton Branch Points', 
-                'Skeleton End Points', 
-                'Skeleton Branch Length Mean', 
-                'Skeleton Branch Length Std',
-                'Skeleton Branch Length Max'
+                # 'Skeleton Length', 
+                # 'Skeleton Branch Points', 
+                # 'Skeleton End Points', 
+                # 'Skeleton Branch Length Mean', 
+                # 'Skeleton Branch Length Std',
+                # 'Skeleton Branch Length Max'
                 # 'X',
                 # 'Y',
                 # 'CellDeath'

@@ -25,6 +25,7 @@ import sys
 import glob
 import h5py
 from tqdm import tqdm
+from scipy import ndimage
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import tools
@@ -210,11 +211,11 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
 
             detectron_outputs = predictor(np.stack([np.array(image)]*3, axis=-1))
 
-            # mask = torch.zeros_like(detectron_outputs["instances"].pred_masks[0], dtype=torch.int16,
-            #                         device=device)
             mask = torch.full_like(detectron_outputs["instances"].pred_masks[0], -1, dtype=torch.int16,
                                    device=device)
-            # resize dataset if necassary
+            # mask = np.full_like(detectron_outputs["instances"].pred_masks[0].cpu().numpy(), -1, dtype=np.int16)
+            
+            # resize datasets if necassary
             num_instances = len(detectron_outputs['instances'].pred_classes)
             for category in categories:
                 current_max_instances = cells_group[category].shape[1]-1
@@ -223,18 +224,38 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
             cells_group['Confidence Score'].resize(num_instances, axis=1)
             
             instance_idx = 0
+            # predicted_masks = detectron_outputs["instances"].pred_masks.cpu().numpy()
             for i, (pred_class, score) in enumerate(zip(detectron_outputs["instances"].pred_classes, detectron_outputs["instances"].scores)):
                 class_name = train_metadata['thing_classes'][pred_class]
                 instance_mask = detectron_outputs["instances"].pred_masks[i].to(device=device)
+                # instance_mask = predicted_masks[i]
 
+                # == FILTER MASKS ==
                 if SETTINGS.REMOVE_EDGE_CELLS:
                     if instance_mask[0, :].any() or instance_mask[-1, :].any() or instance_mask[:, 0].any() or instance_mask[:, -1].any():
                         continue
-
                 
-                mask = torch.where(instance_mask, instance_idx, mask)
+                # Filter out masks containing disconnected regions
+                # _, num_features = ndimage.label(instance_mask)
+                # if num_features != 1:
+                #     continue
+                
+                # # Filter out masks containing holes
+                # filled_mask = ndimage.binary_fill_holes(instance_mask)
+                # if not np.array_equal(filled_mask, instance_mask):
+                #     continue
+                
+                # Filter overlaps, keeping mask with highest confidecne score (masks are already sorted by descending confidence score)
+                overlapping_idxs = torch.unique(mask[instance_mask])
+                overlapping_idxs = overlapping_idxs[overlapping_idxs >= 0]
+                if len(overlapping_idxs)>0:
+                    continue
+                        
+                # == SAVE MASKS ==
+                # mask = torch.where(instance_mask, instance_idx, mask)
+                mask[instance_mask] = instance_idx
                 cells_group[class_name][frame_idx, instance_idx] = 1
-                cells_group['Confidence Score'][frame_idx, instance_idx] = score
+                cells_group['Confidence Score'][frame_idx, instance_idx] = score.cpu().numpy()
                 instance_idx += 1
 
             segmentations_ds[frame_idx] = mask.cpu().numpy()

@@ -1,5 +1,6 @@
 from typing import Optional, Union
 import sys
+from itertools import combinations
 
 from pathlib import Path
 import h5py
@@ -8,6 +9,7 @@ import numpy as np
 from tqdm import tqdm
 import pandas as pd
 import seaborn as sns
+from scipy.stats import wasserstein_distance, ks_2samp
 
 from PhagoPred import SETTINGS
 from PhagoPred.feature_extraction.extract_features import CellType
@@ -586,7 +588,125 @@ def compare_cell_features(hdf5_files: list[Path], labels: list[str], feature: st
     plt.legend()
     plt.grid()
     plt.savefig(save_as)
+    
 
+def compare_cell_features_grid(
+    hdf5_files: list[Path], 
+    labels: list[str], 
+    features: list[str], 
+    save_as: Path,
+    alpha: float = 0.1  # significance level
+) -> None:
+    
+    n_features = len(features)
+    n_cols = 3  # histogram | KS | median ± 5–95%
+    n_rows = n_features
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 4 * n_rows))
+    if n_rows == 1:
+        axes = np.expand_dims(axes, axis=0)
+
+    cmap = plt.get_cmap('Set1')
+    colours = [cmap(i) for i in range(len(hdf5_files))]
+
+    # KS critical value constants
+    c_alpha_values = {0.10: 1.22, 0.05: 1.36, 0.01: 1.63}
+    c_alpha = c_alpha_values.get(alpha, 1.36)
+
+    for row, feature in enumerate(features):
+        ax_hist = axes[row, 0]
+        ax_bar = axes[row, 1]
+        ax_summary = axes[row, 2]
+
+        all_data = []
+
+        # --- Load and process feature data ---
+        for hdf5_file, label, colour in zip(hdf5_files, labels, colours):
+            with h5py.File(hdf5_file, 'r') as f:
+                features_ds = f['Cells']['Phase'][feature][:]  # shape: (frames, cells)
+                cell_deaths_arr = f['Cells']['Phase']['CellDeath']
+
+                # Mask values after cell death
+                cell_deaths = cell_deaths_arr[0]
+                for i, cell_death in enumerate(cell_deaths):
+                    if not np.isnan(cell_death):
+                        features_ds[int(cell_death):, i] = np.nan
+
+                # Average per cell over time
+                cell_means = features_ds.ravel()
+                # cell_means = np.nanmean(features_ds, axis=0)
+                cell_means = cell_means[~np.isnan(cell_means)]
+                all_data.append(cell_means)
+
+                # Histogram
+                ax_hist.hist(cell_means, bins=50, alpha=0.5, color=colour, density=True, label=label)
+
+        # --- Histogram axis ---
+        ax_hist.set_title(feature)
+        ax_hist.set_xlabel(feature)
+        ax_hist.set_ylabel('Normalised Frequency')
+        # ax_hist.grid()
+        if row == 0:
+            ax_hist.legend()
+
+        # --- KS statistics ---
+        pair_labels = []
+        ks_values = []
+        p_values = []
+        D_crit_values = []
+        for (i, j) in combinations(range(len(all_data)), 2):
+            ks_result = ks_2samp(all_data[i], all_data[j])
+            n1, n2 = len(all_data[i]), len(all_data[j])
+            D_crit = c_alpha * np.sqrt((n1 + n2) / (n1 * n2))
+
+            pair_labels.append(f"{labels[i]} vs\n{labels[j]}")
+            ks_values.append(ks_result.statistic)
+            p_values.append(ks_result.pvalue)
+            D_crit_values.append(D_crit)
+
+        sig_mask = np.array(p_values) < alpha
+
+        bars = ax_bar.bar(range(len(ks_values)), ks_values, color='black', edgecolor='black')
+        ax_bar.set_xticks(range(len(ks_values)))
+        ax_bar.set_xticklabels(pair_labels)
+        ax_bar.set_ylim(0, 1)
+        ax_bar.set_ylabel('KS statistic')
+        ax_bar.set_title(f"{feature} Pairwise KS")
+
+        # Annotate bars and draw Dcrit lines
+        for b, val, sig, D_crit in zip(bars, ks_values, sig_mask, D_crit_values):
+            ax_bar.text(b.get_x() + b.get_width() / 2, val + 0.02,
+                        f"{val:.2f}" + (" *" if sig else ""), 
+                        ha='center', va='bottom', fontsize=10,
+                        color='black')
+
+            # ax_bar.hlines(D_crit, b.get_x(), b.get_x() + b.get_width(),
+            #               colors='blue', linestyles='dashed', linewidth=1)
+
+        if row == 0:
+            ax_bar.text(0.95, 0.95, f"* p < {alpha} (significant at α = {alpha})", 
+                        ha='right', va='top', transform=ax_bar.transAxes, color='black', fontsize=10)
+            # ax_bar.text(0.95, 0.88, f"Blue dashed = D_crit", 
+            #             ha='right', va='top', transform=ax_bar.transAxes, color='blue', fontsize=9)
+
+        # --- Median + 5–95th percentile summary ---
+        medians = [np.median(d) for d in all_data]
+        p5 = [np.percentile(d, 5) for d in all_data]
+        p95 = [np.percentile(d, 95) for d in all_data]
+        yerr = np.array([np.array(medians) - np.array(p5), np.array(p95) - np.array(medians)])
+
+        ax_summary.bar(range(len(labels)), medians, color=colours, alpha=1.0, edgecolor='none')
+        ax_summary.errorbar(range(len(labels)), medians, yerr=yerr, fmt='none', ecolor='black', capsize=5)
+        ax_summary.set_xticks(range(len(labels)))
+        ax_summary.set_xticklabels(labels)
+        ax_summary.set_ylabel(f"{feature} (median ± 5–95%)")
+        ax_summary.set_title(f"{feature} Summary Stats")
+        # ax_summary.grid(axis='y')
+
+    plt.tight_layout()
+    plt.savefig(save_as)
+    plt.close(fig)
+    
 def plot_alive_vs_dead_feature(hdf5_file: Path, feature: str, save_as: Path) -> None:
     """Plot histograms of a given feature for cells that survive vs cells that die."""
     
@@ -659,13 +779,14 @@ def main():
         'Area',
         'Circularity',
         'Perimeter',
-        'Displacement',
+        'Speed',
+        # 'Displacement',
         # 'Mode 0',
         # 'Mode 1',
         # 'Mode 2',
         # 'Mode 3',
         # 'Mode 4',
-        'Speed',
+        # 'Speed',
         # 'Phagocytes within 100 pixels',
         # 'Phagocytes within 250 pixels',
         # 'Phagocytes within 500 ',
@@ -707,7 +828,7 @@ def main():
    
     files = [
         Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5',
-        Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '21_10_2500.h5',
+        Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_2500.h5',
         # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / 'old' / '03_10_2500.h5',
         Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5',
         # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000_inner.h5',
@@ -721,30 +842,35 @@ def main():
             #   'Inner radius',
             #   'Outer radius'
               ]
-    km_plot(files,
-            labels,
-            Path('temp') / 'km_curve.png',
-            [5, 5, 5],
-            num_frames = 900)
+    # km_plot(files,
+    #         labels,
+    #         Path('temp') / 'km_curve.png',
+    #         [5, 5, 5],
+    #         num_frames = 750)
     # plot_num_alive_cells(files, Path('temp') / 'dead_cells.png', labels=labels, last_frame=600)
     # compare_cell_features(files,
     #                       labels,
     #                       'Speed',
     #                       Path('temp') / 'speed_plt.png')
-    plot_feature_correlations_multi(
-        Path('temp') / 'corr_plt.png',
-        files,
-        feature_names,
-        labels,
-    )
-    plot_percentile_cell_features_multi(
-        Path('temp') / 'features.png',
-        files,
-        0,
-        820,
-        labels=labels,
-        feature_names=feature_names
-    )
+    compare_cell_features_grid(files,
+                               labels,
+                               features=feature_names,
+                               save_as=Path('temp') / 'hists.png',
+                               )
+    # plot_feature_correlations_multi(
+    #     Path('temp') / 'corr_plt.png',
+    #     files,
+    #     feature_names,
+    #     labels,
+    # )
+    # plot_percentile_cell_features_multi(
+    #     Path('temp') / 'features.png',
+    #     files,
+    #     0,
+    #     750,
+    #     labels=labels,
+    #     feature_names=feature_names
+    # )
     # # compare_cell_features([Path('PhagoPred') / 'Datasets' / '13_06_survival.h5',
     #             Path('PhagoPred') / 'Datasets' / '24_06_survival.h5'], 
     #             ['13_06', '24_06'], 'Area',

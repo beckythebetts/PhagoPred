@@ -6,12 +6,13 @@ try:
     # DATASET = Path('PhagoPred')/'Datasets'/'secondwithlight - Copy.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_short_seg_test.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'24_06.h5'
-    # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '21_10_2500.h5'
-    # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5'
+    # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_2500.h5'
+    DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / 'old' / '03_10_2500.h5'
-    DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5'
+    # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/ 'Prelims' / '16_09_3.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_500.h5'
+    # DATASET = Path('PhagoPred')/'Datasets'/ 'Prelims' / '16_09_1_no_overlaps.h5'
 
     with h5py.File(DATASET, 'r') as f:
         NUM_FRAMES = f['Images'].attrs['Number of frames']

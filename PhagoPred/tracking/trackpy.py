@@ -73,6 +73,10 @@ class TrackerWithTrackpy:
         for row in df.itertuples():
             # row.frame, row.cell_index, row.particle
             self.track_id_map[row.frame, row.cell_index] = row.particle
+            
+        with h5py.File(self.file, 'r+') as f:
+            f['Segmentations']['Phase'].attrs['Tracking search range'] = search_range
+            f['Segmentations']['Phase'].attrs['Tracking memory'] = memory
 
     def apply_track_id_map(self):
         with h5py.File(self.file, 'r+') as f:
