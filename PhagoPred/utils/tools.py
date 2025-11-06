@@ -22,6 +22,15 @@ from PhagoPred.utils import mask_funcs
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def print_cell_deaths(hdf5_file: Path = SETTINGS.DATASET) -> None:
+    with h5py.File(hdf5_file, 'r') as f:
+        deaths= f['Cells']['Phase']['CellDeath'][0]
+        cells = np.nonzero(~np.isnan(deaths))[0]
+        death_frames = deaths[cells]
+        for cell, frame in zip(cells, death_frames):
+            print(cell, frame)
+        
+        
 def get_cell_end_frames(cell_idx: int, h5py_file: h5py.File) -> tuple[int, int]:
     """Use 'X' coord datset to get frame of first and last non nan"""
     not_nan_mask = ~np.isnan(h5py_file['Cells']['Phase']['X'][:, cell_idx])
@@ -1049,14 +1058,18 @@ def plot_correlations(features='all'):
 
 
 if __name__ == '__main__':
+    # copy_hdf5_groups(Path('PhagoPred') / 'Datasets' / 'ExposureTest' / 'old' / '03_10_2500.h5', 
+    #                  Path('PhagoPred')/'Datasets'/'ExposureTest'/ 'old' / '03_10_2500_new.h5',
+    #                  ['Images'])
+    print_cell_deaths()
     # hdf5_from_tiffs(Path("D:/27_05_1"), 
     #                 Path('D:/27_05.h5'),
     #                 phase_channel=1,
     #                 epi_channel=2,
     #                 )
     # repack_hdf5()
-    copy_hdf5_groups(Path('PhagoPred') / 'Datasets' / 'ExposureTest' / 'old' / '07_10_0.h5', Path('PhagoPred')/'Datasets'/'ExposureTest'/'07_10_0.h5', ['Images'])
-    copy_hdf5_groups(Path('PhagoPred') / 'Datasets' / 'ExposureTest' / 'old' / '10_10_5000.h5', Path('PhagoPred')/'Datasets'/'ExposureTest'/'10_10_5000.h5', ['Images'])
+    # copy_hdf5_groups(Path('PhagoPred') / 'Datasets' / 'ExposureTest' / 'old' / '07_10_0.h5', Path('PhagoPred')/'Datasets'/'ExposureTest'/'07_10_0.h5', ['Images'])
+    # copy_hdf5_groups(Path('PhagoPred') / 'Datasets' / 'ExposureTest' / 'old' / '10_10_5000.h5', Path('PhagoPred')/'Datasets'/'ExposureTest'/'10_10_5000.h5', ['Images'])
 
     # with h5py.File(Path('D:/27_05.h5'), 'r') as f:
     #     dset = f['Images/Epi/Data']

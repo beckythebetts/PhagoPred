@@ -46,13 +46,15 @@ class CellDeath(BaseFeature):
     """
     Determine frame at which cell dies, or np.nan if no cell death.
     Note: unlike all other cell features, this returns a single value for each cell (not each frame of each cell).
+    
+    Use no smoothing for classification (as )
     """
     derived_feature = True
 
-    def __init__(self, threshold: float = 0.1, min_frames_dead: int = 5, smoothed_frames: float = 2):
+    def __init__(self, threshold: float = 0.85, min_frames_dead: int = 5, smoothed_frames: float = 5):
         super().__init__()
         self.threshold = threshold
-        self.min_frames_dead = min_frames_dead
+        # self.min_frames_dead = min_frames_dead
         self.smoothed_frames = smoothed_frames
 
     def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
@@ -60,30 +62,49 @@ class CellDeath(BaseFeature):
         alive = phase_xr['Macrophage']
         
         cell_state = xr.full_like(alive, np.nan, dtype=float)
+        
+        is_alive = alive.fillna(0) > 0.5
+        is_dead  = dead.fillna(0) > 0.5
 
-        cell_state = cell_state.where(alive != 1, 1)
-        cell_state = cell_state.where(dead != 1, 0)
+        cell_state = xr.where(is_alive, 1.0, cell_state)
+        cell_state = xr.where(is_dead, 0.0, cell_state)
+
+        # cell_state = cell_state.where(alive < 0.5, 1)
+        # cell_state = cell_state.where(dead > 0.5, 0)
 
         # smooth
-        smoothed_cell_state = cell_state.rolling(Frame=self.smoothed_frames, center=True).reduce(np.nanmean).values
+        smoothed_cell_state = cell_state.rolling(Frame=self.smoothed_frames, center=True).reduce(np.nanmean)
+        # cell_state = cell_state.rolling(1, center=True).reduce(np.nanmean)
 
-        below_threshold = smoothed_cell_state < self.threshold
+        # need to interpolate, as nan values will be seen as alive when thresholding
+        smoothed_cell_state = smoothed_cell_state.chunk({'Frame': -1})
+        smoothed_cell_state = smoothed_cell_state.interpolate_na(dim='Frame', method="linear", fill_value="extrapolate").values
+        
+        cell_state = cell_state.chunk({'Frame': -1})
+        cell_state = cell_state.interpolate_na(dim='Frame', method="linear", fill_value="extrapolate").values
+        # smoothed_cell_state = np.interp(smoothed_cell_state, )
+        
+        
+        dead_frames = smoothed_cell_state < self.threshold
+        # print(np.unique(smoothed_cell_state))
+        reversed_dead_frames = dead_frames[::-1]
+    
+        reversed_dead_frames_cum_min = np.minimum.accumulate(reversed_dead_frames, axis=0)
+        permanently_dead_frames = reversed_dead_frames_cum_min[::-1]
+        
+        death_frames = np.argmax(permanently_dead_frames, axis=0).astype(float) # take index of first permanently dead frame 
+        death_frames[np.all(permanently_dead_frames==0, axis=0)] = np.nan
+        
+        # # Use unsmoothed cell state to classify a cell as no_death or death
+        # dead_frames = cell_state < self.threshold
+        # reversed_dead_frames = dead_frames[::-1]
+    
+        # reversed_dead_frames_cum_min = np.minimum.accumulate(reversed_dead_frames, axis=0)
+        # permanently_dead_frames = reversed_dead_frames_cum_min[::-1]
+        
+        # death_frames[np.all(permanently_dead_frames==0, axis=0)] = np.nan
 
-        kernel = np.ones(self.min_frames_dead, dtype=int)
-        conv_result = np.apply_along_axis(
-            lambda x: convolve(x.astype(int), kernel, mode='valid'),
-            axis=0, arr=below_threshold
-        )
-
-        death_possible = conv_result == self.min_frames_dead  # shape: (frames - N + 1, cells)
-        first_death_idx = np.argmax(death_possible, axis=0)  # (n_cells,)
-        has_death = np.any(death_possible, axis=0)
-
-        # Output array
-        death_frames = np.full((1, smoothed_cell_state.shape[1]), np.nan)
-        death_frames[0, has_death] = first_death_idx[has_death]
-
-        return death_frames
+        return death_frames[np.newaxis, :, np.newaxis]
 
 class FirstLastFrame(BaseFeature):
     """Computes frame of each cells first and last appearances."""
