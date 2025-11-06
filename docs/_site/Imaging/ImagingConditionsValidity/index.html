@@ -10,7 +10,7 @@
   <head>
     <meta charset="utf-8">
 
-<!-- begin _includes/seo.html --><title>Overview - Phagocytosis Outcome Prediction</title>
+<!-- begin _includes/seo.html --><title>Imaging Conditions Validity - Phagocytosis Outcome Prediction</title>
 <meta name="description" content="">
 
 
@@ -18,8 +18,8 @@
 <meta property="og:type" content="website">
 <meta property="og:locale" content="en_US">
 <meta property="og:site_name" content="Phagocytosis Outcome Prediction">
-<meta property="og:title" content="Overview">
-<meta property="og:url" content="http://localhost:4000/PhagoPred/">
+<meta property="og:title" content="Imaging Conditions Validity">
+<meta property="og:url" content="http://localhost:4000/PhagoPred/Imaging/ImagingConditionsValidity/">
 
 
 
@@ -33,20 +33,10 @@
 
 
 
-<link rel="canonical" href="http://localhost:4000/PhagoPred/">
+<link rel="canonical" href="http://localhost:4000/PhagoPred/Imaging/ImagingConditionsValidity/">
 
 
 
-
-
-  <script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "Person",
-    "name": null,
-    "url": "http://localhost:4000/PhagoPred/"
-}
-</script>
 
 
 
@@ -216,7 +206,7 @@
 
 
   <article class="page" itemscope itemtype="https://schema.org/CreativeWork">
-    <meta itemprop="headline" content="Overview">
+    <meta itemprop="headline" content="Imaging Conditions Validity">
     
     
     
@@ -225,7 +215,7 @@
       
         <header>
           <h1 id="page-title" class="page__title" itemprop="headline">
-            <a href="http://localhost:4000/PhagoPred/" itemprop="url">Overview
+            <a href="http://localhost:4000/PhagoPred/Imaging/ImagingConditionsValidity/" itemprop="url">Imaging Conditions Validity
 </a>
           </h1>
           
@@ -236,24 +226,50 @@
 
       <section class="page__content" itemprop="text">
         
-        <p>Phagocytosis, the engulfment and elimination of particles by cells, is a fundamental component of the innate immune response. Bacteria have evolved various strategies to survive and escape phagocytosis, some of which are well understood, while others remain unidentified.</p>
+          <aside class="sidebar__right ">
+            <nav class="toc">
+              <header><h4 class="nav__title"><i class="fas fa-file-alt"></i> On this page</h4></header>
+              <ul class="toc__menu"><li><a href="#fluorescent-signal">Fluorescent signal</a></li><li><a href="#macrophage-survival">Macrophage Survival</a></li><li><a href="#macrophage-population-growth">Macrophage Population Growth</a></li><li><a href="#macrophage-morphology">Macrophage Morphology</a></li></ul>
+            </nav>
+          </aside>
+        
+        <p>Fluorescence imaging may lead to photoxicity in macrophages, mostly due to the generation of ROS. Therefore, various fluorescence illumination exposures where tested in an attempt to balance maximising the signal intensity of the labelled <em>S. Aureus</em> bacteria against minimising the phototoxic affects on J774 macrophages.</p>
+<h1 id="fluorescent-signal">Fluorescent signal</h1>
+<p><img src="/PhagoPred/images/exposure_signals.png" alt="Comparison of signal for different exposures" /></p>
 
-<p><strong>Aim</strong>: Identify patterns in phagocyte morphology and dynamics that indicate successful or failed phagocytosis.</p>
+\[SNR = \frac{\hat{S}}{\sigma_b}\]
 
-<p>Using time-lapse, two-channel microscopy, we image macrophages (professional phagocytes) and Staphylococcus aureus bacteria to capture phagocytosis events.
-Segmentation via Mask R-CNN provides cell outlines.
-Tracking is performed with a linear sum assignment problem approach.
-We extract multivariate time series features describing the morphology, movement, and interactions of cells involved in each phagocytosis event. 
-To classify phagocytosis events as successful or failed, we plan to evaluate several machine learning approaches, balancing accuracy and interpretability.</p>
+\[SBR = \frac{\hat{S}}{\hat{b}}\]
 
-<p><img src="/PhagoPred/images/phago_example.png" alt="Phagocytosis" /></p>
+\[CV = \frac{\sigma_S}{\hat{S}}\]
 
-<ol>
-  <li><a href="Imaging/">Imaging</a></li>
-  <li><a href="Segmentation/">Segmentation</a></li>
-  <li><a href="Tracking/">Tracking</a></li>
-  <li><a href="FeatureExtraction/">Feature Extraction</a></li>
-</ol>
+<p>$\hat{S}$, $\sigma_S$ are mean and standard deviation of signal, and $\hat{b}$, $\sigma_b$ are mean and standard deviaton of background.
+A background image for each exposure was taken and subtracted, then a Gaussian smoothed image ($\sigma=200$) was also subtracted.</p>
+
+<h1 id="macrophage-survival">Macrophage Survival</h1>
+<p>For 0s, 2.5s and 5s exposures, unlabelled macrophges were imaged over a period of 67 hours. The resulting timelapses were <a href="/PhagoPred/Segmentation">segmented</a>, <a href="/PhagoPred/Tracking">tracked</a> and the <a href="/PhagoPred/Segmentation/CellDeathDetection">time of death for cells identified</a>. From this a Kaplan-Meier estimator was used to estimate survival functions for each cell population. It is important to note that the KM estimator assumes independence between each sample (cell) which is not the case here due to signalling and interactions between macrophages. However, it still describes the differences in survival trends between each exposure group.
+<img src="/PhagoPred/images/km_curves.png" alt="KM curves" />
+Shaded regions show 95% confidence intervals. Only cells present and alive during the first frame of imaging were included here.</p>
+
+<h1 id="macrophage-population-growth">Macrophage Population Growth</h1>
+<p>The total number of alive macrophages at each frame was also calculated and fitted with a Gompertz curve. Population $N$ at time $t$ is paramaterised by the maximum poulation $K$, the time of maximum growth $t_0$ and an intial growth rate $r$.</p>
+
+\[N(t) = K \exp({-\exp({r(t-t_0)}}))\]
+
+<p><img src="/PhagoPred/images/gompertz.png" alt="Gompertx fits" />
+The growth rate $r$ found for each fit was compared.
+<img src="/PhagoPred/images/gompertz_r.png" alt="Gompertx r" /></p>
+
+<h1 id="macrophage-morphology">Macrophage Morphology</h1>
+<p>Finally a number of morphological and movement features were calcuated for each macorpahge at each time step. The histograms for each of these feature were compared between each exposure poulation using the Kolomogorov-Smirnov statistic, $D$, which is the maximum difference between the cumulative density functions ($F_1$, $F_2$) of each distribution.</p>
+
+\[D = sup_x \left| F_1(x) - F_2(x)\right|\]
+
+<p>The median and 5th and 95th percentile values were also plotted.</p>
+
+<p><img src="/PhagoPred/images/standard_hists.png" alt="feature Histograms" />
+<img src="/PhagoPred/images/skeleton_hists.png" alt="feature Histograms" /></p>
+
 
         
       </section>
