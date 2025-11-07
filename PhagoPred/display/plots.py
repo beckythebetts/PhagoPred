@@ -664,7 +664,8 @@ def compare_cell_features_grid(
             p_values.append(ks_result.pvalue)
             D_crit_values.append(D_crit)
 
-        sig_mask = np.array(p_values) < alpha
+        # sig_mask = np.array(p_values) < alpha
+        sig_mask = np.zeros_like(p_values)
 
         bars = ax_bar.bar(range(len(ks_values)), ks_values, color='black', edgecolor='black')
         ax_bar.set_xticks(range(len(ks_values)))
@@ -683,9 +684,9 @@ def compare_cell_features_grid(
             # ax_bar.hlines(D_crit, b.get_x(), b.get_x() + b.get_width(),
             #               colors='blue', linestyles='dashed', linewidth=1)
 
-        if row == 0:
-            ax_bar.text(0.95, 0.95, f"* p < {alpha} (significant at α = {alpha})", 
-                        ha='right', va='top', transform=ax_bar.transAxes, color='black', fontsize=10)
+        # if row == 0:
+        #     ax_bar.text(0.95, 0.95, f"* p < {alpha} (significant at α = {alpha})", 
+        #                 ha='right', va='top', transform=ax_bar.transAxes, color='black', fontsize=10)
             # ax_bar.text(0.95, 0.88, f"Blue dashed = D_crit", 
             #             ha='right', va='top', transform=ax_bar.transAxes, color='blue', fontsize=9)
 
@@ -776,10 +777,10 @@ def plot_cell_positions(hdf5_file: Path, title=None, save_as: Path = None) -> No
     
 def main():
     feature_names=[
-        'Area',
-        'Circularity',
-        'Perimeter',
-        'Speed',
+        # 'Area',
+        # 'Circularity',
+        # 'Perimeter',
+        # 'Speed',
         # 'Displacement',
         # 'Mode 0',
         # 'Mode 1',
@@ -796,12 +797,12 @@ def main():
         # 'Total Fluorescence', 
         # 'Fluorescence Distance Mean', 
         # 'Fluorescence Distance Variance'
-        # 'Skeleton Length', 
+        'Skeleton Length', 
         # 'Skeleton Branch Points', 
         # 'Skeleton End Points', 
-        # 'Skeleton Branch Length Mean', 
+        'Skeleton Branch Length Mean', 
         # 'Skeleton Branch Length Std',
-        # 'Skeleton Branch Length Max',
+        'Skeleton Branch Length Max',
     ]
     # plot_two_death_frame_hists(
     #     Path('temp') / 'death_frames_fine_tuned.txt',

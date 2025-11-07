@@ -6,6 +6,7 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy
+from tqdm import tqdm
 
 from PhagoPred.feature_extraction.extract_features import CellType
 
@@ -24,6 +25,7 @@ class CellDataset(torch.utils.data.Dataset):
                  uncensored_only: bool = False,
                  summary_stats: bool = False,
                  fixed_len: int = None,
+                 max_time_to_death: int = None,
                  ):
         """
         A PyTorch Dataset for loading cell data from multiple HDF5 files.
@@ -47,6 +49,7 @@ class CellDataset(torch.utils.data.Dataset):
         self.interpolate_nan = interpolate_nan
         self.specified_cell_idxs = specified_cell_idxs if specified_cell_idxs and len(self.hdf5_paths) == 1 else None
         self.num_bins = num_bins
+        self.max_time_to_death = max_time_to_death
 
         self._lock = threading.Lock()
         self._files = [None] * len(hdf5_paths)  # To hold open file handles
@@ -223,13 +226,16 @@ class CellDataset(torch.utils.data.Dataset):
             landmark_frame = np.random.randint(cell_metadata['Start Frames'], last_frame)
             start_frame = cell_metadata['Start Frames']
         else:
-            # landmark_frame = np.random.randint(max(self.fixed_len, cell_metadata['Start Frames']), last_frame)
-            if cell_metadata['Start Frames'] + self.fixed_len >= last_frame:
-                return None, None, None, None
-            landmark_frame = np.random.randint(cell_metadata['Start Frames'] + self.fixed_len, last_frame)
+            if self.max_time_to_death is None: 
+                if cell_metadata['Start Frames'] + self.fixed_len >= last_frame:
+                    return None, None, None, None
+                landmark_frame = np.random.randint(cell_metadata['Start Frames'] + self.fixed_len, last_frame)
+
+            else:
+                landmark_frame = np.random.randint(last_frame-self.max_time_to_death, last_frame)
             start_frame = int(landmark_frame - self.fixed_len)
-            # start_frame = int(last_frame - landmark_frame)
-        # start_frame = cell_metadata['Start Frames'] if self.fixed_len is None else last_frame - self.fixed_len
+            if start_frame < 0:
+                return None, None, None, None
 
         cell_features = all_cell_features[start_frame:landmark_frame+1, cell_metadata['Local Cell Idxs']] # (num_frames, num_features)
         
@@ -330,6 +336,17 @@ def collate_fn(batch, fixed_length=None, means=None, stds=None, device='cpu'):
 
     return cell_features, lengths, time_to_event_bins, event_indicators, time_to_events
 
-
+def dataset_to_xy(ds, n_slices=5):
+    X, events, times = [], [], []
+    for i in tqdm(range(len(ds)), desc=f'Processing dataset {ds}'):
+        for _ in range(n_slices):
+            features, _, event, time = ds[i]
+            if features is not None:
+                X.append(features.flatten())
+                events.append(event)
+                times.append(time)
+    X = np.vstack(X)
+    y = np.array(list(zip(events, times)), dtype=[('event', '?'), ('time', '<f8')])
+    return X, y
 
     
