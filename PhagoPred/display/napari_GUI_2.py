@@ -76,7 +76,7 @@ class AllCellsViewer:
         self.viewer.mouse_double_click_callbacks.append(_click_callback)
     
 def main():
-    hdf5_file = Path('C:\\Users\\php23rjb\\Documents\\PhagoPred\\PhagoPred\\Datasets\\27_05_500.h5')
+    hdf5_file = Path('/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/21_10_2500.h5')
     viewer = napari.Viewer()
     all_cells = AllCellsViewer(viewer, hdf5_file)
     napari.run()
