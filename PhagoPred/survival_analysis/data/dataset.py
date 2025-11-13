@@ -240,6 +240,8 @@ class CellDataset(torch.utils.data.Dataset):
         cell_features = all_cell_features[start_frame:landmark_frame+1, cell_metadata['Local Cell Idxs']] # (num_frames, num_features)
         
         time_to_event = last_frame - landmark_frame
+        
+        assert ~np.isnan(time_to_event)
             
         time_to_event_bin = np.digitize(time_to_event, self.get_bins()) - 1  # Bin the observation time
         time_to_event_bin = np.clip(time_to_event_bin, 0, self.num_bins - 1)
@@ -337,14 +339,18 @@ def collate_fn(batch, fixed_length=None, means=None, stds=None, device='cpu'):
     return cell_features, lengths, time_to_event_bins, event_indicators, time_to_events
 
 def dataset_to_xy(ds, n_slices=5):
+    """Convert dataset to sksurv compatible."""
     X, events, times = [], [], []
     for i in tqdm(range(len(ds)), desc=f'Processing dataset {ds}'):
         for _ in range(n_slices):
             features, _, event, time = ds[i]
             if features is not None:
-                X.append(features.flatten())
-                events.append(event)
-                times.append(time)
+                if not np.any(np.isnan(features)):
+                    X.append(features.flatten())
+                    events.append(event)
+                    times.append(time)
+                    
+                    assert ~np.any(np.isnan(X)), (features.flatten(), features.flatten().shape, event, time)
     X = np.vstack(X)
     y = np.array(list(zip(events, times)), dtype=[('event', '?'), ('time', '<f8')])
     return X, y

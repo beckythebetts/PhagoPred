@@ -446,7 +446,32 @@ def split_by_radius(hdf5_file: Path) -> None:
             copy_dataset(features_group, outer_group, outer_region_mask)
             
         # print(cell_positions.shape)
-        
+ 
+def replace_hot_pixels(image: np.ndarray,
+                       upper_percentile: float = 99.9,
+                       filter_size: int = 3) -> np.ndarray:
+    """
+    Replace the brightest pixels (above a given percentile)
+    with local median values.
+    """
+    # Ensure float
+    img = image.astype(np.float32)
+
+    # 1. Find threshold
+    cutoff = np.percentile(img, upper_percentile)
+
+    # 2. Create mask of "hot" pixels
+    hot_mask = img > cutoff
+
+    # 3. Compute median-filtered version
+    median_img = scipy.ndimage.median_filter(img, size=filter_size)
+
+    # 4. Replace only hot pixels
+    corrected = img.copy()
+    corrected[hot_mask] = median_img[hot_mask]
+
+    return corrected
+    
 if __name__ == '__main__':
     # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/07_10_0.h5")
     # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/10_10_5000.h5")
