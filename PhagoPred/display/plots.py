@@ -691,16 +691,20 @@ def compare_cell_features_grid(
             #             ha='right', va='top', transform=ax_bar.transAxes, color='blue', fontsize=9)
 
         # --- Median + 5–95th percentile summary ---
-        medians = [np.median(d) for d in all_data]
-        p5 = [np.percentile(d, 5) for d in all_data]
-        p95 = [np.percentile(d, 95) for d in all_data]
-        yerr = np.array([np.array(medians) - np.array(p5), np.array(p95) - np.array(medians)])
+        # medians = [np.median(d) for d in all_data]
+        # p5 = [np.percentile(d, 5) for d in all_data]
+        # p95 = [np.percentile(d, 95) for d in all_data]
+        # yerr = np.array([np.array(medians) - np.array(p5), np.array(p95) - np.array(medians)])
 
-        ax_summary.bar(range(len(labels)), medians, color=colours, alpha=1.0, edgecolor='none')
-        ax_summary.errorbar(range(len(labels)), medians, yerr=yerr, fmt='none', ecolor='black', capsize=5)
-        ax_summary.set_xticks(range(len(labels)))
+        # ax_summary.bar(range(len(labels)), medians, color=colours, alpha=1.0, edgecolor='none')
+        bp = ax_summary.boxplot(all_data, labels=labels, patch_artist=True, medianprops=dict(color='black'), flierprops=dict(marker='.', markerfacecolor='black', markersize=2))
+        for patch, colour in zip(bp['boxes'], colours):
+            patch.set_facecolor(colour)
+            
+        # ax_summary.errorbar(range(len(labels)), medians, yerr=yerr, fmt='none', ecolor='black', capsize=5)
+        ax_summary.set_xticks(range(1, len(labels)+1))
         ax_summary.set_xticklabels(labels)
-        ax_summary.set_ylabel(f"{feature} (median ± 5–95%)")
+        ax_summary.set_ylabel(f"{feature}")
         ax_summary.set_title(f"{feature} Summary Stats")
         # ax_summary.grid(axis='y')
 
@@ -777,10 +781,10 @@ def plot_cell_positions(hdf5_file: Path, title=None, save_as: Path = None) -> No
     
 def main():
     feature_names=[
-        # 'Area',
-        # 'Circularity',
-        # 'Perimeter',
-        # 'Speed',
+        'Area',
+        'Circularity',
+        'Perimeter',
+        'Speed',
         # 'Displacement',
         # 'Mode 0',
         # 'Mode 1',
@@ -797,12 +801,12 @@ def main():
         # 'Total Fluorescence', 
         # 'Fluorescence Distance Mean', 
         # 'Fluorescence Distance Variance'
-        'Skeleton Length', 
+        # 'Skeleton Length', 
         # 'Skeleton Branch Points', 
         # 'Skeleton End Points', 
-        'Skeleton Branch Length Mean', 
+        # 'Skeleton Branch Length Mean', 
         # 'Skeleton Branch Length Std',
-        'Skeleton Branch Length Max',
+        # 'Skeleton Branch Length Max',
     ]
     # plot_two_death_frame_hists(
     #     Path('temp') / 'death_frames_fine_tuned.txt',

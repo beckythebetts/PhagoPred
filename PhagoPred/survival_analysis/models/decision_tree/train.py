@@ -55,7 +55,7 @@ def train(train_paths: list, val_paths: list, features: list, save_as: Path, fix
     
     print(len(X_train))
     
-    survival_tree = SurvivalTree(min_samples_leaf=1000, max_depth=5, max_leaf_nodes=5)
+    survival_tree = SurvivalTree(min_samples_leaf=1000, max_depth=5, max_leaf_nodes=3)
     survival_tree.fit(X_train, y_train)
     
     model_data = {

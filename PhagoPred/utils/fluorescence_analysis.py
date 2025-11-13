@@ -11,7 +11,9 @@ from pathlib import Path
 import tifffile
 import scipy
 
+
 from PhagoPred.utils import tools
+from PhagoPred.utils.dataset_creation import to_8bit, compute_percentile_limits, replace_hot_pixels
 
 results = []
 
@@ -25,7 +27,7 @@ class FluorescenceAnalysis():
         # self.tiff_file = tiff_file
 
         self.signal_tiff_file = directory / f'{file_name}_1' / f'{file_name}_1_MMStack_Pos0.ome.tif'
-        self.background_tiff_file = directory / f'{file_name}_background_1' / f'{file_name}_background_1_MMStack_Pos0.ome.tif'
+        # self.background_tiff_file = directory / f'{file_name}_background_1' / f'{file_name}_background_1_MMStack_Pos0.ome.tif'
 
         self.save_dir = save_dir
         if self.save_dir is None:
@@ -37,43 +39,53 @@ class FluorescenceAnalysis():
 
         self.masks = []
 
-        try:
-            self.combined_mask = plt.imread(self.save_dir / f'{self.strain_name}_combined_mask.png').astype(bool)[:, :, 0]
-            print(self.combined_mask.shape)
-            self.bg_mask = ~self.combined_mask
-            # split combined_mask into disconenected regions
-            # Label each connected region in the combined mask
-            labeled_mask, num_labels = scipy.ndimage.label(self.combined_mask)
+        plt.imsave(directory / f'{strain_name}.png', self.fluor_img)
+        # try:
+        #     self.combined_mask = plt.imread(self.save_dir / f'{self.strain_name}_combined_mask.png').astype(bool)[:, :, 0]
+        #     print(self.combined_mask.shape)
+        #     self.bg_mask = ~self.combined_mask
+        #     # split combined_mask into disconenected regions
+        #     # Label each connected region in the combined mask
+        #     labeled_mask, num_labels = scipy.ndimage.label(self.combined_mask)
 
-            # Create a list of boolean masks, one per connected region
-            self.masks = [(labeled_mask == i) for i in range(1, num_labels + 1)]
-        except: 
-            self.get_masks()
+        #     # Create a list of boolean masks, one per connected region
+        #     self.masks = [(labeled_mask == i) for i in range(1, num_labels + 1)]
+        # except: 
+        #     self.get_masks()
             
-        self.compute_metrics()
-        self.plot_images_and_histogram()
+        # self.compute_metrics()
+        # self.plot_images_and_histogram()
 
     def get_ims(self) -> tuple[np.ndarray, np.ndarray]:
         img_stack = tifffile.imread(self.signal_tiff_file)
-        background_stack = tifffile.imread(self.background_tiff_file)
+        # background_stack = tifffile.imread(self.background_tiff_file)
 
-        if img_stack.shape[0] != 2:
-            raise ValueError("Expected 2-channel TIFF (shape[0] should be 2).")
+        # if img_stack.shape[0] != 2:
+            # raise ValueError("Expected 2-channel TIFF (shape[0] should be 2).")
 
-        self.phase_img = img_stack[1]
-        self.fluor_img = img_stack[0].astype(np.int32) - background_stack.astype(np.int32)
+        self.phase_img = img_stack[2]
+        self.fluor_img = img_stack[1].astype(np.int32)
+            # - background_stack.astype(np.int32)
         # self.fluor_img = background_stack.astype(np.int16)
         print(self.fluor_img.shape)
         
+        # determine 'hot pixels'
+        # min_val, max_val = compute_percentile_limits(self.fluor_img, 99.9, 100)
+        self.fluor_img = replace_hot_pixels(self.fluor_img, 99.9, 3)
+        # self.fluor_img = scipy.ndimage.median_filter(self.fluor_img, size=10)
+        # self.fluor_img = to_8bit(self.fluor_img, min_val, max_val)
+        # self.fluor_img = scipy.ndimage.gaussian_filter(self.fluor_img, sigma=3)
         # Gaussian filtering for vignette rmeoval?
-        bg_estimate = scipy.ndimage.gaussian_filter(self.fluor_img, sigma=200)
+        bg_estimate = scipy.ndimage.gaussian_filter(self.fluor_img, sigma=50)
         self.fluor_img = self.fluor_img - bg_estimate
         self.fluor_img = np.clip(self.fluor_img, 0, None)
+        self.fluor_img = scipy.ndimage.median_filter(self.fluor_img, size=10)
+        self.fluor_img = scipy.ndimage.gaussian_filter(self.fluor_img, sigma=3)
         return self.phase_img, self.fluor_img
 
     def get_masks(self):
         fig, ax = plt.subplots()
-        ax.imshow(self.phase_img, cmap='gray')
+        ax.imshow(self.fluor_img, cmap='gray')
         plt.title("Draw masks around bacteria. Press Enter when done.")
 
         self.masks = []
@@ -490,8 +502,8 @@ def combine_images(directory: Union[Path, str]) -> None:
 
 def main():
     # FluorescenceAnalysis("1s Exposure", Path("C:\\Users") / 'php23rjb' / 'Downloads' / 'temp' / 'exposure_test', "mcherry_exposure_1s")
-    # for exposure in ('1', '2.5', '5', '10'):
-    #     FluorescenceAnalysis(f"{exposure}s Exposure", Path("C:\\Users") / 'php23rjb' / 'Downloads' / 'temp' / 'exposure_test', f"mcherry_exposure_{exposure.replace('.', '_')}s")
+    for exposure in ('1', '2.5', '5', '10', '20'):
+        FluorescenceAnalysis(f"{exposure}s Exposure", Path("C:\\Users") / 'php23rjb' / 'Downloads' / 'temp' / '11_11_pulsed_exposures', f"{exposure.replace('.', '_')}s")
 
     # FluorescenceAnalysis("2.5s E")
     # FluorescenceAnalysis("SH1000 - mCherry",
