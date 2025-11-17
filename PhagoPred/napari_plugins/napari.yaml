@@ -1,0 +1,13 @@
+name: napari-multitools
+display_name: "Napari Multitools"
+
+contributions:
+  commands:
+    - id: napari-multitools.split_layer
+      title: Split layer
+      python_name: napari_plugins.split_layer.split_layer:split_channels_widget
+
+  widgets:
+    - command: napari-multitools.split_layer
+      display_name: "Split layer"
+      autogenerate: true

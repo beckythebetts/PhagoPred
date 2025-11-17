@@ -7,8 +7,6 @@ import napari
 from qtpy import QtWidgets
 import h5py
 
-
-
 class AllCellsViewer:
     """Lazily load all ims from hdf5 file."""
     def __init__(self, viewer, hdf5_file_path: Path):

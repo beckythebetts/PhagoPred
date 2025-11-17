@@ -17,6 +17,8 @@ class CellViewer(QWidget):
     cell_death_signal = Signal(int)
     def __init__(self, viewer: napari.Viewer, hdf5_file: h5py.File, cell_idx: int, frame_size=300):
         super().__init__()
+        
+        
         self.viewer = viewer
         self.hdf5_file = hdf5_file
         self.cell_idx = cell_idx
@@ -28,9 +30,14 @@ class CellViewer(QWidget):
         # Read frame range from file
         self.first_frame = int(self.hdf5_file['Cells']['Phase']['First Frame'][0, self.cell_idx])
         self.last_frame = int(self.hdf5_file['Cells']['Phase']['Last Frame'][0, self.cell_idx])
-        self.cell_death = int(self.hdf5_file['Cells']['Phase']['CellDeath'][0, self.cell_idx])
+        self.cell_death = self.hdf5_file['Cells']['Phase']['CellDeath'][0, self.cell_idx]
+        try:
+            self.cell_death = int(self.cell_death)
+        except ValueError:
+            pass
 
         # Feature names from HDF5
+        self.progress_bar = None
         self.feature_names = [k for k in self.hdf5_file['Cells']['Phase'].keys() if k not in ('Images','First Frame','Last Frame','X','Y', 'CellDeath', 'Macrophage', 'Dead Macrophage')]
         
         # Create plots widget with checkboxes
@@ -46,15 +53,21 @@ class CellViewer(QWidget):
             hdf5_file=self.hdf5_file  # pass already open hdf5
         )
         # self.loader_thread.progress.connect(self.on_progress)
-        self.loader_thread.finished.connect(self.on_load_finished)
+        self.loader_thread.start_signal.connect(self._start_load)
         self.loader_thread.start()
-
         # Link Napari frame changes to vertical lines
         self.vlines = {}
         self.viewer.dims.events.current_step.connect(self.update_vertical_lines)
         
-
+    def _start_load(self, frames):
+        self.progress_bar = LoadingBarDialog(frames)
+        self.progress_bar.show()
+        self.loader_thread.finished.connect(self.on_load_finished)
+        self.loader_thread.progress.connect(self.progress_bar.update_progress)
+        
+        
     def on_load_finished(self, phase_data, epi_data, mask):
+        self.progress_bar.close()
         self.cell_death_signal.emit(self.cell_death)
         self.phase_data = phase_data
         self.epi_data = epi_data
@@ -98,7 +111,8 @@ class CellViewer(QWidget):
         event.accept()
             
 class CellLoaderThread(QThread):
-    # progress = Signal(int)
+    start_signal = Signal(int)
+    progress = Signal(int)
     finished = Signal(np.ndarray, np.ndarray, np.ndarray)  # phase_data, epi_data, cell_outline
 
     def __init__(self, cell_idx, first_frame, last_frame, frame_size, hdf5_file):
@@ -115,35 +129,38 @@ class CellLoaderThread(QThread):
     def run(self):
         try:
             # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            n_frames = self.last_frame - self.first_frame
+            self.n_frames = self.last_frame - self.first_frame
+            self.start_signal.emit(self.n_frames)
             
-            self.loading_bar = LoadingBarDialog(n_frames, f'Loading Cell {self.cell_idx}')
-            self.loading_bar.show()
-
-            phase_data = np.empty((n_frames, self.frame_size, self.frame_size))
-            epi_data = np.empty((n_frames, self.frame_size, self.frame_size))
-            mask = np.empty((n_frames, self.frame_size, self.frame_size), dtype=np.int32)
+            # self.loading_bar = LoadingBarDialog(n_frames, f'Loading Cell {self.cell_idx}')
+            # self.loading_bar.show()
+            im_shape = self.hdf5_file['Images']['Phase'][0].shape
+            phase_data = np.empty((self.n_frames, self.frame_size, self.frame_size))
+            epi_data = np.empty((self.n_frames, self.frame_size, self.frame_size))
+            mask = np.empty((self.n_frames, self.frame_size, self.frame_size), dtype=np.int32)
 
             # with h5py.File(self.hdf5_file, 'r') as f:
             x_centres = self.hdf5_file['Cells']['Phase']['X'][self.first_frame:self.last_frame, self.cell_idx]
             y_centres = self.hdf5_file['Cells']['Phase']['Y'][self.first_frame:self.last_frame, self.cell_idx]
             x_centres, y_centres = tools.fill_nans(x_centres), tools.fill_nans(y_centres)
 
-            for idx in range(n_frames):
+            for idx in range(self.n_frames):
                 frame_idx = self.first_frame + idx
                 xmin, xmax, ymin, ymax = mask_funcs.get_crop_indices(
-                    (y_centres[idx], x_centres[idx]), self.frame_size, SETTINGS.IMAGE_SIZE
+                    (y_centres[idx], x_centres[idx]), self.frame_size, im_shape
                 )
                 phase_data[idx] =  self.hdf5_file['Images']['Phase'][frame_idx, ymin:ymax, xmin:xmax]
                 epi_data[idx] = self.hdf5_file['Images']['Epi'][frame_idx, ymin:ymax, xmin:xmax]
                 mask[idx] = self.hdf5_file['Segmentations']['Phase'][frame_idx, ymin:ymax, xmin:xmax]
-                self.loading_bar.update_progress(idx)
+                # self.loading_bar.update_progress(idx)
+                self.progress.emit(idx)
 
             cell_mask = (mask == self.cell_idx)
             # print(np.unique(cell_mask))
 
             self.finished.emit(phase_data, epi_data, cell_mask)
-            self.loading_bar.close()
+            # self.loading_bar.close()
+            
 
         except Exception as e:
             import traceback

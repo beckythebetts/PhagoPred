@@ -1,0 +1,13 @@
+pyproject.toml
+napari_multitools.egg-info/PKG-INFO
+napari_multitools.egg-info/SOURCES.txt
+napari_multitools.egg-info/dependency_links.txt
+napari_multitools.egg-info/entry_points.txt
+napari_multitools.egg-info/requires.txt
+napari_multitools.egg-info/top_level.txt
+napari_plugins/__init__.py
+napari_plugins/napari.yaml
+napari_plugins/split_layer/__init__.py
+napari_plugins/split_layer/split_layer.py
+tests/test_features.py
+tests/test_tracking.py

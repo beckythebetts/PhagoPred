@@ -1,0 +1,26 @@
+[project]
+name = "napari-multitools"
+version = "0.1.0"
+description = "A collection of small Napari tools (e.g., split channels)"
+authors = [{ name = "Your Name" }]
+requires-python = ">=3.9"
+dependencies = [
+    "napari",
+    "magicgui",
+]
+classifiers = [
+    "Framework :: napari",
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["napari_plugins*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml"]
+
+[project.entry-points."napari.manifest"]
+"napari-multitools" = "napari_plugins:napari.yaml"
