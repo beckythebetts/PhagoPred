@@ -28,4 +28,5 @@ checkpoints/
 *.h5
 *.hdf5
 *.pickle
+*.mp4
 # *.png
