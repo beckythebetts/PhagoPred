@@ -7,7 +7,16 @@ contributions:
       title: Split layer
       python_name: napari_plugins.split_layer.split_layer:split_channels_widget
 
+    - id: napari-multitools.distance_bands
+      title: Distance Bands
+      python_name: napari_plugins.distance_bands.distance_bands:distance_bands_widget
+
   widgets:
     - command: napari-multitools.split_layer
       display_name: "Split layer"
       autogenerate: true
+
+    - command: napari-multitools.distance_bands
+      display_name: "Distance Bands"
+      autogenerate: false
+  

@@ -234,18 +234,12 @@ class FeaturesExtraction:
     def extract_primary_features(self, f: h5py.File, cell_type: CellType) -> None:
         if len(cell_type.primary_features) > 0:
             print(f'\n=== Calculating Primary Features ({cell_type.name}) ===\n')
-            # phase_xr = self.cell_types[self.cell_type_names.index('Phase')].get_features_xr(f)
-            # epi_xr = None
-            # if 'Epi' in self.cell_type_names:   
-            #     epi_xr = self.cell_types[np.argwhere(self.cell_type_names == 'Epi')].get_features_xr(f)
 
             for frame_idx in tqdm(range(self.num_frames)):
 
-                # sys.stdout.write(f'\r=== Calculating Primary Features ({cell_type.name}) ===')
-                # sys.stdout.flush()
-
                 mask = cell_type.get_masks(f, frame_idx)
                 image = cell_type.get_images(f, frame_idx)
+                epi_image = CellType('Epi').get_images(f, frame_idx)
 
                 num_cells = np.max(mask) + 1
 
@@ -257,9 +251,14 @@ class FeaturesExtraction:
 
                     expanded_mask = torch.tensor(mask).to(self.DEVICE).unsqueeze(0) == cell_idxs.unsqueeze(1).unsqueeze(2)
 
+                    if 'X' in f[cell_type.features_group].keys():
+                        centre_coords = cell_type.get_features_xr(f, ['X', 'Y'])
+                        x_centres = torch.from_numpy(centre_coords['X'].values).to(mask.device)
+                        y_centres = torch.from_numpy(centre_coords['Y'].values).to(mask.device)
+                        expanded_mask, epi_image, image = features.crop_masks_images(expanded_mask, epi_image, image, x_centres, y_centres)
+                        
                     for feature in cell_type.primary_features:
                         result = feature.compute(mask=expanded_mask, image=image)
-                        # print(result.shape)
                         if result.ndim == 1:
                             result = result[:, np.newaxis]
                         for i, feature_name in enumerate(feature.get_names()):
