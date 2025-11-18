@@ -185,7 +185,7 @@ class FeaturesExtraction:
             self, 
             h5py_file=SETTINGS.DATASET, 
             frame_batchsize=10,
-            cell_batch_size=100
+            cell_batch_size=200
             ) -> None:
         
         self.num_frames = None
@@ -227,7 +227,7 @@ class FeaturesExtraction:
         with h5py.File(self.h5py_file, 'r+') as f:
             for cell_type in self.cell_types:
                 self.extract_primary_features(f, cell_type)
-                self.extract_primary_derived_features(f, cell_type)
+                # self.extract_primary_derived_features(f, cell_type)
                 self.extract_derived_features(f, cell_type)
             
 
@@ -235,12 +235,21 @@ class FeaturesExtraction:
         if len(cell_type.primary_features) > 0:
             print(f'\n=== Calculating Primary Features ({cell_type.name}) ===\n')
 
+            if 'X' in f[cell_type.features_group].keys():
+                centre_coords = cell_type.get_features_xr(f, ['X', 'Y'])
+                x_centres = torch.from_numpy(centre_coords['X'].values)
+                y_centres = torch.from_numpy(centre_coords['Y'].values)
+                # print(x_centres.shape)
+                
+                x_centres, y_centres = x_centres.to(self.DEVICE), y_centres.to(self.DEVICE)
+                        
             for frame_idx in tqdm(range(self.num_frames)):
 
                 mask = cell_type.get_masks(f, frame_idx)
-                image = cell_type.get_images(f, frame_idx)
-                epi_image = CellType('Epi').get_images(f, frame_idx)
-
+                
+                image = torch.tensor(cell_type.get_images(f, frame_idx)).to(self.DEVICE)
+                epi_image = torch.tensor(CellType('Epi').get_images(f, frame_idx)).to(self.DEVICE)
+            
                 num_cells = np.max(mask) + 1
 
                 for first_cell in range(0, num_cells, self.cell_batch_size):
@@ -252,14 +261,14 @@ class FeaturesExtraction:
                     expanded_mask = torch.tensor(mask).to(self.DEVICE).unsqueeze(0) == cell_idxs.unsqueeze(1).unsqueeze(2)
 
                     if 'X' in f[cell_type.features_group].keys():
-                        centre_coords = cell_type.get_features_xr(f, ['X', 'Y'])
-                        x_centres = torch.from_numpy(centre_coords['X'].values).to(mask.device)
-                        y_centres = torch.from_numpy(centre_coords['Y'].values).to(mask.device)
-                        expanded_mask, epi_image, image = features.crop_masks_images(expanded_mask, epi_image, image, x_centres, y_centres)
+                        current_x_centres, current_y_centres = x_centres[frame_idx, first_cell:last_cell], y_centres[frame_idx, first_cell:last_cell]
+                        # print(current_x_centres)
+                        current_expanded_mask, current_epi_images, current_images = features.crop_masks_images(expanded_mask, epi_image, image, current_x_centres, current_y_centres)
+                    else:
+                        current_expanded_mask, current_epi_images, current_images = expanded_mask, epi_image, image
                         
                     for feature in cell_type.primary_features:
-                        result = feature.compute(mask=expanded_mask, image=image)
-                        # print(result.shape)
+                        result = feature.compute(mask=current_expanded_mask, image=current_images, epi_image=current_epi_images)
                         if result.ndim == 1:
                             result = result[:, np.newaxis]
                         for i, feature_name in enumerate(feature.get_names()):
@@ -272,105 +281,6 @@ class FeaturesExtraction:
         
                     torch.cuda.empty_cache()
     
-    def extract_primary_derived_features(self, f: h5py.File, cell_type: CellType) -> None:
-        """
-        Extracts primary and derived features for a given cell type.
-        """
-        # self.extract_primary_features(f, cell_type)
-        
-        if len(cell_type.primary_derived_features) > 0:
-            print(f'\n=== Calculating Primary/Derived Features ({cell_type.name}) ===\n')
-            phase_features_xr = self.cell_types[self.cell_type_names.index('Phase')].get_features_xr(f)
-            epi_features_xr = None
-
-            if 'Epi' in self.cell_type_names:
-                epi_features_xr = self.cell_types[np.argwhere(self.cell_type_names == 'Epi')].get_features_xr(f)
-            
-            for frame_idx in tqdm(range(self.num_frames)):
-                mask = cell_type.get_masks(f, frame_idx)
-                image = cell_type.get_images(f, frame_idx)
-                epi_image = CellType('Epi').get_images(f, frame_idx)
-
-                frame_phase_xr = phase_features_xr.isel(Frame=frame_idx)
-                frame_epi_xr = None
-                
-                num_cells = np.max(mask) + 1
-
-                for first_cell in range(0, num_cells, self.cell_batch_size):
-
-                    last_cell = min(first_cell + self.cell_batch_size, num_cells)
-
-                    cell_idxs = np.arange(first_cell, last_cell)
-                    phase_xr = frame_phase_xr.isel({'Cell Index': cell_idxs})
-
-                    cell_idxs = torch.from_numpy(cell_idxs).to(self.DEVICE)
-
-                    expanded_mask = torch.tensor(mask).to(self.DEVICE).unsqueeze(0) == cell_idxs.unsqueeze(1).unsqueeze(2)
-
-                    for feature in cell_type.primary_derived_features:
-                        result = feature.compute(mask=expanded_mask, image=image, epi_image=epi_image, phase_xr=phase_xr, epi_xr=None)
-                        if result.ndim == 1:
-                            result = result[:, np.newaxis]
-                        for i, feature_name in enumerate(feature.get_names()):
-
-                            #resize dataset if too many cells
-                            if num_cells>f[cell_type.features_group][feature_name].shape[cell_type.CELL_DIM]:
-                                f[cell_type.features_group][feature_name].resize(num_cells, cell_type.CELL_DIM)
-
-                            f[cell_type.features_group][feature_name][frame_idx, first_cell:last_cell] = result[:, i]
-        
-                    torch.cuda.empty_cache()
-    
-    def extract_primary_derived_features(self, f: h5py.File, cell_type: CellType) -> None:
-        """
-        Extracts primary and derived features for a given cell type.
-        """
-        # self.extract_primary_features(f, cell_type)
-        
-        if len(cell_type.primary_derived_features) > 0:
-            print(f'\n=== Calculating Primary/Derived Features ({cell_type.name}) ===\n')
-            phase_features_xr = self.cell_types[self.cell_type_names.index('Phase')].get_features_xr(f)
-            epi_features_xr = None
-
-            if 'Epi' in self.cell_type_names:
-                epi_features_xr = self.cell_types[np.argwhere(self.cell_type_names == 'Epi')].get_features_xr(f)
-            
-            for frame_idx in tqdm(range(self.num_frames)):
-                mask = cell_type.get_masks(f, frame_idx)
-                image = cell_type.get_images(f, frame_idx)
-                epi_image = CellType('Epi').get_images(f, frame_idx)
-
-                frame_phase_xr = phase_features_xr.isel(Frame=frame_idx)
-                frame_epi_xr = None
-                
-                num_cells = np.max(mask) + 1
-
-                for first_cell in range(0, num_cells, self.cell_batch_size):
-
-                    last_cell = min(first_cell + self.cell_batch_size, num_cells)
-
-                    cell_idxs = np.arange(first_cell, last_cell)
-                    phase_xr = frame_phase_xr.isel({'Cell Index': cell_idxs})
-
-                    cell_idxs = torch.from_numpy(cell_idxs).to(self.DEVICE)
-
-                    expanded_mask = torch.tensor(mask).to(self.DEVICE).unsqueeze(0) == cell_idxs.unsqueeze(1).unsqueeze(2)
-
-                    for feature in cell_type.primary_derived_features:
-                        result = feature.compute(mask=expanded_mask, image=image, epi_image=epi_image, phase_xr=phase_xr, epi_xr=None)
-                        if result.ndim == 1:
-                            result = result[:, np.newaxis]
-                        for i, feature_name in enumerate(feature.get_names()):
-
-                            #resize dataset if too many cells
-                            if num_cells>f[cell_type.features_group][feature_name].shape[cell_type.CELL_DIM]:
-                                f[cell_type.features_group][feature_name].resize(num_cells, cell_type.CELL_DIM)
-
-                            f[cell_type.features_group][feature_name][frame_idx, first_cell:last_cell] = result[:, i]
-        
-                    torch.cuda.empty_cache()
-                
-
 
     def extract_derived_features(self, f: h5py.File, cell_type: CellType) -> None:
         if len(cell_type.derived_features) > 0:

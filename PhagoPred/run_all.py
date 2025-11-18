@@ -16,18 +16,18 @@ from PhagoPred.survival_analysis.models import losses
 if __name__ == '__main__':
     for dataset in (
         # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / 'old' / '03_10_2500.h5',
-        # Path('PhagoPred')/'Datasets'/ 'Prelims' / '16_09_3.h5',
+        Path('PhagoPred')/'Datasets'/ 'Prelims' / '16_09_1.h5',
         # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_2500.h5',
-        Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5',
+        # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5',
         # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5',
     ):
-        # segment.seg_dataset(dataset=dataset)
-        # trackpy.run_tracking(dataset=dataset)
-        # extract_features.extract_features(dataset=dataset, phase_features=[features.Fluorescence(),
-        #                 # features.UmapEmbedding(),
-        #                 ])
-        # clean_features.remove_bad_frames(dataset=dataset)
-        GUI.run(dataset=dataset)
+        segment.seg_dataset(dataset=dataset)
+        trackpy.run_tracking(dataset=dataset)
+        extract_features.extract_features(dataset=dataset, phase_features=[features.Fluorescence(),
+                        # features.UmapEmbedding(),
+                        ])
+        clean_features.remove_bad_frames(dataset=dataset)
+        # GUI.run(dataset=dataset)
         
     # trackpy.run_tracking()
     # extract_features.extract_features()

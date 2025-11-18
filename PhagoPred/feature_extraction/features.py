@@ -10,6 +10,7 @@ import pickle
 from skimage.measure import label, regionprops
 import time
 import kornia
+import matplotlib.pyplot as plt
 
 from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
 from PhagoPred.feature_extraction.morphology.UMAP import load_UMAP, UMAP_embedding
@@ -475,183 +476,95 @@ class Fluorescence(BaseFeature):
             'Outer Total FLuorescence',
             ]
     
-    def copmute(self, mask: torch.tensor = None, image: torch.tensor = None, epi_image: torch.tensor = None) -> np.ndarray:
+    def compute(self, mask: torch.tensor = None, image: torch.tensor = None, epi_image: torch.tensor = None) -> np.ndarray:
         num_cells, H, W = mask.shape
         
+        results = np.full((num_cells, 5), np.nan)
+        
         valid = torch.sum(mask, dim=(1,2)) > 0
-        
-        mask = mask.unsqueeze(0) #(1, num_cells_in_batch, H, W)
-        dist_transform = kornia.contrib.distance_transform(image = mask)
-        dist_transform = dist_transform.squeeze(0) # (num_cells, H, W)
-        
-        max_dist, _ = torch.max(dist_transform.view(num_cells, H*W), dim=1) # (num_cells)
-        # pos_x = max_pos // W
-        # pos_y = max_pos % W
-        
-        # coords = torch.stack([pos_y, pos_x], dim=1) # (num_cells, 2)
-        
-        inner_mask = dist_transform > (max_dist // 2) 
-        outer_mask = dist_transform <= (max // 2) & dist_transform > 0
-        
-        
-        total_fluorescence = torch.sum(epi_image*mask, dim=(1, 2))
-        dist_mean = torch.sum(epi_image * mask * dist_transform, dim=(1, 2)) / total_fluorescence
-        dist_variance = torch.sum(epi_image * mask * dist_transform**2, dim=(1, 2)) / total_fluorescence - dist_mean**2
-        inner_fluorescence = torch.sum(epi_image*inner_mask, dim=(1, 2))
-        outer_fluorescence = torch.sum(epi_image*outer_mask, dim=(1, 2))
-        
-        results = np.full((mask.shape[0], 5), np.nan)
-        valid_np = valid.cpu().numpy()
-        results[valid_np, 0] = total_fluorescence.cpu().numpy()
-        results[valid_np, 1] = dist_mean.cpu().numpy()
-        results[valid_np, 2] = dist_variance.cpu().numpy()
-        results[valid_np, 3] = inner_fluorescence.cpu().numpy()
-        results[valid_np, 4] = outer_fluorescence.cpu().numpy()
+        num_valid = torch.sum(valid).item()
+        if num_valid > 0:
+            
+            epi_image = epi_image[valid]
+            mask = mask[valid]
+            
+            temp_mask = (~mask).unsqueeze(0).to(torch.float) # (1, num_cells_in_batch, H, W)
+            # mask = mask.unsqueeze(0).to(torch.float) #(1, num_cells_in_batch, H, W)
+            dist_transform = kornia.contrib.distance_transform(image = temp_mask)
+            # mask = mask.squeeze(0)
+            dist_transform = dist_transform.squeeze(0) # (num_cells, H, W)
+            
+            
+            
+            max_dist, _ = torch.max(dist_transform.view(num_valid, H*W), dim=1) # (num_cells)
+            
+            
+            max_dist = max_dist.unsqueeze(1).unsqueeze(1).expand(-1, H, W)
+            dist_transform = dist_transform / (max_dist + 1e-6)
+            
+            inner_mask = dist_transform > 0.5 
+            outer_mask = (dist_transform <= 0.5) & (dist_transform > 0)
+            
+            total_fluorescence = torch.sum(epi_image*mask, dim=(1, 2))
+            dist_mean = torch.sum(epi_image * mask * dist_transform, dim=(1, 2)) / total_fluorescence
+            dist_variance = torch.sum(epi_image * mask * dist_transform**2, dim=(1, 2)) / total_fluorescence - dist_mean**2
+            inner_fluorescence = torch.sum(epi_image*inner_mask, dim=(1, 2))
+            outer_fluorescence = torch.sum(epi_image*outer_mask, dim=(1, 2))
+            
+            results = np.full((num_cells, 5), np.nan)
+            valid_np = valid.cpu().numpy()
+            results[valid_np, 0] = total_fluorescence.cpu().numpy()
+            results[valid_np, 1] = dist_mean.cpu().numpy()
+            results[valid_np, 2] = dist_variance.cpu().numpy()
+            results[valid_np, 3] = inner_fluorescence.cpu().numpy()
+            results[valid_np, 4] = outer_fluorescence.cpu().numpy()
 
         return results
-        
 
-# class Fluorescence(BaseFeature):
-#     """Fluorescence intensity of cells in the image.
-#     Use radial moments to describe distribution from centre.
-#     $M_n = \sum_{i} I_i * r_i^n$
-#     where $I_i$ is the intensity at pixel $i$ and $r_i$ is the distance from the cell centroid.
-#     Total fluorescence is $M_0$, mean fluorescence distance is $M_1 / M_0$, and variance is $M_2 / M_0 - (M_1 / M_0)^2$.
-#     """
-#     primary_feature = True
-#     derived_feature = True
-#     requires = ['X', 'Y']
-
-#     def __init__(self):
-#         super().__init__()
-#         self.crop_size = 300
-#         self.pad = self.crop_size // 2
-#         self.distance_map = None  # Placeholder for distance map, if needed
-
-#     def get_distance_grid(self, device):
-
-#         # Create coordinate grids
-#         y = torch.arange(self.crop_size, device=device)
-#         x = torch.arange(self.crop_size, device=device)
-#         yy, xx = torch.meshgrid(y, x, indexing='ij')
-#         # Compute distances from center
-#         dist = torch.sqrt((yy - self.pad)**2 + (xx - self.pad)**2)
-#         return dist  # shape: (crop_size, crop_size)
-
-#     def get_names(self):
-#         return [
-#             'Total Fluorescence', 
-#             'Fluorescence Distance Mean', 
-#             'Fluorescence Distance Variance',
-#             'Inner Total Fluorescnece',
-#             'Outer Total FLuorescence',
-#             ]
+def crop_masks_images(expanded_mask: torch.tensor, epi_image: torch.tensor, phase_image: torch.tensor, x_centres: torch.tensor, y_centres=torch.tensor, crop_size=200) -> tuple[torch.tensor, torch.tensor, torch.tensor]:
     
-#     def crop_centered_batch(self, array_padded, x_centres_padded, y_centres_padded):
-        
-#         N = x_centres_padded.shape[0]
-#         pad = self.crop_size // 2
-
-#         rel = torch.arange(-pad, pad, device=array_padded.device)
-#         grid_y = rel.view(1, self.crop_size).expand(N, self.crop_size) + y_centres_padded.view(N, 1)
-#         grid_x = rel.view(1, self.crop_size).expand(N, self.crop_size) + x_centres_padded.view(N, 1)
-
-#         H_pad, W_pad = array_padded.shape[1:]
-#         grid_y = grid_y.clamp(0, H_pad - 1)
-#         grid_x = grid_x.clamp(0, W_pad - 1)
-
-#         assert torch.all(torch.isfinite(grid_y)), "grid_y contains NaN or Inf"
-#         assert torch.all(torch.isfinite(grid_x)), "grid_x contains NaN or Inf"
-#         assert torch.all(grid_y >= 0), "grid_y contains negative indices"
-#         assert torch.all(grid_x >= 0), "grid_x contains negative indices"
-#         assert array_padded.device == grid_y.device == grid_x.device, "Device mismatch"
-
-#         crops = array_padded[
-#             torch.arange(N, device=array_padded.device).view(N, 1, 1).int(),
-#             grid_x.unsqueeze(1).expand(N, self.crop_size, self.crop_size).int(),
-#             grid_y.unsqueeze(2).expand(N, self.crop_size, self.crop_size).int(),
-#         ]
-#         return crops
-
-#     def compute(self, mask: torch.tensor = None, image: torch.tensor = None, epi_image: torch.tensor = None, phase_xr: xr.Dataset = None, epi_xr: xr.Dataset = None) -> np.array:
-#         if self.distance_map is None:
-#             self.distance_map = self.get_distance_grid(mask.device)
-        
-#         epi_image = torch.from_numpy(epi_image).to(mask.device)
-        
-#         if mask.ndim == 2:
-#             mask = mask.unsqueeze(0)
-
-#         if epi_image.ndim == 2:
-#             epi_image = epi_image.unsqueeze(0)
-
-#         self.pad = self.crop_size // 2
-
-#         x_centres = torch.from_numpy(phase_xr['X'].values).to(mask.device)
-#         y_centres = torch.from_numpy(phase_xr['Y'].values).to(mask.device)
-
-#         valid = (~torch.isnan(x_centres)) & (~torch.isnan(y_centres))
-        
-#         x_centres_padded = (x_centres + self.pad)[valid]
-#         y_centres_padded = (y_centres + self.pad)[valid]
-
-#         self.mask_padded = torch.nn.functional.pad(mask, (self.pad, self.pad, self.pad, self.pad), mode='constant', value=0)[valid]
-#         self.epi_image_padded = torch.nn.functional.pad(epi_image, (self.pad, self.pad, self.pad, self.pad), mode='constant', value=0)
-#         self.epi_image_padded = self.epi_image_padded.expand(len(x_centres_padded), -1, -1)
-
-#         cropped_masks = self.crop_centered_batch(self.mask_padded, x_centres_padded, y_centres_padded)
-#         cropped_epi_image = self.crop_centered_batch(self.epi_image_padded, x_centres_padded, y_centres_padded)
-
-#         total_fluorescence = torch.sum(cropped_epi_image * cropped_masks, dim=(1, 2))
-#         dist_mean = torch.sum(cropped_epi_image * cropped_masks * self.distance_map, dim=(1, 2)) / total_fluorescence
-#         dist_variance = torch.sum(cropped_epi_image * cropped_masks * self.distance_map**2, dim=(1, 2)) / total_fluorescence - dist_mean**2
-
-#         results = np.full((mask.shape[0], 5), np.nan)
-#         valid_np = valid.cpu().numpy()
-#         results[valid_np, 0] = total_fluorescence.cpu().numpy()
-#         results[valid_np, 1] = dist_mean.cpu().numpy()
-#         results[valid_np, 2] = dist_variance.cpu().numpy()
-
-#         return results
-    
-
-def crop_masks_images(expanded_mask: torch.tensor, epi_image: torch.tensor, phase_image: torch.tensor, x_centres: torch.tensor, y_centres=torch.tensor, crop_size=400) -> tuple[torch.tensor, torch.tnsor, torch.tensor]:
     num_cells = expanded_mask.shape[0]
     
-    half_crop_size = crop_size // 2
-    valid = (~torch.isnan(x_centres), ~torch.isnan(y_centres))
-    x_centres_valid, y_centres_valid = x_centres[valid], y_centres[valid]
+    shape = (num_cells, crop_size, crop_size)
     
-    pad = (half_crop_size, half_crop_size, half_crop_size, half_crop_size)
-    mask_padded = torch.nn.functional.pad(expanded_mask, pad)[valid]
-    epi_padded = torch.nn.functional.pad(epi_image, pad)
-    phase_padded = torch.nn.functional.pad(phase_image, pad)
-    
-    N = x_centres_valid.shape[0]
-    rel = torch.arange(-half_crop_size, half_crop_size, device=mask_padded.device)
-    yy, xx = torch.meshgrid(rel, rel, indexing='ij')
-    
-    yy = yy.unsqueeze(0) + y_centres_valid.view(N, 1, 1)
-    xx = xx.unsqueeze(0) + x_centres_valid.view(N, 1, 1)
-    
-    H_pad, W_pad = mask_padded.shape[-2:]
-    yy = yy.clamp(0, H_pad - 1).long()
-    xx = xx.clamp(0, W_pad - 1).long()
-    
-    batch_idx = torch.arange(N, device=mask_padded.device).view(N, 1, 1).expand_as(xx)
-    mask_crops_valid = mask_padded[batch_idx, :, yy, xx]
-    epi_crops_valid = epi_padded[batch_idx, :, yy, xx]
-    phase_crops_valid = phase_padded[batch_idx, :, yy, xx]
+    mask_crops = torch.full(shape, False, device=expanded_mask.device)
+    epi_crops = torch.full(shape, 0, device=expanded_mask.device, dtype=torch.uint8)
+    phase_crops = torch.full(shape, 0, device=expanded_mask.device, dtype=torch.uint8)
 
-    shape = (num_cells, *mask_crops_valid.shape[1:])
-    mask_crops = torch.full(shape, float('nan'), device=expanded_mask.device)
-    epi_crops = torch.full(shape, float('nan'), device=expanded_mask.device)
-    phase_crops = torch.full(shape, float('nan'), device=expanded_mask.device)
+    valid = ~torch.isnan(x_centres)
+    num_valid = torch.sum(valid)
+    
+    if num_valid > 0:
+    
+        half_crop_size = crop_size // 2
+        
+        pad = (half_crop_size, half_crop_size, half_crop_size, half_crop_size)
+        mask_padded = torch.nn.functional.pad(expanded_mask[valid], pad)
+        epi_padded = torch.nn.functional.pad(epi_image, pad).unsqueeze(0).expand(num_valid, -1, -1)
+        phase_padded = torch.nn.functional.pad(phase_image, pad).unsqueeze(0).expand(num_valid, -1, -1)
+        
+        xcv = x_centres[valid] + half_crop_size
+        ycv = y_centres[valid] + half_crop_size
 
-    # fill valid indices
-    mask_crops[valid] = mask_crops_valid
-    epi_crops[valid] = epi_crops_valid
-    phase_crops[valid] = phase_crops_valid
+        N = xcv.shape[0]
+        rel = torch.arange(-half_crop_size, half_crop_size, device=mask_padded.device)
+        yy, xx = torch.meshgrid(rel, rel, indexing='ij')
+        
+        yy = yy.unsqueeze(0) + ycv.view(N, 1, 1)
+        xx = xx.unsqueeze(0) + xcv.view(N, 1, 1)
+        
+        H_pad, W_pad = mask_padded.shape[-2:]
+        yy = yy.clamp(0, H_pad - 1).long()
+        xx = xx.clamp(0, W_pad - 1).long()
+        
+        batch_idx = torch.arange(N, device=mask_padded.device).view(N, 1, 1).expand_as(xx)
+        mask_crops_valid = mask_padded[batch_idx, xx, yy]
+        epi_crops_valid = epi_padded[batch_idx, xx, yy]
+        phase_crops_valid = phase_padded[batch_idx, xx, yy]
+        
+        mask_crops[valid] = mask_crops_valid
+        epi_crops[valid] = epi_crops_valid.to(torch.uint8)
+        phase_crops[valid] = phase_crops_valid.to(torch.uint8)
 
     return mask_crops, epi_crops, phase_crops
 
