@@ -28,7 +28,15 @@ def replace_hot_pixels(image: np.ndarray,
 
     return corrected
 
-def bg_removal_v1(img, sigma_bg=50, sigma_smooth=3, size_median=10):
+def bg_removal(img, sigma_bg=50, size_median=3):
+    bg_estimate = scipy.ndimage.gaussian_filter(img, sigma=sigma_bg)
+    img = img - bg_estimate
+    img = np.clip(img, 0, None)
+    img = scipy.ndimage.median_filter(img, size=size_median)
+    return img
+
+
+def bg_removal_v1(img, sigma_bg=50, sigma_smooth=3, size_median=3):
     bg_estimate = scipy.ndimage.gaussian_filter(img, sigma=sigma_bg)
     img = img - bg_estimate
     img = np.clip(img, 0, None)
@@ -72,7 +80,7 @@ class BGRemovalWidget(QWidget):
 
         # Dropdown for method
         self.method_box = QComboBox()
-        self.method_box.addItems(["v1", "v2", "v3", "v4"])
+        self.method_box.addItems(["v0", "v1", "v2", "v3", "v4"])
         layout.addWidget(QLabel("Method:"))
         layout.addWidget(self.method_box)
 
@@ -87,14 +95,14 @@ class BGRemovalWidget(QWidget):
         layout.addWidget(QLabel("Sigma (smoothing):"))
         self.sigma_smooth = QSpinBox()
         self.sigma_smooth.setRange(0, 20)
-        self.sigma_smooth.setValue(3)
+        self.sigma_smooth.setValue(0)
         layout.addWidget(self.sigma_smooth)
 
         # Median Size
         layout.addWidget(QLabel("Median size:"))
         self.size_median = QSpinBox()
         self.size_median.setRange(1, 20)
-        self.size_median.setValue(10)
+        self.size_median.setValue(3)
         layout.addWidget(self.size_median)
 
         # Apply button
@@ -122,13 +130,12 @@ class BGRemovalWidget(QWidget):
             result = bg_removal_v2(img, sigma_bg, sigma_smooth, size_median)
         elif method == "v3":
             result = bg_removal_v3(img, sigma_bg, sigma_smooth, size_median)
+        elif method =='v0':
+            result = bg_removal(img, sigma_bg, size_median)
         else:
             result = bg_removal_v4(img, sigma_bg, sigma_smooth, size_median)
 
-        # if self.processed_layer and self.processed_layer in self.viewer.layers:
-        #     self.processed_layer.data = result
-        # else:
-        self.processed_layer = self.viewer.add_image(result, name=f"{method}, {sigma_bg}, {sigma_smooth}, {size_median}", blending="additive")
+        self.processed_layer = self.viewer.add_image(result, name=f"{method}, {sigma_bg}, {sigma_smooth}, {size_median}", blending="additive", colormap='red')
 
         self.viewer.layers.selection.clear()
         self.viewer.layers.selection.add(img_layer)

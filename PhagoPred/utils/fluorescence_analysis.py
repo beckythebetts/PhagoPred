@@ -17,117 +17,105 @@ from PhagoPred.utils.dataset_creation import to_8bit, compute_percentile_limits,
 
 results = []
 
-class FluorescenceAnalysis():
-    def __init__(self, strain_name: str, directory: Path, file_name: str, save_dir: Path = None) -> None:
-        print(directory)
-        self.strain_name = strain_name
-        self.combined_mask = None
-        self.bg_mask = None
+from typing import Union
+from pathlib import Path
 
-        # self.tiff_file = tiff_file
+import numpy as np
+import pandas as pd
+import tifffile
+import scipy.ndimage
+import matplotlib.pyplot as plt
+
+import napari
+from PhagoPred.utils import tools, fluor_background_removal
+from PhagoPred.utils.dataset_creation import to_8bit, compute_percentile_limits, replace_hot_pixels
+
+plt.rcParams["font.family"] = 'serif'
+
+class FluorescenceAnalysis:
+    def __init__(self, strain_name: str, directory: Path, file_name: str, save_dir: Path = None):
+        self.strain_name = strain_name
+        self.directory = directory
+        self.save_dir = save_dir or directory
 
         self.signal_tiff_file = directory / f'{file_name}_1' / f'{file_name}_1_MMStack_Pos0.ome.tif'
-        # self.background_tiff_file = directory / f'{file_name}_background_1' / f'{file_name}_background_1_MMStack_Pos0.ome.tif'
-
-        self.save_dir = save_dir
-        if self.save_dir is None:
-            self.save_dir = directory
-
-        # self.crop = (slice(1200, 1300), slice(1200, 1300))
 
         self.phase_img, self.fluor_img = self.get_ims()
 
         self.masks = []
+        self.combined_mask = None
+        self.bg_mask = None
 
-        plt.imsave(directory / f'{strain_name}.png', self.fluor_img)
-        # try:
-        #     self.combined_mask = plt.imread(self.save_dir / f'{self.strain_name}_combined_mask.png').astype(bool)[:, :, 0]
-        #     print(self.combined_mask.shape)
-        #     self.bg_mask = ~self.combined_mask
-        #     # split combined_mask into disconenected regions
-        #     # Label each connected region in the combined mask
-        #     labeled_mask, num_labels = scipy.ndimage.label(self.combined_mask)
+        # Save raw fluorescence image for reference
+        plt.imsave(directory / f'{strain_name}.png', self.fluor_img, cmap='gray')
+        try:
+            self.combined_mask = plt.imread(self.save_dir / f'{self.strain_name}_combined_mask.png').astype(bool)[:, :, 0]
+            print(self.combined_mask.shape)
+            self.bg_mask = ~self.combined_mask
+            # split combined_mask into disconenected regions
+            # Label each connected region in the combined mask
+            labeled_mask, num_labels = scipy.ndimage.label(self.combined_mask)
 
-        #     # Create a list of boolean masks, one per connected region
-        #     self.masks = [(labeled_mask == i) for i in range(1, num_labels + 1)]
-        # except: 
-        #     self.get_masks()
-            
-        # self.compute_metrics()
-        # self.plot_images_and_histogram()
+            # Create a list of boolean masks, one per connected region
+            self.masks = [(labeled_mask == i) for i in range(1, num_labels + 1)]
+        except: 
+            self.get_masks()
+        
+        self.compute_metrics()
+        self.plot_images_and_histogram()
 
     def get_ims(self) -> tuple[np.ndarray, np.ndarray]:
         img_stack = tifffile.imread(self.signal_tiff_file)
-        # background_stack = tifffile.imread(self.background_tiff_file)
-
-        # if img_stack.shape[0] != 2:
-            # raise ValueError("Expected 2-channel TIFF (shape[0] should be 2).")
-
         self.phase_img = img_stack[2]
         self.fluor_img = img_stack[1].astype(np.int32)
-            # - background_stack.astype(np.int32)
-        # self.fluor_img = background_stack.astype(np.int16)
-        print(self.fluor_img.shape)
+
+        self.fluor_img = fluor_background_removal.replace_hot_pixels(self.fluor_img)
+        self.fluor_img = fluor_background_removal.bg_removal(self.fluor_img)
         
-        # determine 'hot pixels'
-        # min_val, max_val = compute_percentile_limits(self.fluor_img, 99.9, 100)
-        self.fluor_img = replace_hot_pixels(self.fluor_img, 99.9, 3)
-        # self.fluor_img = scipy.ndimage.median_filter(self.fluor_img, size=10)
-        # self.fluor_img = to_8bit(self.fluor_img, min_val, max_val)
-        # self.fluor_img = scipy.ndimage.gaussian_filter(self.fluor_img, sigma=3)
-        # Gaussian filtering for vignette rmeoval?
-        bg_estimate = scipy.ndimage.gaussian_filter(self.fluor_img, sigma=50)
-        self.fluor_img = self.fluor_img - bg_estimate
-        self.fluor_img = np.clip(self.fluor_img, 0, None)
-        self.fluor_img = scipy.ndimage.median_filter(self.fluor_img, size=10)
-        self.fluor_img = scipy.ndimage.gaussian_filter(self.fluor_img, sigma=3)
+        # crop_size = 100
+
+        # def crop_from_center_corner(img, crop_size):
+        #     h, w = img.shape[:2]
+        #     # Top-left corner at the center of the image
+        #     top = h // 2
+        #     left = w // 2
+        #     bottom = top + crop_size
+        #     right = left + crop_size
+
+        #     # Ensure we don’t go out of bounds
+        #     bottom = min(bottom, h)
+        #     right = min(right, w)
+
+        #     return img[top:bottom, left:right]
+
+        # self.phase_img = crop_from_center_corner(self.phase_img, crop_size)
+        # self.fluor_img = crop_from_center_corner(self.fluor_img, crop_size)
+
+
         return self.phase_img, self.fluor_img
 
     def get_masks(self):
-        fig, ax = plt.subplots()
-        ax.imshow(self.fluor_img, cmap='gray')
-        plt.title("Draw masks around bacteria. Press Enter when done.")
+        """
+        Open Napari for interactive ROI selection. Each ROI is stored as a boolean mask.
+        """
+        viewer = napari.Viewer()
+        viewer.add_image(self.fluor_img, name='Fluorescence', colormap='red')
+        viewer.add_image(self.phase_img, name='Phase', colormap='gray', blending='additive')
 
-        self.masks = []
-        selector = [None]  # Mutable wrapper for PolygonSelector
+        shapes_layer = viewer.add_shapes(name='Masks', shape_type='polygon', edge_color='lime', face_color='lime', opacity=0.3)
 
-        def onselect(verts):
-            path = PlotPath(verts)
-            y, x = np.meshgrid(
-                np.arange(self.phase_img.shape[0]),
-                np.arange(self.phase_img.shape[1]),
-                indexing='ij'
-            )
-            points = np.vstack((x.flatten(), y.flatten())).T
-            mask = path.contains_points(points).reshape(self.phase_img.shape)
-            self.masks.append(mask)
+        print("Draw polygons for bacteria, then close the Napari window when done.")
+        napari.run()  # Blocks until the viewer window is closed
 
-            # # Show visual feedback
-            # ax.imshow(mask, alpha=0.3, cmap='Reds')
+        masks = []
+        for shape in shapes_layer.data:
+            mask = np.zeros_like(self.fluor_img, dtype=bool)
+            rr, cc = polygon_to_mask(shape[:, 1], shape[:, 0], self.fluor_img.shape)
+            mask[rr, cc] = True
+            masks.append(mask)
 
-            # Recreate selector to allow another polygon
-            fig.canvas.mpl_disconnect(selector[0]._key_press_cid)
-            start_selector()
-
-        def start_selector():
-            selector[0] = PolygonSelector(ax, onselect, useblit=True)
-            selector[0]._key_press_cid = fig.canvas.mpl_connect('key_press_event', on_key)
-
-        def on_key(event):
-            if event.key == 'enter':
-                plt.close(fig)
-
-        # Start the first selector
-        start_selector()
-
-        plt.show()
-
-        # Combine masks after all polygons are drawn
-        if self.masks:
-            self.combined_mask = np.any(self.masks, axis=0)
-        else:
-            self.combined_mask = np.zeros_like(self.phase_img, dtype=bool)
-
+        self.masks = masks
+        self.combined_mask = np.any(masks, axis=0) if masks else np.zeros_like(self.fluor_img, dtype=bool)
         self.bg_mask = ~self.combined_mask
 
         plt.imsave(self.save_dir / f'{self.strain_name}_combined_mask.png', self.combined_mask, cmap='gray')
@@ -219,132 +207,53 @@ class FluorescenceAnalysis():
         df = pd.DataFrame(self.results, columns=columns, index=indexes)
         df = df.round(3)
         df.to_csv(self.save_dir / f'{self.strain_name}_results.txt', index=True, sep='\t')
-        print(f"\nSaved {len(self.results)} entries to {self.save_dir / 'results.txt'}")
         return self.results
-    
-    def plot_images_and_histogram(self):
-        plt.rcParams["font.family"] = 'serif'
 
+    def plot_images_and_histogram(self):
         
-        crop = slice(150, 350), slice(300, 500)
-        crop = slice(None), slice(None)
-        phase = self.phase_img[crop]
-        fluor = self.fluor_img[crop]
-        fluor = tools.threshold_image(fluor, lower_percentile=0, upper_percentile=99.9)
         
         if self.combined_mask is None:
             self.combined_mask = plt.imread(self.save_dir / f'{self.strain_name}_combined_mask.png').astype(bool)[:, :, 0]
-            print(self.combined_mask.shape)
             self.bg_mask = ~self.combined_mask
-        fluor_signal = fluor[self.combined_mask[crop]]
-        fluor_bg = fluor[self.bg_mask[crop]]
-
-        # Normalize for overlay
+            
+        fluor_signal = self.fluor_img[self.combined_mask]
+        fluor_bg = self.fluor_img[self.bg_mask]
+        
+        fluor_signal = fluor_signal[fluor_signal > 0]
+        fluor_bg = fluor_bg[fluor_bg > 0]
+        
+        crop = slice(300, 500), slice(300, 500)
+        
+        phase = self.phase_img[crop]
+        fluor = self.fluor_img[crop]
+        
+        # Overlay
         phase_norm = (phase - np.min(phase)) / (np.max(phase) - np.min(phase))
         fluor_norm = (fluor - np.min(fluor)) / (np.max(fluor) - np.min(fluor))
-
-        # Create RGB overlay: Grayscale phase + red fluorescence
         overlay = np.zeros((*phase.shape, 3))
-        overlay[..., 0] = fluor_norm      # Red channel
-        overlay[..., 1] = phase_norm      # Green channel (optional)
-        overlay[..., 2] = phase_norm      # Blue channel (optional)
+        overlay[..., 0] = fluor_norm
+        overlay[..., 1] = phase_norm
+        overlay[..., 2] = phase_norm
 
-        # Plot images side by side + overlay + histogram
-        fig, axs = plt.subplots(1, 4, figsize=(18, 5))
-
-        axs[0].imshow(phase, cmap='gray')
-        axs[0].set_title('Phase Image')
-        axs[0].axis('off')
-
-        axs[1].imshow(fluor, cmap='Reds')
-        axs[1].set_title('Fluorescence (Red)')
-        axs[1].axis('off')
-
-        axs[2].imshow(overlay)
-        axs[2].set_title('Overlay')
-        axs[2].axis('off')
-
-        fluor_signal = fluor_signal[fluor_signal>0]
-        fluor_bg = fluor_bg[fluor_bg>0]
-        axs[3].hist(fluor_signal.ravel(), bins=50, color='red', alpha=0.7, density=True)
-        axs[3].hist(fluor_bg.ravel(), bins=50, color='blue', alpha=0.5, density=True)
-        axs[3].legend(['Signal', 'Background'])
+        fig, axs = plt.subplots(1, 4, figsize=(11, 3), constrained_layout=True)
+        axs[0].imshow(phase, cmap='gray'); axs[0].set_title('Phase Image'); axs[0].axis('off')
+        axs[1].imshow(fluor, cmap='Reds'); axs[1].set_title('Fluorescence'); axs[1].axis('off')
+        axs[2].imshow(overlay); axs[2].set_title('Overlay'); axs[2].axis('off')
+        axs[3].hist(fluor_signal.ravel(), bins=20, color='red', alpha=0.7, density=True)
+        axs[3].hist(fluor_bg.ravel(), bins=20, color='blue', alpha=0.5, density=True)
         axs[3].set_title('Fluorescence Intensity Histogram')
         axs[3].set_xlabel('Pixel Intensity')
         axs[3].set_ylabel('Normalised Frequency')
-        # axs[3].set_yscale('log')
-
-        plt.suptitle(self.strain_name)
-        plt.tight_layout()
+        axs[3].legend(['Signal', 'Background']); axs[3].set_title('Intensity Histogram')
+        fig.suptitle(self.strain_name)
         plt.savefig(self.save_dir / f'{self.strain_name}_images.png')
-    # def save_ims(self):
 
-    #     plt.imsave(self.save_dir / 'f{self.strain_name}_images.png')
-    
 
-def plot_results(directory: Union[Path, str]) -> None:
-    """"""
-    plt.rcParams["font.family"] = 'serif'
-    if isinstance(directory, str):
-        directory = Path(directory)
-
-    nrows = 2
-    ncolumns = 3
-
-    data_means = {
-        'Signal Intensity': lambda x: x.at['Mean', 'Mean'],
-        'Background Intensity': lambda x: x.at['BG', 'Mean'],
-        'Cell Size / pixels': lambda x: x.at['Mean', 'Pixels'],
-        'SNR': lambda x: x.at['Mean', 'SNR'],
-        # 'CNR': lambda x: x.at['Mean', 'CNR'],
-        'SBR': lambda x: x.at['Mean', 'SBR'],
-        'CV': lambda x: x.at['Mean', 'CV'],
-    }
-    data_stds = {
-        'Signal Intensity': lambda x: x.at['Mean', 'Std'],
-        'Background Intensity': lambda x: x.at['BG', 'Std'],
-        'Cell Size / pixels': lambda x: x.at['Std', 'Pixels'],
-        'SNR': lambda x: x.at['Std', 'SNR'],
-        # 'CNR': lambda x: x.at['Std', 'CNR'],
-        'SBR': lambda x: x.at['Std', 'SBR'],
-        'CV': lambda x: x.at['Std', 'CV'],
-    }
-
-    results_means = []
-    results_stds = []
-    strains = []
-
-    # Load all result files
-    # for file in directory.glob("*_results.txt"):
-    for file in (directory / '1s Exposure_results.txt', directory / '2.5s Exposure_results.txt', directory / '5s Exposure_results.txt', directory / '10s Exposure_results.txt'):
-        strain = file.stem.replace("_results", "")
-        strains.append(strain)
-
-        df = pd.read_csv(file, sep='\t', index_col=0)
-        results_means.append({name: func(df) for name, func in data_means.items()})
-        results_stds.append({name: func(df) for name, func in data_stds.items()})
-
-    fig, axs = plt.subplots(nrows, ncolumns, sharex=True, figsize=(10, 5))
-    axs = axs.flatten()
-    colours = [plt.get_cmap('tab10').colors[i] for i in range(len(strains))]
-
-    for ax, metric in zip(axs, data_means.keys()):
-        metric_means = [strain_means[metric] for strain_means in results_means]
-        metric_stds = [strain_stds[metric] for strain_stds in results_stds]
-        ax.bar(range(len(strains)), metric_means, yerr=metric_stds, color=colours, capsize=5)
-        ax.set_ylabel(metric)
-        ax.tick_params(axis='x', bottom=False, labelbottom=False)
-        # ax.set_title(metric)
-        # ax.set_xticklabels(strains, rotation=45, ha='right') 
-    # After defining `strains` and `colours`
-    legend_handles = [Patch(color=color, label=strain) for strain, color in zip(strains, colours)]
-    plt.tight_layout(rect=[0, 0, 0.8, 1])
-    fig.legend(
-        handles=legend_handles,
-        loc='upper right',
-        frameon=False,
-    )
-    plt.savefig(directory / 'results.png')
+# Helper function for converting polygon vertices to mask
+def polygon_to_mask(x, y, shape):
+    from skimage.draw import polygon
+    rr, cc = polygon(y, x, shape)
+    return rr, cc
 
 def plot_results_line(directory: Union[Path, str], x_positions: list[float]) -> None:
     """
@@ -400,7 +309,7 @@ def plot_results_line(directory: Union[Path, str], x_positions: list[float]) -> 
     result_files = []
 
     # Load results
-    for exposure in ('1', '2.5', '5', '10'):
+    for exposure in x_positions:
         file = directory / f'{exposure}s Exposure_results.txt'
         if not file.exists():
             print(f"Warning: File {file.name} not found. Skipping.")
@@ -421,7 +330,7 @@ def plot_results_line(directory: Union[Path, str], x_positions: list[float]) -> 
     axs = axs.flatten()
 
     # Colormap for strains (e.g., exposures)
-    cmap = plt.get_cmap('tab10')
+    cmap = plt.get_cmap('Set1')
     colors = [cmap(i) for i in range(len(strains))]
 
     line_metrics = [metric for metric in means_metrics.keys() if metric != 'Cell Size / pixels']
@@ -435,11 +344,9 @@ def plot_results_line(directory: Union[Path, str], x_positions: list[float]) -> 
         means = np.array(means)
         stds = np.array(stds)
         spreads = np.transpose(np.array(spreads))
-        print(spreads)
         spreads[0] = means - spreads[0]
         spreads[1] = spreads[1] - means
-        print(means)
-        print(spreads)
+        print(means.shape, spreads.shape)
         ax.errorbar(x_positions, means, yerr=spreads, marker='o', color='k', capsize=5, label=metric)
         # ax.fill_between(x_positions, means - stds, means + stds, color='tab:red', alpha=0.5)
         ax.set_title(metric)
@@ -454,46 +361,36 @@ def plot_results_line(directory: Union[Path, str], x_positions: list[float]) -> 
 
     size_metric = 'Cell Size / pixels'
     cell_means = []
-    cell_stds = []
     cell_means = [result[size_metric] for result in results_means]
-    # cell_stds = [result[size_metric] for result in results_stds]
+
     cell_spreads = [result[size_metric] for result in results_spreads]
-    # for file in result_files:
-    #     df = pd.read_csv(file, sep='\t', index_col=0)
-    #     cell_means.append(df.at[cell_size_metric[0], cell_size_metric[1]])
-    #     cell_stds.append(df.at[cell_size_std[0], cell_size_std[1]])
+
 
     cell_spreads = np.transpose(np.array(cell_spreads))
-    print(cell_means)
-    print(cell_spreads)
+
     
     cell_spreads[0] = cell_means - cell_spreads[0]
     cell_spreads[1] = cell_spreads[1] - cell_means
-    print(cell_spreads)
     
     bars = cell_ax.bar(x, cell_means, yerr=cell_spreads, capsize=5, color=colors)
     cell_ax.set_xticks(x)
     cell_ax.set_xticklabels(strains, rotation=45)
     cell_ax.set_title("Cell Size / pixels")
     cell_ax.set_ylabel("Pixels")
-
-    # Legend for cell size bars
-    # legend_handles = [Patch(color=color, label=strain) for strain, color in zip(strains, colors)]
-    # fig.legend(handles=legend_handles, loc='upper right', frameon=False)
-    # cell_ax.legend(handles=legend_handles)
-
-    # plt.tight_layout(rect=[0, 0, 0.8, 1])
+    
     plt.tight_layout()
     plt.savefig(directory / 'results_lineplot.png')
-    # plt.show()
+
 
     
-def combine_images(directory: Union[Path, str]) -> None:
+def combine_images(directory: Union[Path, str], exposures: list) -> None:
     if isinstance(directory, str):
         directory = Path(directory)
     stacked_image = []
     # for file in directory.glob("*_images.png"):
-    for file in (directory / '1s Exposure_images.png', directory / '2.5s Exposure_images.png', directory / '5s Exposure_images.png', directory / '10s Exposure_images.png'):
+    # for file in (directory / '1s Exposure_images.png', directory / '2.5s Exposure_images.png', directory / '5s Exposure_images.png', directory / '10s Exposure_images.png'):
+    for exposure in exposures:
+        file = directory / f'{exposure}s Exposure_images.png'
         stacked_image.append(plt.imread(file))
     stacked_image = np.concatenate(stacked_image, axis=0)
     plt.imsave(directory / 'image_all.png', stacked_image)
@@ -502,24 +399,19 @@ def combine_images(directory: Union[Path, str]) -> None:
 
 def main():
     # FluorescenceAnalysis("1s Exposure", Path("C:\\Users") / 'php23rjb' / 'Downloads' / 'temp' / 'exposure_test', "mcherry_exposure_1s")
-    for exposure in ('1', '2.5', '5', '10', '20'):
-        FluorescenceAnalysis(f"{exposure}s Exposure", Path("C:\\Users") / 'php23rjb' / 'Downloads' / 'temp' / '11_11_pulsed_exposures', f"{exposure.replace('.', '_')}s")
+    # directory = Path("C:\\Users") / 'php23rjb' / 'Downloads' / 'temp' / 'ExposureTest1411' / '1ml'
+    exposures = ['0.5', '1.0', '2.5', '5.0', '10.0']
+    # for exposure in ('0.5', '1.0', '2.5', '5.0', '10.0'):
+    #     FluorescenceAnalysis(f"{exposure}s Exposure", directory, f"{exposure.replace('.', '_')}s")
+    directory =  Path("C:\\Users") / 'php23rjb' / 'Downloads' / 'temp' / '10_11_exposures'
+    exposures = ['1', '2.5', '5', '10']
+    for exposure in exposures:
+        FluorescenceAnalysis(f"{exposure}s Exposure", directory, f"{exposure.replace('.', '_')}s")
 
-    # FluorescenceAnalysis("2.5s E")
-    # FluorescenceAnalysis("SH1000 - mCherry",
-    #                      "C:\\Users\\php23rjb\\Downloads\\14_08_stap_redo\\4631_SH1000_mC_1\\4631_SH1000_mC_1_MMStack_Pos0.ome.tif",
-    #                      )
-    # FluorescenceAnalysis("JE2 - mCherry",
-    #                      "C:\\Users\\php23rjb\\Downloads\\14_08_stap_redo\\4634_JE2_mC_1\\4634_JE2_mC_1_MMStack_Pos0.ome.tif")
-    # FluorescenceAnalysis("SH1000 - smURFP",
-    #                      "C:\\Users\\php23rjb\\Downloads\\14_08_stap_redo\\5522_SH1000_Sm_1\\5522_SH1000_Sm_1_MMStack_Pos0.ome.tif")
-    # FluorescenceAnalysis("JE2 - smURFP",
-    #                      "C:\\Users\\php23rjb\\Downloads\\14_08_stap_redo\\5525_JE2_Sm_1\\5525_JE2_Sm_1_MMStack_Pos0.ome.tif")
-    # combine_images("C:\\Users\\php23rjb\\Downloads\\14_08_stap_redo")
-    # plot_results("C:\\Users\\php23rjb\\Downloads\\temp\\exposure_test")
-    plot_results_line("C:\\Users\\php23rjb\\Downloads\\temp\\exposure_test", [1, 2.5, 5, 10])
+    # exposures = ['1.0', '2.5', '5.0', '10.0']
+    plot_results_line(directory, exposures)
 
-    # combine_images(Path("C:\\Users") / 'php23rjb' / 'Downloads' / 'temp' / 'exposure_test')
+    combine_images(directory, exposures)
 
 if __name__ == "__main__":
     main()
