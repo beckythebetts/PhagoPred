@@ -9,9 +9,20 @@ import torch
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import mask_funcs
+device = device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def pad_to(input: torch.tensor, max_h: int, max_w: int) -> torch.tensor:
+    """Pad the given input to the target shape"""
+    h, w = input.shape
+    
+    pad_h = max_h - h
+    pad_w = max_w - w
+
+    padded = torch.nn.functional.pad(input, (pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2))
+    return padded
 
 class Gabor:
-    def __init__(self, wavelengths=np.arange(2, 15, 1), thetas=np.arange(0, 1, 0.25)):
+    def __init__(self, wavelengths=np.arange(2, 15, 1), thetas=np.arange(0, 1, 0.25), gpu: bool=False):
         self.wavelengths = wavelengths
         self.frequencies = 1/self.wavelengths
         self.thetas = thetas*np.pi
@@ -21,6 +32,33 @@ class Gabor:
             for frequency in self.frequencies
             for theta in self.thetas
         ]
+        self.kernel_pixels = [kernel.size for kernel in self.kernels] #num pixels per kernel for later normalising
+        
+        if gpu:
+            self.kernels = [torch.tensor(kernel, dtype=torch.complex64, device=device) for kernel in self.kernels]
+            
+            max_h, max_w = max(kernel.shape[0] for kernel in self.kernels), max(kernel.shape[1] for kernel in self.kernels)
+            self.padding = max(max_h, max_w)
+            self.kernels = [pad_to(kernel, max_h, max_w) for kernel in self.kernels]
+            
+            self.kernels = torch.stack(self.kernels)[:, None, :, :]
+            
+            self.kernel_pixels = torch.tensor(self.kernel_pixels, device=device)
+        
+    
+    def get_dominant_scales_batch(self, im_batch: torch.tensor, mask_batch: torch.tensor) -> torch.tensor:
+        im_batch = im_batch.to(torch.complex64)
+        im_batch = im_batch[:, None, :, :]
+        filtered_ims = torch.nn.functional.conv2d(im_batch, self.kernels, padding=self.padding)
+        filtered_ims[mask_batch[:, None, :, :]] = 0
+        
+        energies = torch.sum(torch.abs(filtered_ims**2)/self.kernel_pixels[None, :, None, None], dim=(2, 3))
+        energies = energies.view(-1, len(self.frequencies), len(self.thetas))
+        energies = torch.sum(energies, dim=2)
+        
+        relative_energies = energies / torch.sum(energies, dim=1)
+        
+        print(relative_energies)
 
 
     def view_kernels(self):
@@ -174,6 +212,7 @@ def get_random_cell(erosion_val=10):
         return image_array, mask
 
 if __name__ == '__main__':
-    test = Gabor()
-    test.view_relative_energies()
+    test = Gabor(gpu=True)
+    test.get_dominant_scales_batch(torch.randn(10, 50, 50), torch.randn(10, 50, 50))
+    # test.view_relative_energies()
     # test.view_convolved_im()
