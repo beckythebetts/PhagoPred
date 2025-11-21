@@ -4,6 +4,9 @@ import dask.array as da
 import h5py
 import napari
 from qtpy import QtWidgets
+import numpy as np
+from tqdm import tqdm
+import numba
 
 from PhagoPred.display.GUI.one_cell import CellViewer
 
@@ -19,6 +22,7 @@ class AllCellsViewer:
         self.seg_data = None
         
         self._load_data()
+        # self._fill_missing_segs()
         self._show_ims()
         
         self.status_label = QtWidgets.QLabel(" ")
@@ -51,18 +55,23 @@ class AllCellsViewer:
         self.epi_data = da.from_array(hdf5_epi, chunks=hdf5_epi.chunks)
         
         self.seg_data = da.from_array(hdf5_seg, chunks=hdf5_seg.chunks)
+    
+    def _fill_missing_segs(self):
+        first_appearances = self.hdf5_file['Cells']['Phase']['First Frame'][0]
+        last_appearances = self.hdf5_file['Cells']['Phase']['Last Frame'][0]
+        self.seg_data = fill_missing_cells(self.seg_data, first_appearances, last_appearances)
+            
         
     def _show_ims(self):
         if "Phase" not in self.viewer.layers:
-            self.viewer.add_image(self.phase_data, name='Phase', colormap='gray')
-            self.viewer.add_image(self.epi_data, name='Epi', colormap='red', opacity=0.5)
-            self.labels_layer = self.viewer.add_labels(self.seg_data + 1, name="Segmentations")
+            self.viewer.add_image(self.phase_data, name='Phase', colormap='gray', opacity=1.0)
+            self.viewer.add_image(self.epi_data, name='Epi', colormap='red', blending='additive', opacity=1.0)
+            self.labels_layer = self.viewer.add_labels(self.seg_data + 1, name="Segmentations", opacity=0.3)
         else:
             for layer_name in ("Phase", "Epi", "Segmentations"):
                 if layer_name in self.viewer.layers:
                     self.viewer.layers[layer_name].visible = True
-        
-        # self.viewer.layers.selection.center()
+    
     
     def _hide_overview_layers(self):
         """Hide the overview (full field) layers."""
@@ -114,3 +123,42 @@ class AllCellsViewer:
         # Create a CellViewer instance
         self.cell_viewer = CellViewer(self.viewer, self.hdf5_file, cell_idx)
         self.cell_viewer.cell_death_signal.connect(lambda x: self.cell_death_label.setText(f'Death at frame: {x}'))
+        
+def fill_missing_cells(seg_data, first_appearance, last_appearance):
+    """
+    seg_data: Dask array of shape (frames, height, width)
+    num_cells: total number of cells
+    first_appearance / last_appearance: lists of frames for each cell
+    """
+    last_known_masks = {}
+
+    filled_frames = []
+    
+    num_cells = len(first_appearance)
+
+    for i in tqdm(range(seg_data.shape[0])):
+        # Compute the current frame to NumPy
+        mask = seg_data[i].compute()  # pull frame into memory
+        filled_mask = mask.copy()
+
+        present_ids = np.unique(mask)
+        present_ids = present_ids[present_ids > 0]  # ignore background
+
+        for cell_id in range(num_cells):
+            if cell_id not in present_ids:
+                if first_appearance[cell_id] <= i <= last_appearance[cell_id]:
+                    if cell_id in last_known_masks:
+                        reused_mask = last_known_masks[cell_id]
+                        filled_mask = np.where(reused_mask, cell_id, filled_mask)
+            else:
+                # store last known mask
+                last_known_masks[cell_id] = (mask == cell_id)
+
+        filled_frames.append(filled_mask)
+
+    # Stack filled frames back into a Dask array
+    # filled_seg_data = np.stack()
+    filled_seg_data = da.stack([da.from_array(frame, chunks=seg_data.chunksize[1:]) 
+                                for frame in filled_frames], axis=0)
+    return filled_seg_data
+

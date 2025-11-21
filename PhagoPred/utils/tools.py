@@ -15,13 +15,71 @@ import json
 import matplotlib.pyplot as plt
 import nd2
 import tifffile
-
+import h5py
+from tqdm import tqdm
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import mask_funcs
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def fill_missing_segs(seg_data: h5py.Dataset, first_appearance: np.ndarray, last_appearance: np.ndarray):
+    """
+    seg_data: OPen hdf5 array of shape (frames, height, width)
+    num_cells: total number of cells
+    first_appearance / last_appearance: lists of frames for each cell
+    """
+    last_known_masks = {}
+    
+    num_cells = len(first_appearance)
+
+    for i in tqdm(range(seg_data.shape[0]), desc='Filling missing segmentations'):
+        mask = seg_data[i, :, :]  
+        filled_mask = mask.copy()
+
+        present_ids = np.unique(mask)
+        present_ids = present_ids[present_ids > 0]  # ignore background
+
+        for cell_id in range(num_cells):
+            if cell_id not in present_ids:
+                if first_appearance[cell_id] <= i <= last_appearance[cell_id]:
+                    if cell_id in last_known_masks:
+                        reused_mask = last_known_masks[cell_id]
+                        filled_mask = np.where(reused_mask, cell_id, filled_mask)
+            else:
+                last_known_masks[cell_id] = (mask == cell_id)
+
+        seg_data[i, :, :] = filled_mask
+        
+def fill_missing_values(feature_ds: h5py.Dataset, first_appearances:np.ndarray, last_appearances: np.ndarray) -> None:
+    """Interpolate the missing values for cell features"""
+    for cell_idx in range(feature_ds.shape[1]):
+        cell_array = feature_ds[:, cell_idx][:]
+        first_appearance, last_appearance = first_appearances[cell_idx], last_appearances[cell_idx]
+        valid_mask = ~np.isnan(cell_array)
+        missing_idxs = np.nonzero(~valid_mask)[0]
+        valid_idxs = np.nonzero(valid_mask)[0]
+        missing_idxs = missing_idxs[(missing_idxs > first_appearance) & (missing_idxs < last_appearance)]
+        
+        try:
+            cell_array[missing_idxs] = np.interp(missing_idxs, valid_idxs, cell_array[valid_idxs])
+        except ValueError:
+            return
+    
+        feature_ds[:, cell_idx] = cell_array
+
+def fill_missing_cells(dataset: Path) -> None:
+    with h5py.File(dataset, 'r+') as f:
+        seg_data = f['Segmentations']['Phase']
+        first_appearances = f['Cells']['Phase']['First Frame'][0]
+        last_appearances = f['Cells']['Phase']['Last Frame'][0]
+        
+        # fill_missing_segs(seg_data, first_appearances, last_appearances)
+        
+        for feature_name in tqdm(list(f['Cells']['Phase'].keys()), desc="Interpolating feature values"):
+            if f['Cells']['Phase'][feature_name].shape[0] > 1:
+                fill_missing_values(f['Cells']['Phase'][feature_name], first_appearances, last_appearances)
+        
 def print_cell_deaths(hdf5_file: Path = SETTINGS.DATASET) -> None:
     with h5py.File(hdf5_file, 'r') as f:
         deaths= f['Cells']['Phase']['CellDeath'][0]

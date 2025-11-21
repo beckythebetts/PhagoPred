@@ -153,27 +153,25 @@ class CellType:
             dataset.attrs['dimensions'] = self.DIMS
             self.primary_derived_feature_datasets.append(dataset)
 
-
     def get_features_xr(self, h5py_file: h5py.File, features: list = None) -> xr.Dataset:
         """
         h5py file is open file, returns x_array (chunked like h5py). If features not specified, reads all features iwth both cell index and time dimensions.
         """
         data_dict = {}
+        shape = h5py_file[self.features_group]['Area'].shape
         for feature_name, feature_data in h5py_file[self.features_group].items():
             if features:
                 if feature_name not in features:
                     continue
-            else:
-                if feature_data.shape[0] == 1:
-                    continue
-            # read as dask array, preserving chunks
             data = da.from_array(feature_data, chunks=feature_data.chunks)
+            
+            if feature_data.shape[0] == 1:
+                data = da.broadcast_to(data, shape)
+
             data_dict[feature_name] = (self.DIMS, data)
 
         ds = xr.Dataset(data_dict)
 
-        # ds = ds.assign_coords(Frame=np.arange(ds.sizes['Frame']))
-        
         return ds
 
     
@@ -185,7 +183,7 @@ class FeaturesExtraction:
             self, 
             h5py_file=SETTINGS.DATASET, 
             frame_batchsize=10,
-            cell_batch_size=200
+            cell_batch_size=100,
             ) -> None:
         
         self.num_frames = None
@@ -223,7 +221,7 @@ class FeaturesExtraction:
                 cell_type.set_up_features_group(f)
                 
 
-    def extract_features(self) -> None:
+    def extract_features(self, crop: bool = True) -> None:
         with h5py.File(self.h5py_file, 'r+') as f:
             for cell_type in self.cell_types:
                 self.extract_primary_features(f, cell_type)
@@ -235,51 +233,58 @@ class FeaturesExtraction:
         if len(cell_type.primary_features) > 0:
             print(f'\n=== Calculating Primary Features ({cell_type.name}) ===\n')
 
-            if 'X' in f[cell_type.features_group].keys():
-                centre_coords = cell_type.get_features_xr(f, ['X', 'Y'])
-                x_centres = torch.from_numpy(centre_coords['X'].values)
-                y_centres = torch.from_numpy(centre_coords['Y'].values)
-                # print(x_centres.shape)
-                
-                x_centres, y_centres = x_centres.to(self.DEVICE), y_centres.to(self.DEVICE)
-                        
-            for frame_idx in tqdm(range(self.num_frames)):
-
-                mask = cell_type.get_masks(f, frame_idx)
-                
-                image = torch.tensor(cell_type.get_images(f, frame_idx)).to(self.DEVICE)
-                epi_image = torch.tensor(CellType('Epi').get_images(f, frame_idx)).to(self.DEVICE)
+            crop_features = [feature for feature in cell_type.primary_features if feature.crop]
+            no_crop_features = [feature for feature in cell_type.primary_features if not feature.crop]
             
-                num_cells = np.max(mask) + 1
-
-                for first_cell in range(0, num_cells, self.cell_batch_size):
-
-                    last_cell = min(first_cell + self.cell_batch_size, num_cells)
-
-                    cell_idxs = torch.arange(first_cell, last_cell).to(self.DEVICE)
-
-                    expanded_mask = torch.tensor(mask).to(self.DEVICE).unsqueeze(0) == cell_idxs.unsqueeze(1).unsqueeze(2)
-
-                    if 'X' in f[cell_type.features_group].keys():
-                        current_x_centres, current_y_centres = x_centres[frame_idx, first_cell:last_cell], y_centres[frame_idx, first_cell:last_cell]
-                        # print(current_x_centres)
-                        current_expanded_mask, current_epi_images, current_images = features.crop_masks_images(expanded_mask, epi_image, image, current_x_centres, current_y_centres)
-                    else:
-                        current_expanded_mask, current_epi_images, current_images = expanded_mask, epi_image, image
+            for crop, features_list in zip([False, True], [no_crop_features, crop_features]):
+                if len(features_list) > 0:
+                    if crop:
+                        centre_coords = cell_type.get_features_xr(f, ['X', 'Y'])
+                        x_centres = torch.from_numpy(centre_coords['X'].values)
+                        y_centres = torch.from_numpy(centre_coords['Y'].values)
+                        # print(x_centres.shape)
                         
-                    for feature in cell_type.primary_features:
-                        result = feature.compute(mask=current_expanded_mask, image=current_images, epi_image=current_epi_images)
-                        if result.ndim == 1:
-                            result = result[:, np.newaxis]
-                        for i, feature_name in enumerate(feature.get_names()):
+                        x_centres, y_centres = x_centres.to(self.DEVICE), y_centres.to(self.DEVICE)
+                                
+                    for frame_idx in tqdm(range(self.num_frames)):
 
-                            #resize dataset if too many cells
-                            if num_cells>f[cell_type.features_group][feature_name].shape[cell_type.CELL_DIM]:
-                                f[cell_type.features_group][feature_name].resize(num_cells, cell_type.CELL_DIM)
+                        mask = cell_type.get_masks(f, frame_idx)
+                        num_cells = np.max(mask) + 1
+                        mask = torch.tensor(mask).to(self.DEVICE)
+                        binary_mask = mask >= 0
+                        
+                        image = torch.tensor(cell_type.get_images(f, frame_idx)).to(self.DEVICE)
+                        epi_image = torch.tensor(CellType('Epi').get_images(f, frame_idx)).to(self.DEVICE)
+                    
+                        
 
-                            f[cell_type.features_group][feature_name][frame_idx, first_cell:last_cell] = result[:, i]
-        
-                    torch.cuda.empty_cache()
+                        for first_cell in range(0, num_cells, self.cell_batch_size):
+
+                            last_cell = min(first_cell + self.cell_batch_size, num_cells)
+
+                            cell_idxs = torch.arange(first_cell, last_cell).to(self.DEVICE)
+
+                            expanded_mask = mask.unsqueeze(0) == cell_idxs.unsqueeze(1).unsqueeze(2)
+
+                            if crop:
+                                current_x_centres, current_y_centres = x_centres[frame_idx, first_cell:last_cell], y_centres[frame_idx, first_cell:last_cell]
+                                current_expanded_mask, current_epi_images, current_images, current_binary_masks = features.crop_masks_images(expanded_mask, epi_image, image, binary_mask, current_x_centres, current_y_centres)
+                            else:
+                                current_expanded_mask, current_epi_images, current_images, current_binary_masks = expanded_mask, epi_image, image, binary_mask
+                                
+                            for feature in features_list:
+                                result = feature.compute(mask=current_expanded_mask, image=current_images, epi_image=current_epi_images, binary_mask=current_binary_masks)
+                                if result.ndim == 1:
+                                    result = result[:, np.newaxis]
+                                for i, feature_name in enumerate(feature.get_names()):
+
+                                    #resize dataset if too many cells
+                                    if num_cells>f[cell_type.features_group][feature_name].shape[cell_type.CELL_DIM]:
+                                        f[cell_type.features_group][feature_name].resize(num_cells, cell_type.CELL_DIM)
+
+                                    f[cell_type.features_group][feature_name][frame_idx, first_cell:last_cell] = result[:, i]
+                
+                            torch.cuda.empty_cache()
     
 
     def extract_derived_features(self, f: h5py.File, cell_type: CellType) -> None:
@@ -304,30 +309,13 @@ class FeaturesExtraction:
                         f[cell_type.features_group][feature_name].resize(1, cell_type.FRAME_DIM)
                     f[cell_type.features_group][feature_name][:] = result[:, :, i]
 
-# def cell_death_hyperparamter_search(dataset: Path = SETTINGS.DATASET, true_deaths_txt: Path = None) -> None:
-#     # with open(true_deaths_txt, 'r') as f:
-#     true_deaths = np.genfromtxt(true_deaths_txt, delimiter=', ', usecols=1)
-    
-#     thresholds = np.arange(0.2, 0.7, 0.1)
-#     min_frames_deads = np.arange(5, 50, 5)
-#     smoothed_frames = np.arange(3, 20, 2)
-#     for threshold in thresholds:
-#         for min_frames_dead in min_frames_deads:
-#             for smoothed_frame in smoothed_frames:
-#                 extract_features(dataset, phase_features=features.CellDeath(threshold, min_frames_dead, smoothed_frame))
-#                 with h5py.File(dataset, 'r') as f:
-#                     estimated_deaths = f['Cells']['Phase']['CellDeath'][0, :len(true_deaths)]
-                
-#     accuracy = 
-#     print(true_deaths, estimated_deaths)
-    
     
 def extract_features(dataset=SETTINGS.DATASET, 
                      phase_features = [
                         features.Fluorescence(), 
                         # features.MorphologyModes(), 
                         features.Speed(),
-                        features.DensityPhase(),
+                        # features.DensityPhase(),
                         features.Displacement(),
                         features.Perimeter(),
                         features.Circularity(),
@@ -345,10 +333,6 @@ def extract_features(dataset=SETTINGS.DATASET,
     feature_extractor.set_up()
     feature_extractor.extract_features()
 
-# def extract_and_clean(dataset=SETTINGS.DATASET):
-#     extract_features(dataset, features.Perimeter())
-#     clean_features.remove_bad_frames(dataset, use_features=['Area', 'Perimeter'])
-#     extract_features(dataset)
     
 def main():
     # cell_death_hyperparamter_search(true_deaths_txt='/home/ubuntu/PhagoPred/temp/03_10_deaths.txt')

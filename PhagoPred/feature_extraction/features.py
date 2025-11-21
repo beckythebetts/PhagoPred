@@ -23,6 +23,7 @@ class BaseFeature:
 
     primary_feature = False
     derived_feature = False
+    crop = False
 
     def __init__(self):
         self.name = [self.__class__.__name__]
@@ -96,15 +97,6 @@ class CellDeath(BaseFeature):
         
         death_frames = np.argmax(permanently_dead_frames, axis=0).astype(float) # take index of first permanently dead frame 
         death_frames[np.all(permanently_dead_frames==0, axis=0)] = np.nan
-        
-        # # Use unsmoothed cell state to classify a cell as no_death or death
-        # dead_frames = cell_state < self.threshold
-        # reversed_dead_frames = dead_frames[::-1]
-    
-        # reversed_dead_frames_cum_min = np.minimum.accumulate(reversed_dead_frames, axis=0)
-        # permanently_dead_frames = reversed_dead_frames_cum_min[::-1]
-        
-        # death_frames[np.all(permanently_dead_frames==0, axis=0)] = np.nan
 
         return death_frames[np.newaxis, :, np.newaxis]
 
@@ -139,7 +131,7 @@ class Coords(BaseFeature):
     def get_names(self):
         return ['X', 'Y', 'Area']
     
-    def compute(self, mask: torch.tensor, image: torch.tensor, epi_image: torch.tensor) -> np.array:
+    def compute(self, mask: torch.tensor, image: torch.tensor, epi_image: torch.tensor, binary_mask: torch.tensor) -> np.array:
         if self.x_grid is None or self.y_grid is None:
             self.x_grid, self.y_grid = torch.meshgrid(
                 torch.arange(mask.shape[1]).to(device),
@@ -161,57 +153,58 @@ class Coords(BaseFeature):
         
         return results.cpu().numpy()
     
-class MorphologyModes(BaseFeature):
+# class MorphologyModes(BaseFeature):
 
-    primary_feature = True
+#     primary_feature = True
 
-    def __init__(self):
-        super().__init__()
-        self.morphology_model = MorphologyFit(SETTINGS.DATASET)
+#     def __init__(self):
+#         super().__init__()
+#         self.morphology_model = MorphologyFit(SETTINGS.DATASET)
 
-        try:
-            self.morphology_model.load_model()
+#         try:
+#             self.morphology_model.load_model()
 
-        except:
-            print('Fitting Morpgology Model')
-            self.morphology_model.fit()
+#         except:
+#             print('Fitting Morpgology Model')
+#             self.morphology_model.fit()
 
 
-    def get_names(self):
-        return [f'Mode {i}' for i in range(self.morphology_model.num_kmeans_clusters)]
+#     def get_names(self):
+#         return [f'Mode {i}' for i in range(self.morphology_model.num_kmeans_clusters)]
     
-    def compute(self, mask: torch.tensor, image: torch.tensor, epi_image: torch.tensor) -> np.array:
-        """
-        Results are of dims [num_cells, num_clusters]
-        """
-        expanded_frame_mask = mask.cpu().numpy()
-        results = self.morphology_model.apply_expanded_mask(expanded_frame_mask)
-        # print(results, results.shape)
-        return results
+#     def compute(self, mask: torch.tensor, image: torch.tensor, epi_image: torch.tensor) -> np.array:
+#         """
+#         Results are of dims [num_cells, num_clusters]
+#         """
+#         expanded_frame_mask = mask.cpu().numpy()
+#         results = self.morphology_model.apply_expanded_mask(expanded_frame_mask)
+#         # print(results, results.shape)
+#         return results
     
-class UmapEmbedding(BaseFeature):
+# class UmapEmbedding(BaseFeature):
     
-    primary_feature = True
+#     primary_feature = True
     
-    def __init__(self):
-        super().__init__()
-        self.umap_embedding = load_UMAP(SETTINGS.UMAP_MODEL)
-        # with open(SETTINGS.UMAP_MODEL, 'rb') as f:
-        #     self.umap_embedding = pickle.load(f)
+#     def __init__(self):
+#         super().__init__()
+#         self.umap_embedding = load_UMAP(SETTINGS.UMAP_MODEL)
+#         # with open(SETTINGS.UMAP_MODEL, 'rb') as f:
+#         #     self.umap_embedding = pickle.load(f)
     
-    def get_names(self):
-        return ['UMAP 1', 'UMAP 2']
+#     def get_names(self):
+#         return ['UMAP 1', 'UMAP 2']
     
-    def compute(self, mask: torch.tensor, image: torch.tensor, epi_image: torch.tensor) -> np.ndarray:
-        """
-        return [num_cells, num_features]"""
-        expanded_frame_mask = mask.cpu().numpy()
-        embeddings = self.umap_embedding.apply(expanded_frame_mask)
-        return embeddings
+#     def compute(self, mask: torch.tensor, image: torch.tensor, epi_image: torch.tensor) -> np.ndarray:
+#         """
+#         return [num_cells, num_features]"""
+#         expanded_frame_mask = mask.cpu().numpy()
+#         embeddings = self.umap_embedding.apply(expanded_frame_mask)
+#         return embeddings
         
 class Skeleton(BaseFeature):
     
     primary_feature = True
+    crop = True
     
     def get_names(self):
         return [
@@ -223,7 +216,7 @@ class Skeleton(BaseFeature):
             'Skeleton Branch Length Max'
         ]
     
-    def compute(self, mask: torch.tensor, image: torch.tensor, epi_image: torch.tensor) -> np.ndarray:
+    def compute(self, mask: torch.tensor, image: torch.tensor, epi_image: torch.tensor, binary_mask: torch.tensor) -> np.ndarray:
         """
         return [num_cells, num_features]
         """
@@ -333,84 +326,183 @@ class Displacement(BaseFeature):
         return displacements.values
 
     
+# class DensityPhase(BaseFeature):
+
+#     derived_feature = True
+
+#     radii = [100, 250, 500]
+
+#     frame_batch_size = 10
+
+#     def get_names(self):
+#         return [f'{state} Phagocytes within {radius} pixels' for radius in self.radii for state in ['Alive', 'Dead']]
+    
+#     def circle_fraction_in_frame(self, x, y, r, H, W):
+#         """Calculate the fraction of a circle that is within the frame."""
+#         circle = Point(x, y).buffer(r)
+#         frame = box(0, 0, W, H)
+#         intersection = circle.intersection(frame)
+#         return intersection.area / (np.pi * r * r)
+    
+#     def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
+#         """Compute number of other phase cells within self.radii pixels (centroid based).
+#         Manual batching becuase of probelms with O(n^2) batching with Dask arrays
+#         """
+#         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#         positions = xr.concat([phase_xr[feat] for feat in ['X', 'Y']], dim='Feature')
+#         positions = positions.transpose('Frame', 'Cell Index', 'Feature').chunk({})
+
+#         results = np.full((positions.sizes['Frame'], positions.sizes['Cell Index'], len(self.radii)), np.nan)
+
+#         H, W = SETTINGS.IMAGE_SIZE
+
+#         for first_frame in tqdm(range(0, positions.sizes['Frame'], self.frame_batch_size)):
+#             last_frame = min(first_frame + self.frame_batch_size, positions.sizes['Frame'])
+            
+#             batch_positions_np = positions.isel(Frame=slice(first_frame, last_frame)).values
+#             batch_positions = torch.tensor(batch_positions_np, device=device)
+
+
+#             distances = batch_positions.unsqueeze(2) - batch_positions.unsqueeze(1)
+#             distances = torch.norm(distances, dim=3)
+#             distances[distances == 0] = float('nan')
+#             for radius_idx, radius in enumerate(self.radii):
+#                 counts = (distances < radius).sum(dim=2).cpu().numpy()
+
+#                 xs = batch_positions_np[..., 0]
+#                 ys = batch_positions_np[..., 1]
+#                 fraction_in = np.ones_like(xs)
+
+#                 # Only correct for cells near the edge
+#                 edge_mask = (
+#                     (xs - radius < 0) | (xs + radius > W) |
+#                     (ys - radius < 0) | (ys + radius > H)
+#                 ) & ~np.isnan(xs) & ~np.isnan(ys)
+
+#                 if np.any(edge_mask):
+#                     # Vectorized geometric correction using shapely
+#                     edge_indices = np.argwhere(edge_mask)
+#                     for idx in edge_indices:
+#                         i, j = idx
+#                         x, y = xs[i, j], ys[i, j]
+#                         fraction_in[i, j] = self.circle_fraction_in_frame(x, y, radius, H, W)
+
+#                 # Avoid division by zero or overcorrection
+#                 fraction_in = np.clip(fraction_in, 1e-3, 1.0)
+#                 corrected = counts / fraction_in
+#                 results[first_frame:last_frame, :, radius_idx] = corrected
+
+#         results = np.where(np.isnan(phase_xr['X'].values)[:, :, np.newaxis], np.nan, results)
+
+#         return results
+
 class DensityPhase(BaseFeature):
 
     derived_feature = True
-
+    crop = True
+    
     radii = [100, 250, 500]
-
     frame_batch_size = 10
 
     def get_names(self):
-        return [f'Phagocytes within {radius} pixels' for radius in self.radii]
-    
+        return [
+            f'{state} Phagocytes within {radius} pixels'
+            for radius in self.radii
+            for state in ['Alive', 'Dead']
+        ]
+
     def circle_fraction_in_frame(self, x, y, r, H, W):
-        """Calculate the fraction of a circle that is within the frame."""
         circle = Point(x, y).buffer(r)
         frame = box(0, 0, W, H)
         intersection = circle.intersection(frame)
         return intersection.area / (np.pi * r * r)
-    
-    def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray) -> np.array:
-        """Compute number of other phase cells within self.radii pixels (centroid based).
-        Manual batching becuase of probelms with O(n^2) batching with Dask arrays
-        """
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        positions = xr.concat([phase_xr[feat] for feat in ['X', 'Y']], dim='Feature')
-        positions = positions.transpose('Frame', 'Cell Index', 'Feature').chunk({})
-        # results = xr.DataArray(np.full((positions.sizes['Frame'], positions.sizes['Cell Index'], len(self.radii)), np.nan),
-        #                 dims=positions.dims)
-        # results.coords['Feature'] = self.radii
 
-        results = np.full((positions.sizes['Frame'], positions.sizes['Cell Index'], len(self.radii)), np.nan)
+    def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray):
+        """
+        phase_xr contains:
+          - X, Y   (Frame × Cell)
+          - CellDeath[0] (Cell,) = death frame or NaN
+        """
+
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        positions = xr.concat(
+            [phase_xr[feat] for feat in ['X', 'Y']],
+            dim='Feature'
+        ).transpose('Frame', 'Cell Index', 'Feature').chunk({})
+
+        n_frames = positions.sizes['Frame']
+        n_cells = positions.sizes['Cell Index']
+        n_radii = len(self.radii)
+
+        death_frame = phase_xr['CellDeath'][0].values
+
+        frame_idx = np.arange(n_frames)[:, None]
+        death_expanded = np.broadcast_to(death_frame, (n_frames, n_cells))
+
+        is_dead = (~np.isnan(death_expanded)) & (death_expanded <= frame_idx)
+        is_alive = ~is_dead   # includes NaN → alive
+
+        results = np.full((n_frames, n_cells, 2 * n_radii), np.nan)
 
         H, W = SETTINGS.IMAGE_SIZE
 
-        for first_frame in tqdm(range(0, positions.sizes['Frame'], self.frame_batch_size)):
-            last_frame = min(first_frame + self.frame_batch_size, positions.sizes['Frame'])
-            
+        for first_frame in tqdm(range(0, n_frames, self.frame_batch_size)):
+            last_frame = min(first_frame + self.frame_batch_size, n_frames)
+
             batch_positions_np = positions.isel(Frame=slice(first_frame, last_frame)).values
             batch_positions = torch.tensor(batch_positions_np, device=device)
-
 
             distances = batch_positions.unsqueeze(2) - batch_positions.unsqueeze(1)
             distances = torch.norm(distances, dim=3)
             distances[distances == 0] = float('nan')
-            for radius_idx, radius in enumerate(self.radii):
-                counts = (distances < radius).sum(dim=2).cpu().numpy()
+
+            alive_mask = torch.tensor(is_alive[first_frame:last_frame], device=device)
+            dead_mask = torch.tensor(is_dead[first_frame:last_frame], device=device)
+
+            for r_idx, radius in enumerate(self.radii):
+
+                neighbors = (distances < radius)  # boolean adjacency
+
+                alive_counts = (neighbors & alive_mask.unsqueeze(1)).sum(dim=2).cpu().numpy()
+
+                dead_counts = (neighbors & dead_mask.unsqueeze(1)).sum(dim=2).cpu().numpy()
 
                 xs = batch_positions_np[..., 0]
                 ys = batch_positions_np[..., 1]
+
                 fraction_in = np.ones_like(xs)
 
-                # Only correct for cells near the edge
                 edge_mask = (
                     (xs - radius < 0) | (xs + radius > W) |
                     (ys - radius < 0) | (ys + radius > H)
                 ) & ~np.isnan(xs) & ~np.isnan(ys)
 
                 if np.any(edge_mask):
-                    # Vectorized geometric correction using shapely
-                    edge_indices = np.argwhere(edge_mask)
-                    for idx in edge_indices:
-                        i, j = idx
-                        x, y = xs[i, j], ys[i, j]
-                        fraction_in[i, j] = self.circle_fraction_in_frame(x, y, radius, H, W)
+                    for i, j in np.argwhere(edge_mask):
+                        fraction_in[i, j] = self.circle_fraction_in_frame(
+                            xs[i, j], ys[i, j], radius, H, W
+                        )
 
-                # Avoid division by zero or overcorrection
                 fraction_in = np.clip(fraction_in, 1e-3, 1.0)
-                corrected = counts / fraction_in
-                results[first_frame:last_frame, :, radius_idx] = corrected
 
-        results = np.where(np.isnan(phase_xr['X'].values)[:, :, np.newaxis], np.nan, results)
+                alive_corrected = alive_counts / fraction_in
+                dead_corrected = dead_counts / fraction_in
+
+                results[first_frame:last_frame, :, 2 * r_idx] = alive_corrected
+                results[first_frame:last_frame, :, 2 * r_idx + 1] = dead_corrected
+
+        valid_mask = ~np.isnan(phase_xr['X'].values)
+        results = np.where(valid_mask[:, :, None], results, np.nan)
 
         return results
    
 class Perimeter(BaseFeature):
 
     primary_feature = True
+    crop = True
 
-    def compute(self, mask: torch.tensor, image: torch.tensor, epi_image: torch.tensor) -> np.array:
+    def compute(self, mask: torch.tensor, image: torch.tensor, epi_image: torch.tensor, binary_mask: torch.tensor) -> np.array:
 
         if mask.shape[1] < 3 or mask.shape[2] < 3:
             return np.full((mask.shape[0],), np.nan)
@@ -446,37 +538,98 @@ class Circularity(BaseFeature):
         circularity = areas * 4 * np.pi / (perimeters**2)
         return circularity.values
     
-class GaborScale(BaseFeature):
+# class GaborScale(BaseFeature):
 
+#     primary_feature = True
+
+#     def __init__(self):
+#         super().__init__()
+#         self.gabor = Gabor(gpu=True)
+
+#     def compute(self, mask: torch.tensor, image: torch.tensor, epi_image: torch.tensor) -> np.array:
+#         dominant_scales = self.gabor.get_dominant_scales_batch(image, mask)
+#         return np.array(dominant_scales)
+
+class ExternalFluorescence(BaseFeature):
+    """Quantify intensity of fluorescence at different distances away from cells."""
     primary_feature = True
+    distances = [10, 25, 50]
+    crop= True
 
     def __init__(self):
         super().__init__()
-        self.gabor = Gabor()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.kernels = {d: self._circular_kernel(d) for d in self.distances}
+    
+    def _circular_kernel(self, radius: int) -> torch.Tensor:
+        """Create a circular kernel for a given radius."""
+        size = 2 * radius + 1
+        y, x = torch.meshgrid(torch.arange(size), torch.arange(size), indexing='ij')
+        center = radius
+        mask = ((x - center) ** 2 + (y - center) ** 2) <= radius ** 2
+        kernel = mask.float().to(self.device)  # float32 for conv2d
+        return kernel.unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
 
-    def compute(self, mask: torch.tensor, image: torch.tensor, epi_image: torch.tensor) -> np.array:
-        dominant_scales = self.gabor.get_dominant_scales(image, mask)
-        return np.array(dominant_scales)
+    def get_names(self):
+        return [f'External Fluorescence Intensity within {dist} pixels' for dist in self.distances]
 
+    def compute(self, mask: torch.Tensor = None,
+                image: torch.Tensor = None,
+                epi_image: torch.Tensor = None,
+                binary_mask: torch.Tensor = None) -> np.ndarray:
 
+        num_cells, H, W = mask.shape
+        results = torch.full((num_cells, len(self.distances)),
+                             float("nan"), device=self.device)
+
+        valid = torch.sum(mask, dim=(1, 2)) > 0
+        if not valid.any():
+            return results.cpu().numpy()
+
+        temp_mask = mask.unsqueeze(1).float()  # (C,1,H,W)
+        # epi = (epi_image * binary_mask).float()  # (C,H,W)
+
+        for i, distance in enumerate(self.distances):
+            kernel = self.kernels[distance]
+            
+            padding = distance
+            
+            dilated_mask = torch.nn.functional.conv2d(temp_mask, kernel, padding=padding).squeeze(1)
+            
+            dilated_mask = dilated_mask > 0
+            dilated_mask = dilated_mask * ~binary_mask
+            fluor_intensity = torch.sum(epi_image * dilated_mask, dim=(1, 2))
+            
+            mask_sum = torch.sum(dilated_mask, dim=(1, 2))
+            # normalise_factor = torch.where(mask_sum == 0, torch.tensor(0, device=mask_sum.device), 1/mask_sum)
+            
+            normalised_fluor_intensity = torch.where(mask_sum > 0, fluor_intensity / mask_sum, torch.tensor(0, device=mask_sum.device))
+            # print(normalised_fluor_intensity.shape)
+            results[valid, i] = normalised_fluor_intensity[valid]
+
+        return results.cpu().numpy()
+            
+            
 class Fluorescence(BaseFeature):
+    """Quantify and describe distribution of fluorescence wihtin cells"""
     primary_feature = True
+    crop = True
     
     def __init__(self):
         super().__init__()
-        self.crop_size = 300
-        self.pad = self.crop_size // 2
+        # self.crop_size = 300
+        # self.pad = self.crop_size // 2
     
     def get_names(self):
         return [
             'Total Fluorescence', 
-            'Fluorescence Distance Mean', 
+            'Fluorescence Distance Mean',
             'Fluorescence Distance Variance',
             'Inner Total Fluorescnece',
             'Outer Total FLuorescence',
             ]
     
-    def compute(self, mask: torch.tensor = None, image: torch.tensor = None, epi_image: torch.tensor = None) -> np.ndarray:
+    def compute(self, mask: torch.tensor = None, image: torch.tensor = None, epi_image: torch.tensor = None, binary_mask: torch.tensor = None) -> np.ndarray:
         num_cells, H, W = mask.shape
         
         results = np.full((num_cells, 5), np.nan)
@@ -494,10 +647,7 @@ class Fluorescence(BaseFeature):
             # mask = mask.squeeze(0)
             dist_transform = dist_transform.squeeze(0) # (num_cells, H, W)
             
-            
-            
             max_dist, _ = torch.max(dist_transform.view(num_valid, H*W), dim=1) # (num_cells)
-            
             
             max_dist = max_dist.unsqueeze(1).unsqueeze(1).expand(-1, H, W)
             dist_transform = dist_transform / (max_dist + 1e-6)
@@ -521,7 +671,7 @@ class Fluorescence(BaseFeature):
 
         return results
 
-def crop_masks_images(expanded_mask: torch.tensor, epi_image: torch.tensor, phase_image: torch.tensor, x_centres: torch.tensor, y_centres=torch.tensor, crop_size=200) -> tuple[torch.tensor, torch.tensor, torch.tensor]:
+def crop_masks_images(expanded_mask: torch.tensor, epi_image: torch.tensor, phase_image: torch.tensor, binary_mask: torch.tensor, x_centres: torch.tensor, y_centres=torch.tensor, crop_size=200) -> tuple[torch.tensor, torch.tensor, torch.tensor]:
     
     num_cells = expanded_mask.shape[0]
     
@@ -530,6 +680,7 @@ def crop_masks_images(expanded_mask: torch.tensor, epi_image: torch.tensor, phas
     mask_crops = torch.full(shape, False, device=expanded_mask.device)
     epi_crops = torch.full(shape, 0, device=expanded_mask.device, dtype=torch.uint8)
     phase_crops = torch.full(shape, 0, device=expanded_mask.device, dtype=torch.uint8)
+    binary_mask_crops = torch.full(shape, 0, device=expanded_mask.device, dtype=torch.bool)
 
     valid = ~torch.isnan(x_centres)
     num_valid = torch.sum(valid)
@@ -542,6 +693,7 @@ def crop_masks_images(expanded_mask: torch.tensor, epi_image: torch.tensor, phas
         mask_padded = torch.nn.functional.pad(expanded_mask[valid], pad)
         epi_padded = torch.nn.functional.pad(epi_image, pad).unsqueeze(0).expand(num_valid, -1, -1)
         phase_padded = torch.nn.functional.pad(phase_image, pad).unsqueeze(0).expand(num_valid, -1, -1)
+        binary_padded = torch.nn.functional.pad(binary_mask, pad).unsqueeze(0).expand(num_valid, -1, -1)
         
         xcv = x_centres[valid] + half_crop_size
         ycv = y_centres[valid] + half_crop_size
@@ -561,10 +713,13 @@ def crop_masks_images(expanded_mask: torch.tensor, epi_image: torch.tensor, phas
         mask_crops_valid = mask_padded[batch_idx, xx, yy]
         epi_crops_valid = epi_padded[batch_idx, xx, yy]
         phase_crops_valid = phase_padded[batch_idx, xx, yy]
+        binary_mask_crops_valid = binary_padded[batch_idx, xx, yy]
         
         mask_crops[valid] = mask_crops_valid
         epi_crops[valid] = epi_crops_valid.to(torch.uint8)
         phase_crops[valid] = phase_crops_valid.to(torch.uint8)
+        binary_mask_crops[valid] = binary_mask_crops_valid.to(torch.bool)
+        
 
-    return mask_crops, epi_crops, phase_crops
+    return mask_crops, epi_crops, phase_crops, binary_mask_crops
 

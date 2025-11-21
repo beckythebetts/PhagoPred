@@ -10,6 +10,7 @@ import scipy
 from concurrent.futures import ThreadPoolExecutor
 
 from PhagoPred import SETTINGS
+from PhagoPred.utils.fluor_background_removal import replace_hot_pixels, bg_removal
 
 def compute_percentile_limits(
         images: np.ndarray,
@@ -301,33 +302,33 @@ def keep_only_group(hdf5_path, keep_groups=['Images']):
 
     print(f"Only '{keep_groups}' group retained.")
 
-def epi_background_correction(dataset=SETTINGS.DATASET):
-    """Averge all epi images, then subtract avrgaed image from each frame. Gaussian blur then rescale to 8bit taking only top 10% of pixel values"""
-    with h5py.File(dataset, 'r+') as f:
-        epi_ds = f['Images']['Epi']
-        d = epi_ds.shape[0]
-        sum_image = np.zeros(epi_ds.shape[1:], dtype=np.float32)
+# def epi_background_correction(dataset=SETTINGS.DATASET):
+#     """Averge all epi images, then subtract avrgaed image from each frame. Gaussian blur then rescale to 8bit taking only top 10% of pixel values"""
+#     with h5py.File(dataset, 'r+') as f:
+#         epi_ds = f['Images']['Epi']
+#         d = epi_ds.shape[0]
+#         sum_image = np.zeros(epi_ds.shape[1:], dtype=np.float32)
 
         
-        for i in tqdm(range(d), desc='Avergaing all epi images'):
-            sum_image += epi_ds[i].astype(np.float32) / d
+#         for i in tqdm(range(d), desc='Avergaing all epi images'):
+#             sum_image += epi_ds[i].astype(np.float32) / d
 
-        print('Sampling pixel values...')
-        sample_pixel_values = []
-        for i in np.linspace(0, d-1, 50).astype(int):
-            sample_pixel_values.append(np.clip((epi_ds[i] - sum_image).astype(np.float32), a_min=0, a_max=None))
-        all_pixel_values = np.concatenate(sample_pixel_values)
-        p0 = np.percentile(all_pixel_values, 0)
-        p99_9 = np.percentile(all_pixel_values, 99.9)
+#         print('Sampling pixel values...')
+#         sample_pixel_values = []
+#         for i in np.linspace(0, d-1, 50).astype(int):
+#             sample_pixel_values.append(np.clip((epi_ds[i] - sum_image).astype(np.float32), a_min=0, a_max=None))
+#         all_pixel_values = np.concatenate(sample_pixel_values)
+#         p0 = np.percentile(all_pixel_values, 0)
+#         p99_9 = np.percentile(all_pixel_values, 99.9)
 
-        for i in tqdm(range(d), desc='Subtracting background'):
-            corrected = np.clip(epi_ds[i].astype(np.float32) - sum_image, a_min=0, a_max=None)
-            # corrected = cv2.medianBlur(corrected, 5)
-            corrected = cv2.GaussianBlur(corrected, (31, 31), 0)
-            epi_ds[i] = to_8bit(corrected, p0, p99_9)
-            # epi_ds[i] = to_8bit(corrected, np.percentile(corrected, 90), np.percentile(corrected, 99.9))
+#         for i in tqdm(range(d), desc='Subtracting background'):
+#             corrected = np.clip(epi_ds[i].astype(np.float32) - sum_image, a_min=0, a_max=None)
+#             # corrected = cv2.medianBlur(corrected, 5)
+#             corrected = cv2.GaussianBlur(corrected, (31, 31), 0)
+#             epi_ds[i] = to_8bit(corrected, p0, p99_9)
+#             # epi_ds[i] = to_8bit(corrected, np.percentile(corrected, 90), np.percentile(corrected, 99.9))
 
-        epi_ds.attrs['Background corrected'] = True
+#         epi_ds.attrs['Background corrected'] = True
 
 # def epi_background_correction_gaussian(dataset=SETTINGS.DATASET, sigma: int = 200) -> None:
 #     """For each frame, aplpy gaussian smoothing to approximate background signal and subtract."""
@@ -341,19 +342,23 @@ def epi_background_correction(dataset=SETTINGS.DATASET):
 #             epi_im = np.clip(epi_im, 0, None)
 #             epi_ds[frame] = epi_im
 
-def epi_background_correction_gaussian(dataset=SETTINGS.DATASET, sigma: int = 100, max_workers: int = 4) -> None:
+def epi_background_correction(dataset=SETTINGS.DATASET, max_workers: int = 4) -> None:
     """Apply Gaussian background correction to each Epi frame using multithreading."""
     
     with h5py.File(dataset, 'r+') as f:
         epi_ds = f['Images']['Epi']
         n_frames, height, width = epi_ds.shape
 
+        # def process_frame(i):
+        #     epi_im = epi_ds[i].astype(np.float32)  # cast once to avoid precision issues
+        #     bg_estimate = scipy.ndimage.gaussian_filter(epi_im, sigma=sigma)
+        #     corrected = np.clip(epi_im - bg_estimate, 0, None).astype(np.uint8)
+        #     return i, corrected
         def process_frame(i):
-            epi_im = epi_ds[i].astype(np.float32)  # cast once to avoid precision issues
-            bg_estimate = scipy.ndimage.gaussian_filter(epi_im, sigma=sigma)
-            corrected = np.clip(epi_im - bg_estimate, 0, None).astype(np.uint8)
-            return i, corrected
-
+            epi_im = epi_ds[i].astype(np.float32)
+            epi_im = replace_hot_pixels(epi_im)
+            epi_im = bg_removal(epi_im)
+            return i, epi_im
         # Process in parallel
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [executor.submit(process_frame, i) for i in range(n_frames)]

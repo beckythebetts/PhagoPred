@@ -140,17 +140,17 @@ class TrackerWithTrackpy:
         """
         Add each cells centroid cooridnates and areas to cells dataset
         """
-        found_features = True
-        with h5py.File(self.file, 'r') as f:
-            for feature_name in features.Coords().get_names():
-                if feature_name not in f[self.cells_group].keys():
-                    found_features = False
-        if not found_features:
-            self.feature_extractor.add_feature(features.Coords(), cell_type=self.channel)
-            self.feature_extractor.set_up()
-            self.feature_extractor.extract_features()
-        else:
-            print('Features already found, skipping to tracking.')
+        # found_features = True
+        # with h5py.File(self.file, 'r') as f:
+        #     for feature_name in features.Coords().get_names():
+        #         if feature_name not in f[self.cells_group].keys():
+        #             found_features = False
+        # if not found_features:
+        self.feature_extractor.add_feature(features.Coords(), cell_type=self.channel)
+        self.feature_extractor.set_up()
+        self.feature_extractor.extract_features(crop=False)
+        # else:
+        #     print('Features already found, skipping to tracking.')
             
         
 def run_tracking(dataset=SETTINGS.DATASET):

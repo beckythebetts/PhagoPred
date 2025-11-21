@@ -40,25 +40,32 @@ class Gabor:
             max_h, max_w = max(kernel.shape[0] for kernel in self.kernels), max(kernel.shape[1] for kernel in self.kernels)
             self.padding = max(max_h, max_w)
             self.kernels = [pad_to(kernel, max_h, max_w) for kernel in self.kernels]
-            
-            self.kernels = torch.stack(self.kernels)[:, None, :, :]
-            
+        
             self.kernel_pixels = torch.tensor(self.kernel_pixels, device=device)
+        
+        # if fft:
+        #     self.kernels = [torch.fft.fft2(kernel) for kernel in]
+        # else:
+            self.kernels = torch.stack(self.kernels)[:, None, :, :]
         
     
     def get_dominant_scales_batch(self, im_batch: torch.tensor, mask_batch: torch.tensor) -> torch.tensor:
         im_batch = im_batch.to(torch.complex64)
         im_batch = im_batch[:, None, :, :]
-        filtered_ims = torch.nn.functional.conv2d(im_batch, self.kernels, padding=self.padding)
-        filtered_ims[mask_batch[:, None, :, :]] = 0
+        mask_batch = mask_batch[:, None, :, :]
+        filtered_ims = torch.nn.functional.conv2d(im_batch, self.kernels, padding='same')
+        mask_batch = mask_batch.expand(filtered_ims.shape)
+        filtered_ims[mask_batch] = 0
         
-        energies = torch.sum(torch.abs(filtered_ims**2)/self.kernel_pixels[None, :, None, None], dim=(2, 3))
+        energies = torch.sum(torch.abs(filtered_ims)**2/self.kernel_pixels[None, :, None, None], dim=(2, 3))
         energies = energies.view(-1, len(self.frequencies), len(self.thetas))
         energies = torch.sum(energies, dim=2)
         
-        relative_energies = energies / torch.sum(energies, dim=1)
+        relative_energies = energies / torch.sum(energies, dim=1, keepdim=True)
         
-        print(relative_energies)
+        dominant_scales = torch.argmax(relative_energies, dim=1).cpu().numpy()
+        return self.wavelengths[dominant_scales]
+        
 
 
     def view_kernels(self):
@@ -213,6 +220,6 @@ def get_random_cell(erosion_val=10):
 
 if __name__ == '__main__':
     test = Gabor(gpu=True)
-    test.get_dominant_scales_batch(torch.randn(10, 50, 50), torch.randn(10, 50, 50))
+    test.get_dominant_scales_batch(torch.randn(10, 50, 50).to(device), torch.ones(10, 50, 50).to(torch.bool))
     # test.view_relative_energies()
     # test.view_convolved_im()
