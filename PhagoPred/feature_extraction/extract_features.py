@@ -53,12 +53,12 @@ class CellType:
 
     def add_feature(self, feature):
         if feature.primary_feature:
-            if feature.derived_feature:
-                self.primary_derived_features.append(feature)
-            else:   
-                self.primary_features.append(feature)
+            self.primary_features.append(feature)
         else:
-            self.derived_features.append(feature)
+            if isinstance(feature, features.CellDeath):
+                self.derived_features.insert(0, feature)
+            else:
+                self.derived_features.append(feature)
 
     def get_feature_names(self):
 
@@ -312,16 +312,14 @@ class FeaturesExtraction:
     
 def extract_features(dataset=SETTINGS.DATASET, 
                      phase_features = [
-                        features.Fluorescence(), 
-                        # features.MorphologyModes(), 
+                        # features.Fluorescence(), 
+                        # features.ExternalFLuorcence(),
                         features.Speed(),
-                        # features.DensityPhase(),
+                        features.DensityPhase(),
                         features.Displacement(),
                         features.Perimeter(),
                         features.Circularity(),
-                        # features.Skeleton(),
-                        # features.UmapEmbedding(),
-                        # features.GaborScale(),
+                        features.Skeleton(),
                         features.CellDeath(),
                         features.FirstLastFrame(),
                         ]):

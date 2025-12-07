@@ -32,7 +32,22 @@ class AllCellsViewer:
         
         self.back_button = QtWidgets.QPushButton("← Back to All Cells")
         self.back_button.setVisible(False)
-        self.viewer.window.add_dock_widget(self.back_button, area="top")    
+        self.viewer.window.add_dock_widget(self.back_button, area="right")  
+        
+        self.goto_widget = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(self.goto_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.goto_label = QtWidgets.QLabel("Go to cell:")
+        self.goto_input = QtWidgets.QLineEdit()
+        self.goto_input.setFixedWidth(60)
+        self.goto_button = QtWidgets.QPushButton("Open")
+
+        layout.addWidget(self.goto_label)
+        layout.addWidget(self.goto_input)
+        layout.addWidget(self.goto_button)
+
+        self.viewer.window.add_dock_widget(self.goto_widget, area="right")  
         
         self._connect_signals()
         
@@ -42,6 +57,25 @@ class AllCellsViewer:
         app.aboutToQuit.connect(self._close_hdf5)
         self._connect_mouse_interactions()
         self.back_button.clicked.connect(self._return_to_overview)
+        self.goto_button.clicked.connect(self._goto_cell_from_text)
+        self.goto_input.returnPressed.connect(self._goto_cell_from_text)
+
+    def _goto_cell_from_text(self):
+        """Open a cell index typed into the text box."""
+        text = self.goto_input.text().strip()
+        if not text.isdigit():
+            self.status_label.setText("Invalid cell index")
+            return
+
+        cell_idx = int(text)
+
+
+        # max_cell = self.seg_data.max().compute() - 1
+        # if cell_idx < 0 or cell_idx > max_cell:
+        #     self.status_label.setText(f"Cell index must be between 0 and {max_cell}")
+        #     return
+
+        self._open_cell_view(cell_idx)
         
     def _load_data(self):
 

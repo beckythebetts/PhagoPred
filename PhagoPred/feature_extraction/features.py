@@ -112,7 +112,7 @@ class FirstLastFrame(BaseFeature):
         areas = phase_xr['Area']
 
         not_nan_mask = ~np.isnan(areas)
-        start = not_nan_mask.argmax(axis=0)
+        start = not_nan_mask.argmax(axis=0) + 1
         reversed_mask = not_nan_mask[::-1, :]
         last = areas.shape[0] - 1 - reversed_mask.argmax(axis=0)
 
@@ -488,12 +488,18 @@ class DensityPhase(BaseFeature):
 
                 alive_corrected = alive_counts / fraction_in
                 dead_corrected = dead_counts / fraction_in
-
+                
+                # print('alive ', np.unique(alive_corrected), '\ndead ', np.unique(dead_corrected))
+                # print("alive_corrected shape:", alive_corrected.shape)
+                # print("dead_corrected  shape:", dead_corrected.shape)
+                # print("results slice shape :", results[first_frame:last_frame, :, 2*r_idx+1].shape)
                 results[first_frame:last_frame, :, 2 * r_idx] = alive_corrected
                 results[first_frame:last_frame, :, 2 * r_idx + 1] = dead_corrected
+                # print(np.unique(results[first_frame:last_frame, :, 2 * r_idx + 1]))
 
         valid_mask = ~np.isnan(phase_xr['X'].values)
         results = np.where(valid_mask[:, :, None], results, np.nan)
+        # print(np.unique(results[first_frame:last_frame, :, 2 * r_idx + 1]))
 
         return results
    

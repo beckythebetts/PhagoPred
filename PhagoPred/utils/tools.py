@@ -74,7 +74,7 @@ def fill_missing_cells(dataset: Path) -> None:
         first_appearances = f['Cells']['Phase']['First Frame'][0]
         last_appearances = f['Cells']['Phase']['Last Frame'][0]
         
-        # fill_missing_segs(seg_data, first_appearances, last_appearances)
+        fill_missing_segs(seg_data, first_appearances, last_appearances)
         
         for feature_name in tqdm(list(f['Cells']['Phase'].keys()), desc="Interpolating feature values"):
             if f['Cells']['Phase'][feature_name].shape[0] > 1:
@@ -553,23 +553,31 @@ def copy_hdf5_groups(src_filename, dest_filename, groups_to_copy):
     """
     with h5py.File(src_filename, 'r') as src_file, h5py.File(dest_filename, 'w') as dest_file:
         def copy_group(src_group, dest_group):
-            # Copy all attributes of the group
             for attr_name, attr_value in src_group.attrs.items():
                 dest_group.attrs[attr_name] = attr_value
             
-            # Recursively copy datasets and subgroups
             for name, item in src_group.items():
                 if isinstance(item, h5py.Dataset):  # Copy datasets directly
                     maxshape = item.maxshape
-                    dest_group.create_dataset(name, data=item[()], maxshape=maxshape)
-                    # Copy dataset attributes
+                    dset = dest_group.create_dataset(                        
+                        name,
+                        shape=item.shape,
+                        maxshape=item.maxshape,
+                        dtype=item.dtype,
+                        chunks=item.chunks)
+                
+                    if item.chunks:
+                        for i in tqdm(range(0, item.shape[0], item.chunks[0]), desc=f'Copying {name} dataset'):
+                            sel = slice(i, min(i + item.chunks[0], item.shape[0]))
+                            dset[sel, ...] = item[sel, ...]
+                    else:
+                        dset[...] = item[()]
                     for attr_name, attr_value in item.attrs.items():
                         dest_group[name].attrs[attr_name] = attr_value
                 elif isinstance(item, h5py.Group):  # Recurse into subgroups
                     subgroup = dest_group.create_group(name)
                     copy_group(item, subgroup)
         
-        # Copy each specified group
         for group_name in groups_to_copy:
             if group_name in src_file:
                 src_group = src_file[group_name]

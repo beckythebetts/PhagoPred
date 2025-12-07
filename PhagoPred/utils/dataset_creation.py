@@ -12,6 +12,78 @@ from concurrent.futures import ThreadPoolExecutor
 from PhagoPred import SETTINGS
 from PhagoPred.utils.fluor_background_removal import replace_hot_pixels, bg_removal
 
+def truncate_hdf5(
+    dataset_path: Path,
+    new_path: Path,
+    start_frame: int,
+    end_frame: int
+) -> None:
+    """Truncate given hdf5 path to only include frames from start_frame to end_frame."""
+    with h5py.File(dataset_path, 'r') as orig:
+        with h5py.File(new_path, 'x') as new:
+            for group in ['Segmentations', 'Images']:
+                orig_group = orig[group]
+                new_group = new.create_group(group)
+
+                for name, dataset in orig_group.items():
+                    if isinstance(dataset, h5py.Dataset):
+                        print(f"Copying dataset '{name}' from frames {start_frame} to {end_frame}")
+                        try:
+                            # Extract the slice of data
+                            sliced_data = dataset[start_frame:end_frame].copy()
+                            print(f"{name} sliced data shape: {sliced_data.shape}, dtype: {sliced_data.dtype}")
+                            # Get creation properties
+                            kwargs = {
+                                'dtype': dataset.dtype,
+                                'compression': dataset.compression,
+                                'compression_opts': dataset.compression_opts,
+                                'chunks': dataset.chunks,
+                                'shuffle': dataset.shuffle,
+                                'fletcher32': dataset.fletcher32,
+                                'maxshape': dataset.maxshape
+                            }
+
+                            # Create dataset in destination
+                            new_group.create_dataset(
+                                name,
+                                data=sliced_data,
+                                shape=sliced_data.shape,
+                                **{k: v for k, v in kwargs.items() if v is not None}
+                                )
+                            new.flush()
+
+                        except Exception as e:
+                            print(e)
+
+                for attr_name, attr_value in orig_group.attrs.items():
+                            new_group.attrs[attr_name] = attr_value
+                        
+                new_group.attrs['Number of frames'] = end_frame - start_frame
+                new.flush()
+            cells_group = 'Cells/Phase'
+            for group in orig[cells_group].keys():
+                orig_dset = orig[cells_group][group]
+                if orig_dset.shape[0] > 1:
+                    sliced_data = orig_dset[start_frame:end_frame].copy()
+                else:
+                    if group == 'Last Frame':
+                        sliced_data = orig_dset[:].copy()
+                        sliced_data[sliced_data > end_frame] = end_frame - 1
+                    elif group == 'CellDeath':
+                        sliced_data = orig_dset[:].copy()
+                        sliced_data[sliced_data >= end_frame] = np.nan
+                new_dset = new.create_dataset(
+                    f'Cells/Phase/{group}',
+                    shape=sliced_data.shape,
+                    dtype=orig_dset.dtype,
+                    chunks=True,
+                    compression=orig_dset.compression,
+                    compression_opts=orig_dset.compression_opts,
+                    data=sliced_data
+                )
+                # new_dset[:] = sliced_data
+                
+                
 def compute_percentile_limits(
         images: np.ndarray,
         lower_percentile: float = 0.1,
@@ -163,83 +235,6 @@ def hdf5_from_tiffs(tiff_files_path: Path, hdf5_file: Path,
         Images.attrs['Number of frames'] = frame_count
         print(f"\nHDF5 file created: {frame_count} frames")
 
-# def hdf5_from_tiffs(tiff_files_path: Path, hdf5_file: Path,
-#                     phase_channel: int = 1, epi_channel: int = 2, frame_step_size: int=1) -> None:
-#     """Convert multi-file, multi-page .ome.tif files to HDF5 with batched reading and
-#     global min/max scaling for quantitative uint8 conversion."""
-
-#     if os.path.exists(hdf5_file):
-#         os.remove(hdf5_file)
-
-#     print(f'Tiff files found? {tiff_files_path.exists()}')
-#     print(f'HDF5 path found? {hdf5_file.parent.exists()}')
-
-#     def natural_sort_key(s):
-#         import re
-#         return [int(text) if text.isdigit() else text.lower()
-#                 for text in re.split(r'(\d+)', str(s))]
-
-#     tiff_files = sorted(tiff_files_path.glob("*.ome.tif"), key=natural_sort_key)
-#     if not tiff_files:
-#         raise ValueError("No .ome.tif files found.")
-
-#     # Get shape info from first file
-#     with tifffile.TiffFile(str(tiff_files[0])) as tif:
-#         series = tif.series[0]
-#         shape = series.shape
-#         T, C, Y, X = shape
-    
-#     with h5py.File(hdf5_file, 'w') as h:
-
-#         Images = h.create_group('Images')
-#         set_hdf5_metadata(Images, X, Y)
-
-#         phase_ds = Images.create_dataset('Phase', shape=(0, Y, X), maxshape=(None, Y, X),
-#                                          dtype='uint8', chunks=(1, Y, X))
-#         epi_ds = Images.create_dataset('Epi', shape=(0, Y, X), maxshape=(None, Y, X),
-#                                          dtype='uint8', chunks=(1, Y, X))
-    
-#         phase_min, phase_max = None, None
-#         epi_min, epi_max = None, None
-
-#         frame_count = 0
-
-#         for i, file in enumerate(tiff_files):
-#             sys.stdout.write(f"\rProcessing file {i + 1} / {len(tiff_files)}, {frame_count} frames processed")
-#             sys.stdout.flush()
-#             with tifffile.TiffFile(str(file)) as tif:
-#                 pages = tif.pages
-#                 num_pages = len(pages)
-#                 num_frames = num_pages // C
-
-#                 selected_frames = np.arange(0, num_frames, frame_step_size)
-                
-#                 num_frames = len(selected_frames)
-                
-#                 phase_page_idxs = selected_frames * C + phase_channel
-#                 epi_page_idxs = selected_frames * C + epi_channel
-
-#                 phase_array = np.stack([pages[i].asarray() for i in phase_page_idxs])
-#                 epi_array = np.stack([pages[i].asarray() for i in epi_page_idxs])
-
-#                 if phase_min is None:
-#                     phase_min, phase_max = compute_percentile_limits(phase_array, 0, 100)
-#                 if epi_min is None:
-#                     epi_min, epi_max = compute_percentile_limits(epi_array, 1, 99)
-                
-#                 phase_array = to_8bit(phase_array, phase_min, phase_max)
-#                 epi_array = to_8bit(epi_array, epi_min, epi_max)
-
-#                 phase_ds.resize((frame_count+num_frames, Y, X))
-#                 epi_ds.resize((frame_count + num_frames, Y, X))
-
-#                 phase_ds[frame_count:frame_count+num_frames] = phase_array
-#                 epi_ds[frame_count:frame_count+num_frames] = epi_array
-
-#                 frame_count += num_frames
-        
-#         Images.attrs['Number of frames'] = frame_count
-#         print(f"\nHDF5 file created: {frame_count} frames")
 
 def make_short_test_copy(orig_file: Path, short_file: Path, start_frame: int = 0, end_frame: int = 50) -> None:
     """
