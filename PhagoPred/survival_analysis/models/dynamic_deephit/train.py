@@ -22,15 +22,15 @@ def train_step(model, dataloader, optimiser, loss_fn, device, max_grad_norm=1.0)
     losses = defaultdict(float)
     
     for batch in dataloader:
-        cell_features, lengths, time_to_event_bins, event_indicators, time_to_event, cell_idxs, files = batch
-        cell_features = cell_features.to(device)
-        lengths = lengths.to(device)
-        time_to_event_bins = time_to_event_bins.to(device)
-        event_indicators = event_indicators.to(device)
+        # cell_features, lengths, time_to_event_bins, event_indicators, time_to_event, cell_idxs, files = batch
+        # cell_features = cell_features.to(device)
+        # lengths = lengths.to(device)
+        # time_to_event_bins = time_to_event_bins.to(device)
+        # event_indicators = event_indicators.to(device)
 
         optimiser.zero_grad()
-        outputs, y = model(cell_features)
-        loss_values = loss_fn(outputs, time_to_event_bins, event_indicators, cell_features, y, )
+        outputs, y = model(batch['features'])
+        loss_values = loss_fn(outputs, batch['time_to_event_bins'], batch['event_indicators'], batch['cell_features'], y)
         
         loss = loss_values[0]
         loss.backward()
@@ -46,7 +46,7 @@ def train_step(model, dataloader, optimiser, loss_fn, device, max_grad_norm=1.0)
         for key, value in zip(
             ['Total Loss', 'NLL Loss', 'Ranking Loss', 'Prediction Loss', 'Censored Loss', 'Uncensored Loss'], loss_values
         ):
-            losses[key] += value.item() * cell_features.size(0)
+            losses[key] += value.item() * batch['features'].size(0)
 
     avg_losses = {key: value / len(dataloader.dataset) for key, value in losses.items()}
     return avg_losses
@@ -123,93 +123,6 @@ def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list, fea
 
     visualize_validation_predictions(model, validate_loader, device, num_examples=20, save_path=save_dir , bin_edges=bins, features=features)
 
-    
-
-def train_single_dataset(
-    model,
-    model_params,
-    hdf5_path: Path,
-    features: list,
-    optimiser,
-    loss_fn,
-    num_epochs: int,
-    save_dir: Path,
-    batch_size: int,
-    lr: float,
-    val_split: float = 0.2,
-    seed: int = 42,
-):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(device)
-    model = model(**model_params)
-    model = model.to(device)
-    
-    os.makedirs(save_dir, exist_ok=True)
-
-    # --- Step 1: Load metadata to get available cell indices ---
-    dummy_dataset = CellDataset(hdf5_paths=[hdf5_path], features=features)
-    all_idxs = np.arange(len(dummy_dataset))  # Total number of cells in the file
-
-    # --- Step 2: Split into train and validation sets ---
-    train_idxs, val_idxs = train_test_split(
-        all_idxs,
-        test_size=val_split,
-        random_state=seed,
-        shuffle=True
-    )
-
-    # --- Step 3: Initialize datasets with selected indices ---
-    train_dataset = CellDataset(
-        hdf5_paths=[hdf5_path],
-        features=features,
-        specified_cell_idxs=train_idxs.tolist(),
-        num_bins=model_params['output_size']
-    )
-    train_dataset.plot_event_vs_censoring_hist(save_path=save_dir / 'train_event_censoring_histogram.png', title='Training Set Event vs Censoring Histogram')
-    bins = train_dataset.get_bins()
-
-    normalisation_means, normalization_stds = train_dataset.get_normalization_stats()
-    model_params['normalization_means'] = normalisation_means.tolist()
-    model_params['normalization_stds'] = normalization_stds.tolist()
-    model_params['event_time_bins'] = bins.tolist()
-    normalisation_means = torch.tensor(normalisation_means, dtype=torch.float32)
-    normalization_stds = torch.tensor(normalization_stds, dtype=torch.float32)
-
-    validate_dataset = CellDataset(
-        hdf5_paths=[hdf5_path],
-        features=features,
-        specified_cell_idxs=val_idxs.tolist(),
-        num_bins =model_params['output_size'],
-        event_time_bins=bins,
-    )
-    validate_dataset.plot_event_vs_censoring_hist(save_path=save_dir / 'val_event_censoring_histogram.png', title='Validation Set Event vs Censoring Histogram')
-
-    # --- Step 4: Create data loaders ---
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size, shuffle=True, collate_fn=lambda x: collate_fn(x, means=normalisation_means, stds=normalization_stds, device=device), num_workers=4, pin_memory=True)
-    validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size, shuffle=False, collate_fn=lambda x: collate_fn(x, means=normalisation_means, stds=normalization_stds, device=device), num_workers=4, pin_memory=True)
-
-    # # --- Step 5: Save model params ---
-    with open(save_dir / 'model_params.json', 'w') as f:
-        json.dump(model_params, f)
-
-    # --- Step 6: Train loop ---
-    optimiser = optimiser(model.parameters(), lr=lr)
-    training_json = save_dir / 'training.jsonl'
-
-    with open(training_json, 'w') as f:
-        for epoch in tqdm(range(1, num_epochs + 1), desc="Training"):
-            train_losses = train_step(model, train_loader, optimiser, loss_fn, device)
-            validate_losses = validate_step(model, validate_loader, loss_fn, device)
-            losses_dict = {'epoch': epoch, 'train': train_losses, 'validate': validate_losses}
-            print(losses_dict)
-            f.write(json.dumps(losses_dict) + '\n')
-
-    # --- Step 7: Save model and plot ---
-    torch.save(model.state_dict(), save_dir / 'model.pth')
-    plot_training_losses(training_json, save_dir / 'loss_plot.png')
-    print(f"Training complete. Model saved to {save_dir}")
-
-    visualize_validation_predictions(model, validate_loader, device, num_examples=5, save_path=save_dir , bin_edges=bins)
 
 def compute_orcale_losses(dataset: CellDataset, loss_fn, device:str):
     """For given slice of each cell time series, compute loss using underlying pmf (if exists)."""
@@ -226,16 +139,17 @@ def compute_orcale_losses(dataset: CellDataset, loss_fn, device:str):
         # if item is None:
         #     continue
         # cell_features, time_to_event_bin, event_indicator, time_to_event, cell_metadata['Local Cell Idxs'], self.hdf5_paths[cell_metadata['File Idxs']], binned_pmf
-        _, _, t_bin, e, _, _, _, pmf = batch
+        # _, _, t_bin, e, _, _, _, pmf = batch
         # loss_values = loss_fn(
         #     torch.tensor(pmf).to(device)[None:, ], 
         #     torch.tensor(t_bin).to(device)[None, :], 
         #     torch.tensor(e).to(device)[None,],
         # )
+        pmf = torch.tensor(batch['binned_pmf']).to(device)
         loss_values = loss_fn(
-            pmf.to(device), 
-            t_bin.to(device), 
-            e.to(device),
+            pmf, 
+            batch['t_bin'], 
+            batch['event_indicator'],
             )
         for key, value in zip(
             ['Total Loss', 'NLL Loss', 'Ranking Loss', 'Prediction Loss', 'Censored Loss', 'Uncensored Loss'], loss_values

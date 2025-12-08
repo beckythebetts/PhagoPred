@@ -53,36 +53,36 @@ class CellDataset(torch.utils.data.Dataset):
         self.max_time_to_death = max_time_to_death
         self.min_length = min_length
         self.oversample_uncensored = None
-        
+
         # self.underyling_hazard = False # Set to True if the underlying hazard function is stored in the HDF5 files
 
         self._lock = threading.Lock()
         self._files = [None] * len(hdf5_paths)  # To hold open file handles
-        
-        self._features_cache = [None] * len(hdf5_paths)  
-        self._pmfs_cache = [None] * len(hdf5_paths)  
+
+        self._features_cache = [None] * len(hdf5_paths)
+        self._pmfs_cache = [None] * len(hdf5_paths)
 
         self.event_time_bins = event_time_bins
-        
+
         self.cell_metadata = None
         self._load_cell_metadata()
         # self.event_time_bins = self._compute_bins()
 
         self.means = means
         self.stds = stds
-        
+
         if isinstance(self.means, torch.Tensor):
             self.means = self.means.cpu().numpy()
         if isinstance(self.stds, torch.Tensor):
             self.stds = self.stds.cpu().numpy()
-        
+
         # self._preloaded_data = None
         if preload_data:
             self._preload_all_data()
-        
+
         if self.event_time_bins is None:
             self._compute_bins()
-        
+
         if summary_stats:
             self.summary_funcs = {
             'mean': lambda feats, diffs: np.nanmean(feats, axis=0),
@@ -94,8 +94,8 @@ class CellDataset(torch.utils.data.Dataset):
             'max': lambda feats, diffs: np.nanmax(feats, axis=0),
             'min': lambda feats, diffs: np.nanmin(feats, axis=0)
         }
-        
-            
+
+
     def _preload_all_data(self):
         """Load all cell features into RAM as numpy arrays."""
         for i, path in enumerate(self.hdf5_paths):
@@ -107,8 +107,8 @@ class CellDataset(torch.utils.data.Dataset):
                 self._pmfs_cache[i] = pmfs_cache
         if self.means is not None and self.stds is not None:
             self.normalise()
-        print("Finished preloading all data into memory.")    
-    
+        print("Finished preloading all data into memory.")
+
     def compute_normalisation_stats(self, sample_ratio=0.1):
         """Compute mean and std directly from NumPy arrays to avoid DataFrame/xarray overhead."""
         all_data = []
@@ -123,16 +123,16 @@ class CellDataset(torch.utils.data.Dataset):
             cell_features = np.reshape(cell_features, (cell_features.shape[0], -1))
             all_data.append(cell_features)
         all_data = np.concatenate(all_data, axis=1)
-        
+
         means = np.nanmean(all_data, axis=1)
         stds = np.nanstd(all_data, axis=1)
         return means, stds
-            
-            
+
+
     def normalise(self):
         for file_idx, file_path in tqdm(enumerate(self.hdf5_paths), desc='Normalising'):
             self._features_cache[file_idx] = (self._features_cache[file_idx] - self.means[:,np.newaxis, np.newaxis]) / self.stds[:, np.newaxis, np.newaxis]
-            
+
     def _compute_bins(self, num_samples=10000):
         print(np.sum(np.isnan(self.cell_metadata['Death Frames'])) / self.__len__())
         times = []
@@ -145,7 +145,7 @@ class CellDataset(torch.utils.data.Dataset):
             if item is None:
                 none_cells += 1
                 continue
-            
+
             _, _, e, t, _, _, _ = item
 
             events += e
@@ -156,16 +156,16 @@ class CellDataset(torch.utils.data.Dataset):
         print('Events', events, 'None cells:', none_cells, 'Censored cells', censored)
         print('Proportion of valid samples = ', len(times)/num_samples)
         bins = np.quantile(times, np.linspace(0, 1, self.num_bins)).astype(int)
-        
+
         # Add etra bin going to very large time value
-        bins = np.append(bins, np.max(times)*1e5) 
+        bins = np.append(bins, np.max(times)*1e5)
         # bins[-1] = np.max(times)*1e5
         # obs_times = self.cell_metadata['End Frames'] - self.cell_metadata['Start Frames'] + 1
         # bins = np.quantile(obs_times, np.linspace(0, 1, self.num_bins + 1)).astype(int)
         # bins = np.linspace(np.min(obs_times), np.max(obs_times), self.num_bins + 1)
         self.event_time_bins = bins
         # self.show_bins(times)
-    
+
     def show_bins(self,times: np.ndarray) -> None:
         """Plot bins histogram."""
         hist = np.histogram(times)
@@ -174,35 +174,35 @@ class CellDataset(torch.utils.data.Dataset):
         print(np.unique(times), bins)
         plt.hist(hist, bins)
         plt.show()
-    
+
     # def get_bins(self):
     #     if self.event_time_bins is None:
     #         self.event_time_bins = self._compute_bins()
     #         print("Computed event time bins.")
     #     return self.event_time_bins
 
-    
+
     def get_normalization_stats(self):
         if self.means is None or self.stds is None:
             self.means, self.stds = self.compute_normalisation_stats()
             print("Computed normalisation statistics.")
             self.normalise()
         return self.means, self.stds
-    
+
     def _get_file(self, idx):
         if self._files[idx] is None:
             with self._lock:
                 if self._files[idx] is None:
                     self._files[idx] = h5py.File(self.hdf5_paths[idx], 'r')
-                    
+
         return self._files[idx]
-    
+
     # def _get_features_xr(self, file_idx):
     #     if self._features_cache[file_idx] is None:
     #         f = self._get_file(file_idx)
     #         self._features_cache[file_idx] = self.cell_type.get_features_xr(f, features=self.features)
     #     return self._features_cache[file_idx]
-    
+
     def _get_features_np(self, file_idx: int, features: list = None) -> np.ndarray:
         if features is None:
             features = self.features
@@ -211,10 +211,10 @@ class CellDataset(torch.utils.data.Dataset):
             f = self._get_file(file_idx)
             arr = f['Cells']['Phase'][feature][:]  # shape: (num_frame, num_cells)
             feature_arrays.append(arr)
-            
+
         features_np = np.stack(feature_arrays, axis=0)
         return features_np
-        
+
     def _load_cell_metadata(self):
         self.cell_metadata = {'File Idxs': [], 'Local Cell Idxs': [], 'Death Frames': [], 'Start Frames': [], 'End Frames': []}
 
@@ -222,12 +222,12 @@ class CellDataset(torch.utils.data.Dataset):
             total_cell_deaths = self._get_features_np(path_idx, features=['CellDeath'])[0][0] # shape = (num_cells)
 
             total_num_cells = len(total_cell_deaths)
-            
+
             if self.uncensored_only:
                 local_cell_idxs = np.nonzero(~np.isnan(total_cell_deaths))[0]
             else:
                 local_cell_idxs = np.arange(total_num_cells)
-                
+
             local_cell_idxs = local_cell_idxs.astype(int)
 
             cell_deaths = total_cell_deaths[local_cell_idxs]
@@ -253,10 +253,10 @@ class CellDataset(torch.utils.data.Dataset):
 
             self.cell_metadata['Start Frames'] += list(start + 1)
             self.cell_metadata['End Frames'] += list(last)
-     
+
         for key, value in self.cell_metadata.items():
             self.cell_metadata[key] = np.array(value)
-            
+
         self._oversample_uncensored_data()
 
     def _oversample_uncensored_data(self):
@@ -268,10 +268,10 @@ class CellDataset(torch.utils.data.Dataset):
         end_frames   = np.array(self.cell_metadata['End Frames'])
 
         event_indicator = ~np.isnan(death_frames)  # True=uncensored, False=censored
-        
+
         ratio_uncensored = np.sum(~np.isnan(death_frames)) / self.__len__()
         self.oversample_uncensored = int(0.5 / ratio_uncensored)
-        
+
         print(f'Oversmapling uncensored data {self.oversample_uncensored} times')
 
         if self.oversample_uncensored > 0:
@@ -298,17 +298,17 @@ class CellDataset(torch.utils.data.Dataset):
             'Start Frames':    start_frames,
             'End Frames':      end_frames,
         }
-                
+
     def __len__(self):
         return len(self.cell_metadata['File Idxs'])
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx) -> dict:
         """
         Returns (features, observation_time, event_indicator)
         """
-        cell_metadata = {key: self.cell_metadata[key][idx] for key in self.cell_metadata} 
+        cell_metadata = {key: self.cell_metadata[key][idx] for key in self.cell_metadata}
         all_cell_features = self._features_cache[cell_metadata['File Idxs']] # shape: (feature, frame, cell)
-        
+
         all_cell_features = all_cell_features.transpose(1, 2, 0) #shape: (frame, cell, feature)
 
         last_frame = cell_metadata['End Frames'] if np.isnan(cell_metadata['Death Frames']) else cell_metadata['Death Frames']
@@ -325,13 +325,13 @@ class CellDataset(torch.utils.data.Dataset):
             return None
         # else:
         #     print("Using Cell:", event_indicator, last_frame, cell_metadata['Start Frames'], min_landmark_dist)
-        
+
         if self.fixed_len is None:
             # print(event_indicator)
             landmark_frame = np.random.randint(cell_metadata['Start Frames'] + min_landmark_dist, last_frame)
             start_frame = cell_metadata['Start Frames']
         else:
-            if self.max_time_to_death is None: 
+            if self.max_time_to_death is None:
                 if cell_metadata['Start Frames'] + self.fixed_len >= last_frame:
                     return None
                 landmark_frame = np.random.randint(cell_metadata['Start Frames'] + self.fixed_len, last_frame)
@@ -345,17 +345,17 @@ class CellDataset(torch.utils.data.Dataset):
         cell_features = all_cell_features[start_frame:landmark_frame+1, cell_metadata['Local Cell Idxs']] # (num_frames, num_features)
         if np.isnan(cell_features).any():
             return None
-        
+
         time_to_event = last_frame - landmark_frame
-        
+
         assert ~np.isnan(time_to_event)
-        
+
         if self.event_time_bins is not None:
             time_to_event_bin = np.digitize(time_to_event, self.event_time_bins) - 1  # Bin the observation time
             time_to_event_bin = np.clip(time_to_event_bin, 0, self.num_bins - 1)
         else:
             time_to_event_bin = None
-        
+
         if self.summary_stats:
             if np.all(np.isnan(cell_features)):
                 return None
@@ -365,29 +365,30 @@ class CellDataset(torch.utils.data.Dataset):
                 results.append(summary_func(cell_features, cell_diffs))
             cell_features = np.stack(results, axis=0)
 
+        pmf = None
+        binned_pmf = None
         if self._pmfs_cache is not None and self.event_time_bins is not None:
             pmfs_cache = self._pmfs_cache[cell_metadata['File Idxs']]
             if pmfs_cache is not None:
                 pmf = pmfs_cache[0][landmark_frame:, cell_metadata['Local Cell Idxs']]
-                # print(pmf.shape)
                 pmf = pmf / np.nansum(pmf)
-                # print('bins', self.event_time_bins)
-                # binned_pmf = np.digitize(pmf, self.event_time_bins) - 1
                 binned_pmf = np.array([
-                    pmf[int(self.event_time_bins[i]):int(self.event_time_bins[i+1])].sum() 
+                    pmf[int(self.event_time_bins[i]):int(self.event_time_bins[i+1])].sum()
                     for i in range(len(self.event_time_bins)-1)
                 ])
-                return cell_features, time_to_event_bin, event_indicator, time_to_event, cell_metadata['Local Cell Idxs'], self.hdf5_paths[cell_metadata['File Idxs']], binned_pmf
-        else:
-            binned_pmf = None
-        # if get_pmf:
-        #     f = self._get_file(cell_metadata['File Idxs'])
-        #     pmf = f['Cells']['Phase']['PMFs'][cell_metadata['Local Cell Idxs'], start_frame:landmark_frame+1]
-        #     pmf = pmf / np.nansum(pmf)
-        #     binned_pmf = np.digitize(pmf, self.event_time_bins) - 1
-        #     return cell_features, time_to_event_bin, event_indicator, time_to_event, cell_metadata['Local Cell Idxs'], self.hdf5_paths[cell_metadata['File Idxs']], binned_pmf
-        return cell_features, time_to_event_bin, event_indicator, time_to_event, cell_metadata['Local Cell Idxs'], self.hdf5_paths[cell_metadata['File Idxs']], binned_pmf
-        
+
+        item = {
+            'features': cell_features,
+            'time_to_event_bin': time_to_event_bin,
+            'time_to_event': time_to_event,
+            'event_indicator': event_indicator,
+            'cell_idx': cell_metadata['Local Cell Idxs'],
+            'hdf5_path': self.hdf5_paths[cell_metadata['File Idxs']],
+            'pmf': pmf,
+            'binned_pmf': binned_pmf,
+        }
+        return item
+
         # return cell_features, time_to_event_bin, event_indicator, time_to_event
 
     def plot_event_vs_censoring_hist(self, title='Events vs Censored', save_path=None, bins=16, show=False):
@@ -401,7 +402,7 @@ class CellDataset(torch.utils.data.Dataset):
         """
         observation_times = self.cell_metadata['End Frames'] - self.cell_metadata['Start Frames'] + 1
         death_frames = self.cell_metadata['Death Frames']
-        
+
         is_event = ~np.isnan(death_frames)
         is_censored = np.isnan(death_frames)
 
@@ -429,48 +430,80 @@ class CellDataset(torch.utils.data.Dataset):
 
 # def summary_collate_fn(batch)
 
-def collate_fn(batch, fixed_length=None, dataset: CellDataset = None, device='cpu', with_nans=False, get_pmfs=False):
-    """
-    Custom collate function to handle variable-length sequences and padding.
-    """
+
+def collate_fn(batch, dataset: CellDataset = None, device: str = 'cpu') -> dict:
+    """Collate function to optionally pad sequences to constant length"""
     new_batch = []
     for sample in batch:
         while sample is None:
             sample = dataset[np.random.randint(len(dataset))]
-            # print('Warning! Invalid sample')
         new_batch.append(sample)
     batch=new_batch
-            
-    # print(len(batch))
-    # print(len(batch[0]))
-    cell_features, time_to_event_bins, event_indicators, time_to_events, cell_idxs, files, pmfs = zip(*batch)
 
+    batch_dict = {key: [sample[key] for sample in batch] for key in batch[0].keys()}
+    batch_dict['lengths'] = [features.shape[0] for features in batch_dict['features']]
 
-    time_to_event_bins = torch.tensor(time_to_event_bins, dtype=torch.long, device=device)
-    event_indicators = torch.tensor(event_indicators, dtype=torch.float32, device=device)
-    time_to_events = torch.tensor(time_to_events, dtype=torch.long, device=device)
-    pmfs = torch.tensor(pmfs, dtype=torch.float32, device=device) if get_pmfs else None
-    # print(observation_times)
+    # Pad start of sequences to fixed length for batch
+    max_seq_len = max(batch_dict['lengths'])
+    for idx, (cell_feats, length) in enumerate(zip(batch_dict['features'], batch_dict['lengths'])):
+        padding_len = max_seq_len - length
+        if padding_len > 0:
+            padding = np.zeros(shape=(padding_len, cell_feats.shape[1]))
+            padded_cell_feats = np.concatenate((padding, cell_feats), axis=0)
+            batch_dict['features'][idx] = padded_cell_feats
 
-    cell_features = [torch.tensor(features, dtype=torch.float32, device=device) for features in cell_features]  # List of [num_frames, num_features]
-    # print(cell_features)
-
-    if fixed_length is not None:
-        cell_features = [f[:fixed_length] for f in cell_features]
-        cell_features = [torch.cat([f, torch.zeros(fixed_length - len(f), f.shape[1])], dim=0) if len(f) < fixed_length else f for f in cell_features]
-        lengths = torch.tensor([min(len(f), fixed_length) for f in cell_features], dtype=torch.long)
-    else:
-        lengths = torch.tensor([len(f) for f in cell_features], dtype=torch.long)
-        cell_features = torch.nn.utils.rnn.pad_sequence(cell_features, batch_first=True, padding_value=0.0)  # [batch_size, max_seq_len, num_features]
+    batch_dict['features'] = torch.tensor(batch_dict['features'], dtype=torch.float32, device=device)
+    batch_dict['lengths'] = torch.tensor(batch_dict['lengths'], dtype=torch.long, device=device)
+    batch_dict['time_to_event'] = torch.tensor(batch_dict['time_to_event'], dtype=torch.float32, device=device)
+    batch_dict['event_indicator'] = torch.tensor(batch_dict['event_indicator'], dtype=torch.float32, device=device)
     
-    if with_nans:
-        nan_mask = ~torch.isnan(cell_features)
-        cell_features = torch.where(nan_mask, cell_features, torch.tensor(0.0, device=device))
-        cell_features = torch.cat([cell_features, nan_mask.float()], dim=-1)  # shape: [batch, frames, features*2]
-    if get_pmfs:
-        return cell_features, lengths, time_to_event_bins, event_indicators, time_to_events, cell_idxs, files, pmfs
-    
-    return cell_features, lengths, time_to_event_bins, event_indicators, time_to_events, cell_idxs, files
+
+    return batch_dict
+
+
+
+# def collate_fn(batch, fixed_length=None, dataset: CellDataset = None, device='cpu', with_nans=False, get_pmfs=False):
+#     """
+#     Custom collate function to handle variable-length sequences and padding.
+#     """
+#     new_batch = []
+#     for sample in batch:
+#         while sample is None:
+#             sample = dataset[np.random.randint(len(dataset))]
+#             # print('Warning! Invalid sample')
+#         new_batch.append(sample)
+#     batch=new_batch
+
+#     # print(len(batch))
+#     # print(len(batch[0]))
+#     cell_features, time_to_event_bins, event_indicators, time_to_events, cell_idxs, files, pmfs = zip(*batch)
+
+
+#     time_to_event_bins = torch.tensor(time_to_event_bins, dtype=torch.long, device=device)
+#     event_indicators = torch.tensor(event_indicators, dtype=torch.float32, device=device)
+#     time_to_events = torch.tensor(time_to_events, dtype=torch.long, device=device)
+#     pmfs = torch.tensor(pmfs, dtype=torch.float32, device=device) if get_pmfs else None
+#     # print(observation_times)
+
+#     cell_features = [torch.tensor(features, dtype=torch.float32, device=device) for features in cell_features]  # List of [num_frames, num_features]
+#     # print(cell_features)
+
+#     if fixed_length is not None:
+#         cell_features = [f[:fixed_length] for f in cell_features]
+#         cell_features = [torch.cat([f, torch.zeros(fixed_length - len(f), f.shape[1])], dim=0) if len(f) < fixed_length else f for f in cell_features]
+#         lengths = torch.tensor([min(len(f), fixed_length) for f in cell_features], dtype=torch.long)
+#     else:
+#         lengths = torch.tensor([len(f) for f in cell_features], dtype=torch.long)
+#         cell_features = torch.nn.utils.rnn.pad_sequence(cell_features, batch_first=True, padding_value=0.0)  # [batch_size, max_seq_len, num_features]
+
+#     if with_nans:
+#         nan_mask = ~torch.isnan(cell_features)
+#         cell_features = torch.where(nan_mask, cell_features, torch.tensor(0.0, device=device))
+#         cell_features = torch.cat([cell_features, nan_mask.float()], dim=-1)  # shape: [batch, frames, features*2]
+#     if get_pmfs:
+#         return cell_features, lengths, time_to_event_bins, event_indicators, time_to_events, cell_idxs, files, pmfs
+
+#     return cell_features, lengths, time_to_event_bins, event_indicators, time_to_events, cell_idxs, files
 
 def dataset_to_xy(ds, n_slices=5):
     """Convert dataset to sksurv compatible."""
@@ -483,10 +516,10 @@ def dataset_to_xy(ds, n_slices=5):
                     X.append(features.flatten())
                     events.append(event)
                     times.append(time)
-                    
+
                     assert ~np.any(np.isnan(X)), (features.flatten(), features.flatten().shape, event, time)
     X = np.vstack(X)
     y = np.array(list(zip(events, times)), dtype=[('event', '?'), ('time', '<f8')])
     return X, y
 
-    
+
