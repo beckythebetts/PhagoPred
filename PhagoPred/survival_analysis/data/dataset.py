@@ -146,8 +146,10 @@ class CellDataset(torch.utils.data.Dataset):
                 none_cells += 1
                 continue
 
-            _, _, e, t, _, _, _ = item
+            # _, _, e, t, _, _, _ = item
 
+            e = item['event_indicator']
+            t = item['time_to_event']
             events += e
             censored += (1-e)
             if t is not None and e==1:
@@ -441,22 +443,21 @@ def collate_fn(batch, dataset: CellDataset = None, device: str = 'cpu') -> dict:
     batch=new_batch
 
     batch_dict = {key: [sample[key] for sample in batch] for key in batch[0].keys()}
-    batch_dict['lengths'] = [features.shape[0] for features in batch_dict['features']]
+    batch_dict['length'] = [features.shape[0] for features in batch_dict['features']]
+    batch_size = len(batch_dict['length'])
 
     # Pad start of sequences to fixed length for batch
-    max_seq_len = max(batch_dict['lengths'])
-    for idx, (cell_feats, length) in enumerate(zip(batch_dict['features'], batch_dict['lengths'])):
-        padding_len = max_seq_len - length
-        if padding_len > 0:
-            padding = np.zeros(shape=(padding_len, cell_feats.shape[1]))
-            padded_cell_feats = np.concatenate((padding, cell_feats), axis=0)
-            batch_dict['features'][idx] = padded_cell_feats
-
-    batch_dict['features'] = torch.tensor(batch_dict['features'], dtype=torch.float32, device=device)
-    batch_dict['lengths'] = torch.tensor(batch_dict['lengths'], dtype=torch.long, device=device)
+    max_seq_len = max(batch_dict['length'])
+    num_features = batch_dict['features'][0].shape[1]
+    features_padded = torch.zeros(batch_size, max_seq_len, num_features, dtype=torch.float32, device=device)
+    for idx, (cell_feats, length) in enumerate(zip(batch_dict['features'], batch_dict['length'])):
+        features_padded[idx, -length:] = torch.tensor(cell_feats, dtype=torch.float32, device=device)
+    # batch_dict['features'] = torch.tensor(batch_dict['features'], dtype=torch.float32, device=device)
+    batch_dict['features'] = features_padded
+    batch_dict['length'] = torch.tensor(batch_dict['length'], dtype=torch.long, device=device)
     batch_dict['time_to_event'] = torch.tensor(batch_dict['time_to_event'], dtype=torch.float32, device=device)
     batch_dict['event_indicator'] = torch.tensor(batch_dict['event_indicator'], dtype=torch.float32, device=device)
-    
+    batch_dict['time_to_event_bin'] = torch.tensor(batch_dict['time_to_event_bin'], dtype=torch.int16, device=device)
 
     return batch_dict
 

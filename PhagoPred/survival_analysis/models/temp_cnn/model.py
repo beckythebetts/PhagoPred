@@ -1,8 +1,6 @@
 import torch
-from pytorch_tcn import TCN
 
 from PhagoPred.survival_analysis.models import losses
-
 
 def build_fc_layers(input_size,
                     output_size,
@@ -37,7 +35,8 @@ class TemporalCNN(torch.nn.Module):
                  kernel_sizes: list[int] = [3, 3],
                  dilations: list[int] = [1, 2, 4],
                  attention_layers: list[int] = [64, 64],
-                 fc_layers: list[int] = [64, 64]
+                 fc_layers: list[int] = [64, 64],
+                 **_
                  ):
 
         super().__init__()
@@ -52,25 +51,38 @@ class TemporalCNN(torch.nn.Module):
             in_channels = out_channels
 
         self.attention = build_fc_layers(input_size=in_channels, output_size=1, layer_sizes=attention_layers)
+        self.attention_vector = torch.nn.Parameter(torch.randn(in_channels))
         self.fc = build_fc_layers(input_size=in_channels, output_size=output_size, layer_sizes=fc_layers)
 
-    def forward(self, x, return_attention: bool=False) -> torch.Tensor:
+    def forward(self, x, lengths, return_attention: bool=False, return_logits: bool = False) -> torch.Tensor:
         """
         Args
         ----
             x [batchsize, seq_len, features]
         """
-
+        batch_size, seq_len, _ = x.size()
+        # Get padding mask
+        mask = torch.arange(seq_len, device=lengths.device).unsqueeze(0) 
+        mask = mask >= (seq_len - lengths).unsqueeze(1) 
+        
         x = x.permute(0, 2, 1) # (batchsize, features, seq_length)
         for layer in self.cn_layers:
             x = layer(x)
         x = x.permute(0, 2, 1) # (batchsize, seq_len, features)
 
-        attn_weights = self.attention(x).squeeze(-1) # (B, T)
-        attn_weights = torch.nn.functional.softmax(attn_weights, dim=1)
+        # attn_weights = self.attention(x).squeeze(-1) # (B, T)
+        # attn_weights = attn_weights.masked_fill(~mask, -1e9)
+        # attn_weights = torch.nn.functional.softmax(attn_weights, dim=1)
+        
+        
+        attn_weights = torch.einsum("btc,c->bt", x, self.attention_vector)
+        attn_weights = attn_weights.masked_fill(~mask, -1e9)
+        attn_weights = torch.nn.functional.softmax(attn_weights)
+
         context_vector = torch.sum(attn_weights.unsqueeze(-1)*x, dim=1) # (B, channels)
         output = self.fc(context_vector)
-        output = torch.nn.functional.softmax(output)
+        if not return_logits:
+            output = torch.nn.functional.softmax(output, dim=1)
 
         if return_attention:
             return output, attn_weights
@@ -93,18 +105,81 @@ def estimated_cif(
     cif = torch.cumsum(outputs, dim=1)
     return cif
 
+import torch
+import torch.nn.functional as F
+
+class TemporalGradCAM:
+    """
+    Grad-CAM for 1D temporal CNNs.
+
+    Usage:
+        cam = TemporalGradCAM(model, target_layer=model.cn_layers[-1])
+        outputs = model(x, lengths)
+        # Choose target scalar (e.g., probability at time bin 5)
+        target = outputs[:, 5].sum()
+        cam_map = cam(x, lengths, target)
+    """
+
+    def __init__(self, model: torch.nn.Module, target_layer: torch.nn.Module):
+        self.model = model
+        self.target_layer = target_layer
+
+        self.activations = None
+        self.gradients = None
+
+        # Forward hook: save activations
+        target_layer.register_forward_hook(self.save_activation)
+        # Backward hook: save gradients
+        target_layer.register_full_backward_hook(self.save_gradient)
+
+    def save_activation(self, module, inp, out):
+        # out shape: (B, C, T)
+        self.activations = out.detach()
+
+    def save_gradient(self, module, grad_in, grad_out):
+        # grad_out[0] shape: (B, C, T)
+        self.gradients = grad_out[0].detach()
+
+    def __call__(self, x: torch.Tensor, lengths: torch.Tensor, target_scalar: torch.Tensor):
+        """
+        Compute Grad-CAM map over time.
+
+        Args:
+            x: (B, T, C) input sequence
+            lengths: (B,) sequence lengths
+            target_scalar: scalar output to backprop
+        Returns:
+            cam_map: (B, T) importance over time
+        """
+        self.model.zero_grad()
+        output = self.model(x, lengths)
+        target_scalar.backward(retain_graph=True)
+
+        # Get activations and gradients: (B, C, T)
+        A = self.activations
+        dA = self.gradients
+
+        # Compute channel weights (global average pooling over time)
+        weights = dA.mean(dim=2)  # (B, C)
+
+        # Weighted combination of activations
+        cam = torch.relu(torch.einsum("bc, bct->bt", weights, A))  # (B, T)
+
+        # Optional: normalize per sequence
+        cam = cam / (cam.max(dim=1, keepdim=True).values + 1e-9)
+
+        return cam
 
 def compute_loss(
     outputs: torch.Tensor,
     t: torch.Tensor,
     e: torch.Tensor,
-    x: torch.Tensor = None,
-    y: torch.Tensor = None,
 ) -> torch.Tensor:
 
 
     t = t.long()
 
+    # outputs = torch.nn.functional.softmax(outputs, dim=1)
     cif = estimated_cif(outputs)
 
     negative_log_likelihood, censored_loss, uncesnored_loss = losses.negative_log_likelihood(outputs, cif, t, e)
@@ -112,22 +187,7 @@ def compute_loss(
 
     ranking_loss = losses.ranking_loss(cif, t, e)
 
-    if x is None or y is None:
-        prediction_loss = torch.tensor(0.0, device=outputs.device)
-    else:
-        mask = None
-
-        if mask is None:
-            features = x
-            mask = torch.ones_like(features, device=features.device)
-        else:
-            features = x[:, :, :x.size(-1)//2]
-            mask = x[:, :, x.size(-1)//2:]
-
-        prediction_loss = losses.prediction_loss(y, features, mask)
-
-    # loss = negative_log_likelihood + ranking_loss + prediction_loss
-    loss = negative_log_likelihood + prediction_loss + ranking_loss
+    loss = negative_log_likelihood + ranking_loss
     if torch.isnan(loss) or torch.isinf(loss):
         print("NaN or inf loss encountered in final loss!")
         print("NaN or inf loss encountered:")
@@ -135,11 +195,10 @@ def compute_loss(
         print(f"  Ranking Loss: {ranking_loss.item()}")
         print(f"  NLL censored: {censored_loss.item()}")
         print(f"  NLL uncensored: {uncesnored_loss.item()}")
-        print(f"  Prediction Loss: {prediction_loss.item()}")
         print(f"  Outputs: {outputs}")
         print(f"  CIF: {cif}")
         print(f"  t: {t}")
         print(f"  e: {e}")
         raise ValueError("NaN or inf loss encountered in compute_loss")
 
-    return loss, negative_log_likelihood, ranking_loss, prediction_loss, censored_loss, uncesnored_loss
+    return loss, negative_log_likelihood, ranking_loss, censored_loss, uncesnored_loss

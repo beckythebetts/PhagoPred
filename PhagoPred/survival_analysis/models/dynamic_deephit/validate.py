@@ -17,18 +17,18 @@ def validate_step(model_, dataloader, loss_fn, device):
 
     with torch.no_grad():
         for batch in dataloader:
-            cell_features, lengths, time_to_event_bins, event_indicators, time_to_events, cell_idxs, files, pmfs = batch
-            cell_features = cell_features.to(device)
-            lengths = lengths.to(device)
-            time_to_event_bins = time_to_event_bins.to(device)
-            event_indicators = event_indicators.to(device)
-            time_to_events = time_to_events.to(device)
+            # cell_features, lengths, time_to_event_bins, event_indicators, time_to_events, cell_idxs, files, pmfs = batch
+            # cell_features = cell_features.to(device)
+            # lengths = lengths.to(device)
+            # time_to_event_bins = time_to_event_bins.to(device)
+            # event_indicators = event_indicators.to(device)
+            # time_to_events = time_to_events.to(device)
 
-            outputs, y = model_(cell_features)
-            loss_values = loss_fn(outputs, time_to_event_bins, event_indicators, cell_features, y)
+            outputs, y = model_(batch['features'], batch['length'])
+            loss_values = loss_fn(outputs, batch['time_to_event_bin'], batch['event_indicator'], batch['features'], y)
             for key, value in zip(
                 ['Total Loss', 'NLL Loss', 'Ranking Loss', 'Prediction Loss', 'Censored Loss', 'Uncensored Loss'], loss_values):
-                losses[key] += value.item() * cell_features.size(0)  # Multiply by batch size
+                losses[key] += value.item() * batch['features'].size(0)  # Multiply by batch size
 
     avg_losses = {key: value / len(dataloader.dataset) for key, value in losses.items()}
     return avg_losses
@@ -49,22 +49,30 @@ def visualize_validation_predictions(
     examples_plotted = 0
 
     for batch in dataloader:
-        cell_features, lengths, time_to_event_bins, event_indicators, time_to_events, cell_idxs, files, pmfs = batch
+        # cell_features, lengths, time_to_event_bins, event_indicators, time_to_events, cell_idxs, files, pmfs = batch
 
-        cell_features = cell_features.to(device)
-        lengths = lengths.cpu().numpy()
-        time_to_event_bins = time_to_event_bins.cpu().numpy()
-        event_indicators = event_indicators.cpu().numpy()
-        time_to_events = time_to_events.cpu().numpy()
-        pmfs = pmfs.cpu().numpy()
+        # cell_features = cell_features.to(device)
+        # lengths = lengths.cpu().numpy()
+        # time_to_event_bins = time_to_event_bins.cpu().numpy()
+        # event_indicators = event_indicators.cpu().numpy()
+        # time_to_events = time_to_events.cpu().numpy()
+        # pmfs = pmfs.cpu().numpy()
 
+        lengths = batch['length'].cpu().numpy()
+        pmfs = batch['binned_pmf']
+        time_to_events = batch['time_to_event'].cpu().numpy()
+        event_indicators = batch['event_indicator'].cpu().numpy()
+        cell_idxs = batch['cell_idx']
+        files = batch['hdf5_path']  
+        
+              
         with torch.no_grad():
-            predicted_dists, _, attn_weights = model(cell_features, return_attention=True)
+            predicted_dists, _, attn_weights = model(batch['features'], batch['length'], return_attention=True)
 
         predicted_dists_np = predicted_dists.cpu().numpy()
         attn_weights_np = attn_weights.cpu().numpy()
 
-        for i in range(len(cell_features)):
+        for i in range(len(batch['features'])):
             if examples_plotted >= num_examples:
                 break
 
@@ -73,17 +81,18 @@ def visualize_validation_predictions(
             # --------------------------------------------------
             #  Feature gradients (optional, still computed)
             # --------------------------------------------------
-            x = cell_features[i, :seq_len, :].detach().clone().to(device)
+            x = batch['features'][i, -seq_len:, :].detach().clone().to(device)
+            length = batch['length'][i].detach().clone().to(device)
             x.requires_grad_(True)
 
             model_was_training = model.training
             model.train()
-            pred_single, _, attn_single = model(x.unsqueeze(0), return_attention=True)
+            pred_single, _, attn_single = model(x.unsqueeze(0), length.unsqueeze(0), return_attention=True)
             scalar = pred_single.sum()
             model.zero_grad()
             scalar.backward()
 
-            attn_vec = attn_single[0, :seq_len].detach().cpu().numpy()  # (seq_len,)
+            attn_vec = attn_single[0, -seq_len:].detach().cpu().numpy()  # (seq_len,)
             feature_values = x.detach().cpu().numpy()  # (seq_len, num_features)
 
             if not model_was_training:
@@ -119,6 +128,8 @@ def visualize_validation_predictions(
             bin_widths = np.diff(abs_bin_edges)
             bin_widths[-1] = 100.0  # avoid zero width
 
+            pmf = np.append(np.zeros(seq_len), pmfs[i])
+            
             ax_sd.bar(
                 abs_bin_edges[:-1],
                 predicted_dists_np[i],
@@ -129,8 +140,18 @@ def visualize_validation_predictions(
                 alpha=0.5
             )
             
+            # ax_sd.fill_between(
+            #     np.arange(len(pmf)),
+            #     0,
+            #     pmf,
+            #     color='r',
+            #     alpha=0.5,
+            #     label='True time to event probability distribution'
+            # )
+            
             ax_sd.bar(
                 abs_bin_edges[:-1],
+                # np.arange(len(pmfs[i])),
                 pmfs[i],
                 width=bin_widths,
                 align='edge',
@@ -316,14 +337,14 @@ def validate(model_, model_dir, val_hdf5_paths):
         max_time_to_death=50,
     )
 
-    validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size=32, shuffle=False, collate_fn= lambda x: collate_fn(x, dataset=validate_dataset, get_pmfs=True))
+    validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size=32, shuffle=False, collate_fn= lambda x: collate_fn(x, dataset=validate_dataset, device=device))
 
     loss_fn = model.compute_loss
 
     val_loss = validate_step(model_, validate_loader, loss_fn, device)
     # print(f"Validation Loss: {val_loss:.4f}")
-    average_attention(model_, validate_loader, device, model_dir / 'attention_weights.jpeg')
-    average_feature_importance(model_, validate_loader, device, features, model_dir / 'feature_importance.jpeg')
+    # average_attention(model_, validate_loader, device, model_dir / 'attention_weights.jpeg')
+    # average_feature_importance(model_, validate_loader, device, features, model_dir / 'feature_importance.jpeg')
     visualize_validation_predictions(model_, validate_loader, device, num_examples=50, save_path=model_dir, bin_edges=np.array(model_params['event_time_bins']), features=features)
 
 def main():

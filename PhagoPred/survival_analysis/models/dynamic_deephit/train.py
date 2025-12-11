@@ -17,31 +17,17 @@ from PhagoPred.survival_analysis.models.dynamic_deephit.validate import validate
 
 def train_step(model, dataloader, optimiser, loss_fn, device, max_grad_norm=1.0):
     model.train()
-    # losses = {'Total Loss': 0.0, 'NLL Loss': 0.0, 'Ranking Loss': 0.0, 'Prediction Loss': 0.0}
-    # total_loss = 0.0
     losses = defaultdict(float)
     
     for batch in dataloader:
-        # cell_features, lengths, time_to_event_bins, event_indicators, time_to_event, cell_idxs, files = batch
-        # cell_features = cell_features.to(device)
-        # lengths = lengths.to(device)
-        # time_to_event_bins = time_to_event_bins.to(device)
-        # event_indicators = event_indicators.to(device)
-
         optimiser.zero_grad()
-        outputs, y = model(batch['features'])
-        loss_values = loss_fn(outputs, batch['time_to_event_bins'], batch['event_indicators'], batch['cell_features'], y)
+        outputs, y = model(batch['features'], batch['length'])
+        loss_values = loss_fn(outputs, batch['time_to_event_bin'], batch['event_indicator'], batch['features'], y)
         
         loss = loss_values[0]
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
         optimiser.step()
-        
-        # for name, param in model.named_parameters():
-        #     if param.grad is None:
-        #         print(f"Parameter {name} has no gradient!")
-        #     else:
-        #         print(f"Parameter {name} grad mean: {param.grad.mean().item()}")
         
         for key, value in zip(
             ['Total Loss', 'NLL Loss', 'Ranking Loss', 'Prediction Loss', 'Censored Loss', 'Uncensored Loss'], loss_values
@@ -131,24 +117,14 @@ def compute_orcale_losses(dataset: CellDataset, loss_fn, device:str):
         dataset, 
         batch_size=256,
         shuffle=False,
-        collate_fn=lambda x: collate_fn(x, dataset=dataset, device=device, get_pmfs=True),
+        collate_fn=lambda x: collate_fn(x, dataset=dataset, device=device),
         num_workers=0,
     )
     for batch in tqdm(dataloader, 'Getting oracle losses'):
-        # item = dataset.__getitem__(idx, get_pmf=True)
-        # if item is None:
-        #     continue
-        # cell_features, time_to_event_bin, event_indicator, time_to_event, cell_metadata['Local Cell Idxs'], self.hdf5_paths[cell_metadata['File Idxs']], binned_pmf
-        # _, _, t_bin, e, _, _, _, pmf = batch
-        # loss_values = loss_fn(
-        #     torch.tensor(pmf).to(device)[None:, ], 
-        #     torch.tensor(t_bin).to(device)[None, :], 
-        #     torch.tensor(e).to(device)[None,],
-        # )
         pmf = torch.tensor(batch['binned_pmf']).to(device)
         loss_values = loss_fn(
             pmf, 
-            batch['t_bin'], 
+            batch['time_to_event_bin'], 
             batch['event_indicator'],
             )
         for key, value in zip(
