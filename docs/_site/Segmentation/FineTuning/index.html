@@ -10,7 +10,7 @@
   <head>
     <meta charset="utf-8">
 
-<!-- begin _includes/seo.html --><title>Imaging Conditions Validity - Phagocytosis Outcome Prediction</title>
+<!-- begin _includes/seo.html --><title>Fine Tuning - Phagocytosis Outcome Prediction</title>
 <meta name="description" content="">
 
 
@@ -18,8 +18,8 @@
 <meta property="og:type" content="website">
 <meta property="og:locale" content="en_US">
 <meta property="og:site_name" content="Phagocytosis Outcome Prediction">
-<meta property="og:title" content="Imaging Conditions Validity">
-<meta property="og:url" content="http://localhost:4000/PhagoPred/Imaging/ImagingConditionsValidity/">
+<meta property="og:title" content="Fine Tuning">
+<meta property="og:url" content="http://localhost:4000/PhagoPred/Segmentation/FineTuning/">
 
 
 
@@ -33,7 +33,7 @@
 
 
 
-<link rel="canonical" href="http://localhost:4000/PhagoPred/Imaging/ImagingConditionsValidity/">
+<link rel="canonical" href="http://localhost:4000/PhagoPred/Segmentation/FineTuning/">
 
 
 
@@ -208,7 +208,7 @@
 
 
   <article class="page" itemscope itemtype="https://schema.org/CreativeWork">
-    <meta itemprop="headline" content="Imaging Conditions Validity">
+    <meta itemprop="headline" content="Fine Tuning">
     
     
     
@@ -217,7 +217,7 @@
       
         <header>
           <h1 id="page-title" class="page__title" itemprop="headline">
-            <a href="http://localhost:4000/PhagoPred/Imaging/ImagingConditionsValidity/" itemprop="url">Imaging Conditions Validity
+            <a href="http://localhost:4000/PhagoPred/Segmentation/FineTuning/" itemprop="url">Fine Tuning
 </a>
           </h1>
           
@@ -231,47 +231,50 @@
           <aside class="sidebar__right ">
             <nav class="toc">
               <header><h4 class="nav__title"><i class="fas fa-file-alt"></i> On this page</h4></header>
-              <ul class="toc__menu"><li><a href="#fluorescent-signal">Fluorescent signal</a></li><li><a href="#macrophage-survival">Macrophage Survival</a></li><li><a href="#macrophage-population-growth">Macrophage Population Growth</a></li><li><a href="#macrophage-morphology">Macrophage Morphology</a></li></ul>
+              
             </nav>
           </aside>
         
-        <p>Fluorescence imaging may lead to photoxicity in macrophages, mostly due to the generation of ROS. Therefore, various fluorescence illumination exposures where tested in an attempt to balance maximising the signal intensity of the labelled <em>S. Aureus</em> bacteria against minimising the phototoxic affects on J774 macrophages.</p>
-<h1 id="fluorescent-signal">Fluorescent signal</h1>
-<p><img src="/PhagoPred/images/exposure_signals.png" alt="Comparison of signal for different exposures" /></p>
+        <p>The Mask R-CNN model was initially trained on full FOV images (2048 x 2048 pixels). Having segmented and tracked full time series with this model, crops of cells just before and just after cell death could be taken and manually labelled, allowing the model to be further fine tuned to better identify the exact frame of cell death. Additionally, crops of clusters which were often incorrectly segmented could be manually segmented and used for fine tuning. From this additional data consisting of {N} images and {K} training and validation sets were created with an 80/20 splits for K-Fold cross validation.</p>
 
-\[SNR = \frac{\hat{S}}{\sigma_b}\]
+<table>
+  <thead>
+    <tr>
+      <th> </th>
+      <th>No Fine Tuning</th>
+      <th>Fine Tuning</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Confusion Matrix (crops containing 0 or 1 cells only) - median (5th-95th percentile)</td>
+      <td><img src="/PhagoPred/images/cmnofinetune.png" alt="CM" /></td>
+      <td><img src="/PhagoPred/images/cmfinetune.png" alt="CM" /></td>
+    </tr>
+    <tr>
+      <td>Classification Accurcay</td>
+      <td>0.74 ± 0.02</td>
+      <td>0.90 ± 0.02</td>
+    </tr>
+    <tr>
+      <td>Example Cluster Segmentation (Green - Manual, Red - Mask R-CNN, Yellow - Overlap)</td>
+      <td><img src="/PhagoPred/images/cluster0.png" alt="Example" /> <img src="/PhagoPred/images/cluster1.png" alt="Example" /></td>
+      <td><img src="/PhagoPred/images/cluster0f.png" alt="Example" /> <img src="/PhagoPred/images/cluster1f.png" alt="Example" /></td>
+    </tr>
+  </tbody>
+</table>
 
-\[SBR = \frac{\hat{S}}{\hat{b}}\]
+<p>Precision recall curves for crops containing clusters are also shown:
+<img src="/PhagoPred/images/cluster_prec_recall.png" alt="Precicions Recall Curve" /></p>
 
-\[CV = \frac{\sigma_S}{\hat{S}}\]
+<p>Various methods of fine tuning were tested:</p>
+<ul>
+  <li>Fine tuning ROI head (freezing weights in all other layers)</li>
+  <li>Fine tuning classfication head only (freezing weights in all other layers)</li>
+  <li>Fine tuning whole model</li>
+</ul>
 
-<p>$\hat{S}$, $\sigma_S$ are mean and standard deviation of signal, and $\hat{b}$, $\sigma_b$ are mean and standard deviaton of background.
-A background image for each exposure was taken and subtracted, then a Gaussian smoothed image ($\sigma=200$) was also subtracted.</p>
-
-<h1 id="macrophage-survival">Macrophage Survival</h1>
-<p>For 0s, 2.5s and 5s exposures, unlabelled macrophges were imaged over a period of 67 hours. The resulting timelapses were <a href="/PhagoPred/Segmentation">segmented</a>, <a href="/PhagoPred/Tracking">tracked</a> and the <a href="/PhagoPred/Segmentation/CellDeathDetection">time of death for cells identified</a>. From this a Kaplan-Meier estimator was used to estimate survival functions for each cell population. It is important to note that the KM estimator assumes independence between each sample (cell) which is not the case here due to signalling and interactions between macrophages. However, it still describes the differences in survival trends between each exposure group.
-<img src="/PhagoPred/images/km_curves.png" alt="KM curves" />
-Shaded regions show 95% confidence intervals. Only cells present and alive during the first frame of imaging were included here.</p>
-
-<h1 id="macrophage-population-growth">Macrophage Population Growth</h1>
-<p>The total number of alive macrophages at each frame was also calculated and fitted with a Gompertz curve. Population $N$ at time $t$ is paramaterised by the maximum poulation $K$, the time of maximum growth $t_0$ and an intial growth rate $r$.</p>
-
-\[N(t) = K \exp({-\exp({r(t-t_0)}}))\]
-
-<p><img src="/PhagoPred/images/gompertz.png" alt="Gompertx fits" />
-The growth rate $r$ found for each fit was compared.
-<img src="/PhagoPred/images/gompertz_r.png" alt="Gompertx r" /></p>
-
-<h1 id="macrophage-morphology">Macrophage Morphology</h1>
-<p>Finally a number of morphological and movement features were calcuated for each macorpahge at each time step. The histograms for each of these feature were compared between each exposure poulation using the Kolomogorov-Smirnov statistic, $D$, which is the maximum difference between the cumulative density functions ($F_1$, $F_2$) of each distribution.</p>
-
-\[D = sup_x \left| F_1(x) - F_2(x)\right|\]
-
-<p>The median and 5th and 95th percentile values were also plotted.</p>
-
-<p><img src="/PhagoPred/images/standard_hists.png" alt="feature Histograms" />
-<img src="/PhagoPred/images/skeleton_hists.png" alt="feature Histograms" /></p>
-
+<p>FIne tuning the whole model was the only method found to show substantial improvement in performance. {Get hyperparameters file}</p>
 
         
       </section>

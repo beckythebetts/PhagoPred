@@ -9,6 +9,8 @@ navigation:
   - title: 2. Segmentation
     url: /Segmentation/
     children:
+    - title: Fine Tuning
+      url: /Segmentation/FineTuning
     - title: Cell Death Detection
       url: /Segmentation/CellDeathDetection
     - title: Loss Functions

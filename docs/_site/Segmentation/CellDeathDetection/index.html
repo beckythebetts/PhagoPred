@@ -163,6 +163,8 @@
           
           <ul>
             
+              <li><a href="/PhagoPred/Segmentation/FineTuning">Fine Tuning</a></li>
+            
               <li><a href="/PhagoPred/Segmentation/CellDeathDetection">Cell Death Detection</a></li>
             
               <li><a href="/PhagoPred/Segmentation/LossFunctions">Loss Functions</a></li>
@@ -236,19 +238,10 @@
         <p>In order to identify when a macrophage dies, the Mask R-CNN model can be trained on images containing both alive and dead cells. In general here, the moment of cell death is taken as when the cell looses it’s structure and the membrane can no longer be clearly defined. (Cells often ball up and exhibit membrane blebbing before this occurs.)
 <img src="/PhagoPred/images/CellDeathMontage.png" alt="Images of cell death" />
 KFold cross validation on the training images (taking one image out for validation per fold), suggested that this performed reasonably:
-<img src="/PhagoPred/images/maskrcnn_performance.png" alt="Preciison recall curves for alive and dead macropahages" />
-These classifications could then be used to identify the frame of cell death. It was assumed there would be some noise in the classifications, so alive cells were asigned a score 1, and dead cells 0. These scores were then smoothed for each cell over time (by taking a 5 frame rolling average) and the cell death was taken as the first frame for which the score dropped below 0.5 for at least 10 frames. However, as shown below, this did not accurately identify cell death. Average error was 56.5 frames.
-<img src="/PhagoPred/images/CellDeathPredictionAccuracy.png" alt="Predicted vs true cell death frame" />
-The training images contained both alive and dead cells. However, cell appearance changed significantly just before death. So to accurately identify the exact frame of death, training data of cells just before and just after death would be required. 
-For 50 cells, the exact frame of death was manually identified. Frames [1, 2, 3, 4, 5, 50, 100, 150, 200] before and after this were used to create a new fine tuning dataset. Images were cropped to the region of the cell to ensure all masks were correct. A training and validation set were crated with an 80/20 split. Below is the results of the original model, as well as the results after fine tuning:</p>
-<ol>
-  <li>Just the classificaiton head</li>
-  <li>The whole ROI head</li>
-  <li>The entire model
-<img src="/PhagoPred/images/cms.png" alt="Confusion matrices before and after fine tuning" />
-The resulting accuracies are either lower than or the same as when doing no fine tuning, more training data is probably needed.
-More cells were added to the training set (total 200 cells). For each cell a random frame between 1 and 10 frames before cell death was selected, a frame 100 frames before cell death and a random frame between1 and 10 frames after cell death. False psitive segmentations and incorrectly merged cells (undersegmentation) were also corrected and added to the dataset.</li>
-</ol>
+<img src="/PhagoPred/images/maskrcnn_performance.png" alt="Preciison recall curves for alive and dead macropahages" /></p>
+
+<p>These classifications could then be used to identify the frame of cell death. It was assumed there would be some noise in the classifications, so alive cells were asigned a score 1, and dead cells 0. These scores were then smoothed for each cell over time (by taking a 5 frame rolling average) and the cell death was taken as the latest frame for which the score dropped below 0.85. The number of frames in the rolling average, and the threshold score were chsoen through a hyperparamter grid search. 
+<img src="/PhagoPred/images/celldeathpred.png" alt="Predicted vs true cell death frame" /></p>
 
         
       </section>
