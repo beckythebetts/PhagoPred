@@ -12,7 +12,8 @@ class Cell:
         self.features = self._generate_base_features()
     
     def _generate_base_pmf(self):
-        pmf = np.ones(self.T) / self.T
+        # pmf = np.ones(self.T) / self.T
+        pmf = np.zeros(self.T)
         # end_peak = np.exp(-0.5 * ((np.arange(self.T) - (self.T-1)) / 50)**2)
         # pmf += end_peak
         return pmf
@@ -53,16 +54,17 @@ class Rule:
     
 class VariationRule(Rule):
     """Increase hazard {delay} frames after an increase in std of {feature}."""
-    def __init__(self, feature: str = '0', probability: float = 1.0, delay: int = 200, sigma: float = 10.0):
+    def __init__(self, feature: str = '0', probability: float = 1.0, delay: int = 200, sigma: float = 10.0, max_strength=1.0):
         self.feature = feature
         self.probability = probability
         self.delay = delay
         self.sigma = sigma
+        self.max_strength = max_strength
         
     def apply(self, cell: Cell) -> None:
         if np.random.rand() < self.probability:
             
-            strength = np.abs(np.random.rand())
+            strength = np.random.rand()*self.max_strength
             
             frame = np.random.randint(cell.T)
             start_idx = frame - self.delay
@@ -73,40 +75,50 @@ class VariationRule(Rule):
             cell[self.feature][start_idx:] = slice_
             
             t = np.arange(cell.T)
-            gaussian = np.exp(-0.5 * ((t - frame) / self.sigma)**2)*strength
-            
-            cell.pmf += gaussian
+            gaussian = np.exp(-0.5 * ((t - frame) / self.sigma)**2)
+            gaussian = gaussian / np.sum(gaussian)
+            cell.pmf += gaussian * strength
+            assert np.sum(cell.pmf) <= 1.0, f"PMF exceeds 1.0, {self.max_strength}, {strength}, {np.sum(cell.pmf)}"
 
 
 class GradualRampRule(Rule):
-    def __init__(self, feature='1', probability=1.0, ramp_length=30, ramp_height=10.0, delay=100, sigma=10.0):
+    def __init__(self, feature='1', probability=1.0, ramp_length=30, ramp_height=10.0, delay=100, sigma=10.0, max_strength: float=1.0):
         self.feature = feature
         self.probability = probability
         self.ramp_length = ramp_length
         self.ramp_height = ramp_height
         self.delay = delay
         self.sigma = sigma
+        self.max_strength = max_strength
 
-        
+    
     def apply(self, cell: Cell):
         if np.random.rand() < self.probability:
-            strength = np.abs(np.random.randn())
+            strength = np.random.rand()*self.max_strength
             start = np.random.randint(cell.T - self.ramp_length)
             ramp = np.linspace(0, self.ramp_height*strength, self.ramp_length)
             cell[self.feature][start:start+self.ramp_length] += ramp
             t = np.arange(cell.T)
             hazard_frame = start + self.ramp_length + self.delay
-            cell.pmf += np.exp(-0.5*((t - hazard_frame)/self.sigma)**2) * strength
+            gaussian = np.exp(-0.5 * ((t - hazard_frame) / self.sigma)**2)
+            gaussian = gaussian / np.sum(gaussian)
+            cell.pmf += gaussian * strength
+            assert np.sum(cell.pmf) <= 1.0, f"PMF exceeds 1.0, {self.max_strength}, {strength}, {np.sum(cell.pmf)}"
 
 
             
 def create_synthetic_dataset(filename: Path, num_cells: int = 1000, num_frames: int = 1000):
     """Create synthetic dataset with given number of cells and frames."""
     
+    
     rules = [
-        # VariationRule(),
+        VariationRule(),
         GradualRampRule(),
     ]
+    num_rules = len(rules)
+    for rule in rules:
+        rule.max_strength = 1 / num_rules
+        print(rule.max_strength)
     
     start_frames = np.random.randint(0, num_frames//2, size=num_cells)
     end_frames = np.random.randint(num_frames//2, num_frames, size=num_cells)
@@ -115,7 +127,7 @@ def create_synthetic_dataset(filename: Path, num_cells: int = 1000, num_frames: 
     
     all_features = {name: np.empty((num_frames, num_cells), dtype=np.float32) for name in features}
     all_deaths = np.empty(num_cells, dtype=np.float32)
-    pmfs = np.empty((num_frames, num_cells), dtype=np.float32)
+    sfs = np.empty((num_frames, num_cells), dtype=np.float32)
     
     for c in tqdm(range(num_cells), desc='Generating cells'):
         cell = Cell(num_frames)
@@ -125,10 +137,25 @@ def create_synthetic_dataset(filename: Path, num_cells: int = 1000, num_frames: 
         # Apply rules
         for rule in rules:
             rule.apply(cell)
-        cell.normalise_pmf()
-        pmfs[:, c] = cell.pmf
-    
-        death_frame = np.random.choice(np.arange(num_frames), p=cell.pmf)
+        # cell.normalise_pmf()
+
+        cum_event_prob = np.cumsum(cell.pmf)
+        # if np.max(cum_event_prob):
+        #     raise ValueError(f"prob > 1 {cum_event_prob}")
+        sf = 1 - cum_event_prob
+        sfs[:, c] = sf
+        
+        # Sample death time
+        u = np.random.rand()
+        if u > np.max(cum_event_prob):
+            death_frame = np.nan
+        else:
+            death_frame = np.argmax(cum_event_prob >= u)
+            if death_frame < start or death_frame > end:
+                death_frame = np.nan
+        
+        
+        # death_frame = np.random.choice(np.arange(num_frames), p=cell.pmf)
         if death_frame < start or death_frame > end:
             death_frame = np.nan
         
@@ -150,7 +177,7 @@ def create_synthetic_dataset(filename: Path, num_cells: int = 1000, num_frames: 
         for name in features:
             grp.create_dataset(name, data=all_features[name], dtype=np.float32)
         grp.create_dataset('CellDeath', data=all_deaths[np.newaxis, :], dtype=np.float32)
-        grp.create_dataset('PMFs', data=pmfs, dtype=np.float32)
+        grp.create_dataset('SFs', data=sfs, dtype=np.float32)
             
 if __name__ == '__main__':
     create_synthetic_dataset(
@@ -160,6 +187,6 @@ if __name__ == '__main__':
     )
     create_synthetic_dataset(
         filename = Path('PhagoPred') / 'Datasets' / 'synthetic.h5',
-        num_cells=10000,
+        num_cells=1000,
         num_frames=1000,
     )

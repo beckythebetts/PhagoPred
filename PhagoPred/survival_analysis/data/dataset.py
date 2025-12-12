@@ -20,7 +20,7 @@ class CellDataset(torch.utils.data.Dataset):
                  stds: np.ndarray=None,
                  specified_cell_idxs: list[int]=None,
                  event_time_bins = None,
-                 num_bins: int = 16,
+                 num_bins: int = None,
                  preload_data: bool = True,
                  uncensored_only: bool = False,
                  summary_stats: bool = False,
@@ -80,7 +80,7 @@ class CellDataset(torch.utils.data.Dataset):
         if preload_data:
             self._preload_all_data()
 
-        if self.event_time_bins is None:
+        if self.event_time_bins is None and self.num_bins is not None:
             self._compute_bins()
 
         if summary_stats:
@@ -511,14 +511,17 @@ def dataset_to_xy(ds, n_slices=5):
     X, events, times = [], [], []
     for i in tqdm(range(len(ds)), desc=f'Processing dataset {ds}'):
         for _ in range(n_slices):
-            features, _, event, time = ds[i]
-            if features is not None:
+            item = ds[i]
+            if item is not None:
+                features = item['features']
+                e = item['event_indicator']
+                time = item['time_to_event']
                 if not np.any(np.isnan(features)):
                     X.append(features.flatten())
-                    events.append(event)
+                    events.append(e)
                     times.append(time)
 
-                    assert ~np.any(np.isnan(X)), (features.flatten(), features.flatten().shape, event, time)
+                    assert ~np.any(np.isnan(X)), (features.flatten(), features.flatten().shape, e, time)
     X = np.vstack(X)
     y = np.array(list(zip(events, times)), dtype=[('event', '?'), ('time', '<f8')])
     return X, y

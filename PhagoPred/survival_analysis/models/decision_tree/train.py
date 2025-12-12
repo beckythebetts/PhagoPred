@@ -196,49 +196,57 @@ def plot_all_km_curves_single_plot(node_info, save_dir: Path):
     plt.savefig(save_dir / 'all_km_curves.png', dpi=300)
     
 def main():
+        # features = [
+        #     'Area',
+        #     # 'X',
+        #     # 'Y',
+        #     'Circularity',
+        #     'Perimeter',
+        #     'Displacement',
+        #     'Speed',
+        #     'Skeleton Length', 
+        #     'Skeleton Branch Points', 
+        #     'Skeleton End Points', 
+        #     'Skeleton Branch Length Mean', 
+        #     'Skeleton Branch Length Std',
+        #     'Skeleton Branch Length Max',
+        #     # 'UMAP 1',
+        #     # 'UMAP 2',
+        #     # 'Mode 0',
+        #     # 'Mode 1',
+        #     # 'Mode 2',
+        #     # 'Mode 3',
+        #     # 'Mode 4',
+        #     # 'Speed',
+        #     'Phagocytes within 100 pixels',
+        #     'Phagocytes within 250 pixels',
+        #     'Phagocytes within 500 pixels',
+        #     # 'Total Fluorescence', 
+        #     # 'Fluorescence Distance Mean', 
+        #     # 'Fluorescence Distance Variance',
+        #     ] 
         features = [
-            'Area',
-            # 'X',
-            # 'Y',
-            'Circularity',
-            'Perimeter',
-            'Displacement',
-            'Speed',
-            'Skeleton Length', 
-            'Skeleton Branch Points', 
-            'Skeleton End Points', 
-            'Skeleton Branch Length Mean', 
-            'Skeleton Branch Length Std',
-            'Skeleton Branch Length Max',
-            # 'UMAP 1',
-            # 'UMAP 2',
-            # 'Mode 0',
-            # 'Mode 1',
-            # 'Mode 2',
-            # 'Mode 3',
-            # 'Mode 4',
-            # 'Speed',
-            'Phagocytes within 100 pixels',
-            'Phagocytes within 250 pixels',
-            'Phagocytes within 500 pixels',
-            # 'Total Fluorescence', 
-            # 'Fluorescence Distance Mean', 
-            # 'Fluorescence Distance Variance',
-            ] 
+        '0',
+        '1',
+        '2',
+        '3',
+        ] 
+    
         
-        train_hdf5_paths=[
-            Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0.h5',
-            Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '28_10_2500.h5',
-            Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '10_10_5000.h5',
+        # train_hdf5_paths=[
+        #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0.h5',
+        #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '28_10_2500.h5',
+        #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '10_10_5000.h5',
             
-        ]
-        val_hdf5_paths=[
-            Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0.h5',
-            Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '28_10_2500.h5',
-            Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '10_10_5000.h5',
-        ]
-        
-        train(train_hdf5_paths, val_hdf5_paths, features, fixed_len=100, save_as=Path('PhagoPred') / 'survival_analysis' / 'models' / 'decision_tree' / 'test', max_time_to_death=100)
+        # ]
+        # val_hdf5_paths=[
+        #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0.h5',
+        #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '28_10_2500.h5',
+        #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '10_10_5000.h5',
+        # ]
+        train_datasets = [Path('PhagoPred')/'Datasets'/'synthetic.h5']
+        val_datasets = [Path('PhagoPred')/'Datasets'/'val_synthetic.h5']
+        train(train_datasets, val_datasets, features, fixed_len=100, save_as=Path('PhagoPred') / 'survival_analysis' / 'models' / 'decision_tree' / 'test', max_time_to_death=100)
         
 if __name__ == '__main__':
     main()

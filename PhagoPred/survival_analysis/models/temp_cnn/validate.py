@@ -110,7 +110,18 @@ def visualize_validation_predictions(
     pbar.close()
         # output, attn = model(batch['features'], batch['length'], return_attention=True)
         
+def eval_model(model_, dataloader, save_dir: Path, device: torch.Device) -> None:
+    for batch in dataloader:
+        outputs = model(batch['features'], batch['length'])
+        
+        true_bins = batch['time_to_event_bin']
+        
+        plot_cm(outputs, true_bins, save_dir / 'cm.png')
+        
 
+def plot_cm(outputs, true_bins, save_as) -> None:
+    pass
+        
         
        
 def average_feature_importance(model, dataloader, device, features, save_as: Path):
