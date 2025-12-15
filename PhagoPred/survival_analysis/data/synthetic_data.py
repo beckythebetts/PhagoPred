@@ -127,7 +127,7 @@ def create_synthetic_dataset(filename: Path, num_cells: int = 1000, num_frames: 
     
     all_features = {name: np.empty((num_frames, num_cells), dtype=np.float32) for name in features}
     all_deaths = np.empty(num_cells, dtype=np.float32)
-    sfs = np.empty((num_frames, num_cells), dtype=np.float32)
+    cifs = np.empty((num_frames, num_cells), dtype=np.float32)
     
     for c in tqdm(range(num_cells), desc='Generating cells'):
         cell = Cell(num_frames)
@@ -139,18 +139,18 @@ def create_synthetic_dataset(filename: Path, num_cells: int = 1000, num_frames: 
             rule.apply(cell)
         # cell.normalise_pmf()
 
-        cum_event_prob = np.cumsum(cell.pmf)
+        cif = np.cumsum(cell.pmf)
         # if np.max(cum_event_prob):
         #     raise ValueError(f"prob > 1 {cum_event_prob}")
-        sf = 1 - cum_event_prob
-        sfs[:, c] = sf
+        # sf = 1 - cum_event_prob
+        cifs[:, c] = cif
         
         # Sample death time
         u = np.random.rand()
-        if u > np.max(cum_event_prob):
+        if u > np.max(cif):
             death_frame = np.nan
         else:
-            death_frame = np.argmax(cum_event_prob >= u)
+            death_frame = np.argmax(cif >= u)
             if death_frame < start or death_frame > end:
                 death_frame = np.nan
         
@@ -177,7 +177,7 @@ def create_synthetic_dataset(filename: Path, num_cells: int = 1000, num_frames: 
         for name in features:
             grp.create_dataset(name, data=all_features[name], dtype=np.float32)
         grp.create_dataset('CellDeath', data=all_deaths[np.newaxis, :], dtype=np.float32)
-        grp.create_dataset('SFs', data=sfs, dtype=np.float32)
+        grp.create_dataset('CIFs', data=cifs, dtype=np.float32)
             
 if __name__ == '__main__':
     create_synthetic_dataset(

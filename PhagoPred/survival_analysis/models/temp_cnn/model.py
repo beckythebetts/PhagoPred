@@ -54,7 +54,7 @@ class TemporalCNN(torch.nn.Module):
         self.attention_vector = torch.nn.Parameter(torch.randn(in_channels))
         self.fc = build_fc_layers(input_size=in_channels, output_size=output_size, layer_sizes=fc_layers)
 
-    def forward(self, x, lengths, return_attention: bool=False, return_logits: bool = False) -> torch.Tensor:
+    def forward(self, x, lengths, return_attention: bool=False) -> torch.Tensor:
         """
         Args
         ----
@@ -81,8 +81,7 @@ class TemporalCNN(torch.nn.Module):
 
         context_vector = torch.sum(attn_weights.unsqueeze(-1)*x, dim=1) # (B, channels)
         output = self.fc(context_vector)
-        if not return_logits:
-            output = torch.nn.functional.softmax(output, dim=1)
+        output = torch.nn.functional.sigmoid(output)
 
         if return_attention:
             return output, attn_weights
@@ -180,12 +179,13 @@ def compute_loss(
     t = t.long()
 
     # outputs = torch.nn.functional.softmax(outputs, dim=1)
-    cif = estimated_cif(outputs)
+    # cif = estimated_cif(outputs)
+    # cif = outputs
 
-    negative_log_likelihood, censored_loss, uncesnored_loss = losses.negative_log_likelihood(outputs, cif, t, e)
+    negative_log_likelihood, censored_loss, uncesnored_loss = losses.negative_log_likelihood(outputs, t, e)
     # negative_log_likelihood, censored_loss, uncesnored_loss = losses.soft_NLL(outputs, cif, t, e)
 
-    ranking_loss = losses.ranking_loss(cif, t, e)
+    ranking_loss = losses.ranking_loss(outputs, t, e)
 
     loss = negative_log_likelihood + ranking_loss
     if torch.isnan(loss) or torch.isinf(loss):

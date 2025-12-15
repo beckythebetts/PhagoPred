@@ -76,7 +76,8 @@ class DynamicDeepHit(torch.nn.Module):
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=1)  # (batch, seq_len)
         context_vector = torch.sum(attn_weights.unsqueeze(-1) * lstm_out, dim=1)  # (batch, lstm_hidden_size)
         output = self.fc(context_vector)  # (batch, output_size)
-        output = torch.nn.functional.softmax(output, dim=-1)  # (batch, output_size)
+        # output = torch.nn.functional.softmax(output, dim=-1)  # (batch, output_size)
+        output = torch.nn.functional.sigmoid(output) #output sigmoid o foutputting CIF
         if return_attention:
             return output, y, attn_weights
         else:
@@ -149,12 +150,14 @@ def compute_loss(
     #     print("Frames with NaNs:", nan_rows.unique())
     #     print("Features with NaNs:", nan_cols.unique())
     # cif = estimated_cif(outputs, t, t_last)
-    cif = estimated_cif(outputs)
+    
+    # cif = estimated_cif(outputs)
+    # cif = outputs
 
-    negative_log_likelihood, censored_loss, uncesnored_loss = losses.negative_log_likelihood(outputs, cif, t, e)
+    negative_log_likelihood, censored_loss, uncesnored_loss = losses.negative_log_likelihood(outputs, t, e)
     # negative_log_likelihood, censored_loss, uncesnored_loss = losses.soft_NLL(outputs, cif, t, e)
 
-    ranking_loss = losses.ranking_loss(cif, t, e)   
+    ranking_loss = losses.ranking_loss(outputs, t, e)   
 
     if x is None or y is None:
         prediction_loss = torch.tensor(0.0, device=outputs.device)
