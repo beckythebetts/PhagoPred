@@ -1,46 +1,47 @@
 import torch
 
-def negative_log_likelihood(outputs: torch.Tensor,
-                            t: torch.Tensor,
-                            e: torch.Tensor) -> torch.Tensor:
-    """Negative loss likelhood for model whch outputs CIF directly.
+# def negative_log_likelihood(outputs: torch.Tensor,
+#                             t: torch.Tensor,
+#                             e: torch.Tensor) -> torch.Tensor:
+#     """Negative loss likelhood for model whch outputs CIF directly.
     
-    Args:
-        outputs: (batch_size, num_time_bins) - predicted probability distribution over time bins
-        t: (batch_size,) - true event/censoring times (as indices of time bins)
-        e: (batch_size,) - event indicators (1 if event occurred, 0 if censored)S
-    Returns:
-        loss: scalar tensor - negative log-likelihood loss
-        censored_loss: scalar tensor
-        uncensored_loss: scalar_tensor
-        """
-    uncensored_mask = e == 1
-    if uncensored_mask.any():
-        unc_outputs = outputs[uncensored_mask]
-        unc_t = t[uncensored_mask]
+#     Args:
+#         outputs: (batch_size, num_time_bins) - predicted probability distribution over time bins
+#         t: (batch_size,) - true event/censoring times (as indices of time bins)
+#         e: (batch_size,) - event indicators (1 if event occurred, 0 if censored)S
+#     Returns:
+#         loss: scalar tensor - negative log-likelihood loss
+#         censored_loss: scalar tensor
+#         uncensored_loss: scalar_tensor
+#         """
+#     uncensored_mask = e == 1
+#     if uncensored_mask.any():
+#         unc_outputs = outputs[uncensored_mask]
+#         unc_t = t[uncensored_mask]
         
-        cif_t = unc_outputs[unc_t]
-        cif_t_minus_1 = torch.where(unc_t > 0, unc_outputs[unc_t], 0)
-        p_t = cif_t - cif_t_minus_1 # output probability of event at time t
+#         cif_t = unc_outputs[torch.arange(unc_outputs.size(0)), unc_t]
         
-        uncensored_loss = torch.mean(-torch.log(p_t))
+#         cif_t_minus_1 = torch.where(unc_t > 0, unc_outputs[torch.arange(unc_outputs.size(0)), unc_t-1], 0)
+#         p_t = cif_t - cif_t_minus_1 # output probability of event at time t
+        
+#         uncensored_loss = torch.mean(-torch.log(p_t))
     
-    else:
-        uncensored_loss = torch.tensor(0.0, device=outputs.device)
+#     else:
+#         uncensored_loss = torch.tensor(0.0, device=outputs.device)
     
-    censored_mask = e == 0
-    if censored_mask.any():
-        cens_outputs = outputs[censored_mask]
-        cens_t = t[censored_mask]
+#     censored_mask = e == 0
+#     if censored_mask.any():
+#         cens_outputs = outputs[censored_mask]
+#         cens_t = t[censored_mask]
         
-        s_t = 1 - cens_outputs[cens_t]
+#         s_t = 1 - cens_outputs[cens_t]
         
-        censored_loss = torch.mean(-torch.log(s_t))
-    else:
-        censored_loss = torch.tensor(0.0, device=outputs.device)
+#         censored_loss = torch.mean(-torch.log(s_t))
+#     else:
+#         censored_loss = torch.tensor(0.0, device=outputs.device)
     
-    loss = uncensored_loss + censored_loss
-    return loss, censored_loss, uncensored_loss
+#     loss = uncensored_loss + censored_loss
+#     return loss, censored_loss, uncensored_loss
 
 
 # def soft_label_distribution(event_times, num_bins, sigma_rel=0.05, device='cpu'):
@@ -120,131 +121,192 @@ def negative_log_likelihood(outputs: torch.Tensor,
         
         
         
-    
-    
-# def negative_log_likelihood(outputs: torch.Tensor, 
-#                             cif: torch.Tensor, 
-#                             t: torch.Tensor, 
-#                             e: torch.Tensor) -> torch.Tensor:
-#     """Negative log-likelihood of joint distribution of first hitting time and survival time.
-    
-#     \begin{align*} {\mathcal L}_{1} = 
-#     - & \sum _{i=1}^{N} \left[{\mathbb {1}} (k^{i} \ne {\varnothing }) \cdot \log \left(\frac{o_{k^{i},\tau ^{i}}^{i}}{1-\sum _{k\ne {\varnothing }}\sum _{n\leq t^{i}_{J^{i}}} o_{k,n}^{i}}\right) \right. \nonumber\\ &+ \left. {\mathbb {1}}(k^{i}={\varnothing })\cdot \log \left(1- \sum _{k\ne {\varnothing }}\hat{F}_{k}(\tau ^{i}|{\mathcal X}^{i}) \right) \right], \tag{7} \end{align*}
-    
-#     Args:
-#         outputs: (batch_size, num_time_bins) - predicted probability distribution over time bins
-#         cif: (batch_size, num_time_bins) - cumulative incidence function (CIF) for each time bin
-#         t: (batch_size,) - true event/censoring times (as indices of time bins)
-#         e: (batch_size,) - event indicators (1 if event occurred, 0 if censored)
-#     Returns:
-#         loss: scalar tensor - negative log-likelihood loss
-#         censored_loss: scalar tensor
-#         uncensored_loss: scalar_tensor
-#     """
-#     batch_size, num_bins = outputs.shape
-#     eps = 1e-6
-
-#     # --- Uncensored samples (events occurred) ---
-#     uncensored_mask = e == 1
-#     if uncensored_mask.any():
-#         unc_outputs = outputs[uncensored_mask]
-#         unc_t = t[uncensored_mask]
-
-#         # Event probability at event time
-#         o_t = unc_outputs[torch.arange(unc_outputs.size(0)), unc_t]
-
-#         # Cumulative probability up to each time bin
-#         # F_t = torch.cumsum(unc_outputs, dim=1)
-#         # F_t = torch.clamp(F_t, max=1.0 - eps)
-
-#         # s_t = torch.ones_like(o_t, device=o_t.device)
-#         # mask = unc_t > 0
-#         # s_t[mask] = 1.0 - F_t[torch.arange(F_t.size(0), device=o_t.device)[mask], unc_t[mask]-1]
-
-#         # ratio = (o_t / torch.clamp(s_t, min=eps)).clamp(min=eps, max=1.0)
-#         # uncensored_loss = -torch.log(ratio)
-#         # uncensored_loss = torch.mean(uncensored_loss)
-        
-#         # True time bin only considrered
-#         uncensored_loss = torch.mean(-torch.log(o_t.clamp(min=0, max=1.0)))
-#     else:
-#         uncensored_loss = torch.tensor(0.0, device=outputs.device)
-
-#     # --- Censored samples (no event) ---
-#     censored_mask = e == 0
-#     if censored_mask.any():
-#         cens_cif = cif[censored_mask]
-#         cens_t = t[censored_mask]
-
-#         # CIF value at censoring time
-#         # Only want  minimise outputs before cenosring time in bins which are not the overflow bin
-#         last_bin_idx = outputs.shape[1] - 1
-#         cens_t[cens_t == last_bin_idx] = last_bin_idx - 1  # Prevent overflow bin issues
-        
-#         cens_cif_t = cens_cif[torch.arange(cens_cif.size(0)), cens_t]
-        
-#         # Clamp to [0, 1)
-#         # cens_cif_t = torch.clamp(cens_cif_t, min=0.0, max=1.0 - eps)
-#         survival = (1.0 - cens_cif_t).clamp(min=eps)
-        
-#         #Dont care about minimising surviavl in final tiime_bin ("overflow bin")
-#         # last_bin_idx = outputs.shape[1] - 1
-#         # survival[cens_t==last_bin_idx] = 1
-        
-#         censored_loss = -torch.log(survival)
-#         censored_loss = torch.mean(censored_loss) 
-#          # Mask final overflow bin
-#         # last_bin_idx = outputs.shape[1] - 1
-#         # mask = cens_t != last_bin_idx
-#         # censored_loss = torch.zeros_like(survival)
-#         # censored_loss[mask] = -torch.log(survival[mask])
-#         # censored_loss = torch.mean(censored_loss)
-#     else:
-#         censored_loss = torch.tensor(0.0, device=outputs.device)
-
-#     # total_loss = (uncensored_loss + censored_loss) / batch_size
-#     # uncensored_loss = uncensored_loss / max(uncensored_mask.sum(), 1)
-#     # censored_loss = censored_loss / max(censored_mask.sum(), 1)
-#     total_loss = uncensored_loss + censored_loss
-#     return total_loss, censored_loss, uncensored_loss
-
-def ranking_loss(
-    cif: torch.Tensor,
-    t: torch.Tensor,
-    e: torch.Tensor,
-    sigma: float = 0.2
-) -> torch.Tensor:
-    """
-    Ranking loss to encourage correct ordering of predicted risk scores.    
+def weighted_negative_log_likelihood(pmf: torch.Tensor,
+                                     t: torch.Tensor,
+                                     e: torch.Tensor,
+                                     mask: torch.Tensor) -> torch.Tensor:
+    """Negative log-likelihood of joint distribution of first hitting time and survival time with weighting based on  rpoprtion of vlaid time steps.
     Args:
+        outputs: (batch_size, num_time_bins) - predicted probability distribution over time bins
         cif: (batch_size, num_time_bins) - cumulative incidence function (CIF) for each time bin
         t: (batch_size,) - true event/censoring times (as indices of time bins)
-        t_last: (batch_size,) - last observed times (as indices of time bins)
         e: (batch_size,) - event indicators (1 if event occurred, 0 if censored)
-        sigma: float - scaling parameter for the logistic function
+    Returns:
+        loss: scalar tensor - negative log-likelihood loss
+        censored_loss: scalar tensor
+        uncensored_loss: scalar_tensor"""
+        
+    batch_size, num_bins = pmf.shape
+    cif = torch.cumsum(pmf, dim=1)
+    eps = 1e-6
+    # Compute weights based on valid time steps
+    valid_lengths = mask.sum(dim=1).float()  # (batch_size,)
+    weights = valid_lengths / mask.size()  # Normalize weights to sum to 1
+    
+def negative_log_likelihood(pmf: torch.Tensor, 
+                            # cif: torch.Tensor, 
+                            t: torch.Tensor, 
+                            e: torch.Tensor) -> torch.Tensor:
+    """Negative log-likelihood of joint distribution of first hitting time and survival time.
+    
+    \begin{align*} {\mathcal L}_{1} = 
+    - & \sum _{i=1}^{N} \left[{\mathbb {1}} (k^{i} \ne {\varnothing }) \cdot \log \left(\frac{o_{k^{i},\tau ^{i}}^{i}}{1-\sum _{k\ne {\varnothing }}\sum _{n\leq t^{i}_{J^{i}}} o_{k,n}^{i}}\right) \right. \nonumber\\ &+ \left. {\mathbb {1}}(k^{i}={\varnothing })\cdot \log \left(1- \sum _{k\ne {\varnothing }}\hat{F}_{k}(\tau ^{i}|{\mathcal X}^{i}) \right) \right], \tag{7} \end{align*}
+    
+    Args:
+        outputs: (batch_size, num_time_bins) - predicted probability distribution over time bins
+        cif: (batch_size, num_time_bins) - cumulative incidence function (CIF) for each time bin
+        t: (batch_size,) - true event/censoring times (as indices of time bins)
+        e: (batch_size,) - event indicators (1 if event occurred, 0 if censored)
+    Returns:
+        loss: scalar tensor - negative log-likelihood loss
+        censored_loss: scalar tensor
+        uncensored_loss: scalar_tensor
     """
+    batch_size, num_bins = pmf.shape
+    cif = torch.cumsum(pmf, dim=1)
+    eps = 1e-6
 
-    batch_size, num_bins = cif.shape
-    t_i = t.unsqueeze(1).expand(-1, batch_size) # (batch_size_i, batch_size_j)
-    t_j = t.unsqueeze(0).expand(batch_size, -1) # (batch_size_i, batch_size_j)
+    # --- Uncensored samples (events occurred) ---
+    uncensored_mask = e == 1
+    if uncensored_mask.any():
+        unc_outputs = pmf[uncensored_mask]
+        unc_t = t[uncensored_mask]
+
+        # Event probability at event time
+        o_t = unc_outputs[torch.arange(unc_outputs.size(0)), unc_t]
+
+        # Cumulative probability up to each time bin
+        # F_t = torch.cumsum(unc_outputs, dim=1)
+        # F_t = torch.clamp(F_t, max=1.0 - eps)
+
+        # s_t = torch.ones_like(o_t, device=o_t.device)
+        # mask = unc_t > 0
+        # s_t[mask] = 1.0 - F_t[torch.arange(F_t.size(0), device=o_t.device)[mask], unc_t[mask]-1]
+
+        # ratio = (o_t / torch.clamp(s_t, min=eps)).clamp(min=eps, max=1.0)
+        # uncensored_loss = -torch.log(ratio)
+        # uncensored_loss = torch.mean(uncensored_loss)
+        
+        # True time bin only considrered
+        uncensored_loss = torch.mean(-torch.log(o_t.clamp(min=0, max=1.0)))
+    else:
+        uncensored_loss = torch.tensor(0.0, device=pmf.device)
+
+    # --- Censored samples (no event) ---
+    censored_mask = e == 0
+    if censored_mask.any():
+        # cens_pmf = pmf[censored_mask]
+        # cens_t = t[censored_mask]
+        
+        # P(T >= t)
+        # survival = cens_pmf[torch.arange(cens_pmf.size(0)), cens_t:]        
+        
+        
+        cens_cif = cif[censored_mask]
+        cens_t = t[censored_mask]
+
+        # CIF value at censoring time
+        # Only want  minimise outputs before cenosring time in bins which are not the overflow bin
+        
+        # last_bin_idx = pmf.shape[1] - 1
+        # cens_t[cens_t == last_bin_idx] = last_bin_idx - 1  # Prevent overflow bin issues
+        
+        # cens_cif_t = cens_cif[torch.arange(cens_cif.size(0)), cens_t]
+        
+        # survival = (1.0 - cens_cif_t)
+        
+        # cens_t = torch.where(cens_t > 0, cens_t - 1, cens_t)
+        cens_t = torch.clamp(cens_t - 1, min=0)
+        cens_cif_t = cens_cif[torch.arange(cens_cif.size(0)), cens_t]
+        survival = 1.0 - cens_cif_t
+        
+        survival = torch.clamp(survival, min=eps, max=1.0)
+        
+        #Dont care about minimising surviavl in final tiime_bin ("overflow bin")
+        # last_bin_idx = outputs.shape[1] - 1
+        # survival[cens_t==last_bin_idx] = 1
+        
+        censored_loss = -torch.log(survival)
+        censored_loss = torch.mean(censored_loss) 
+         # Mask final overflow bin
+        # last_bin_idx = outputs.shape[1] - 1
+        # mask = cens_t != last_bin_idx
+        # censored_loss = torch.zeros_like(survival)
+        # censored_loss[mask] = -torch.log(survival[mask])
+        # censored_loss = torch.mean(censored_loss)
+    else:
+        censored_loss = torch.tensor(0.0, device=pmf.device)
+
+    # total_loss = (uncensored_loss + censored_loss) / batch_size
+    # uncensored_loss = uncensored_loss / max(uncensored_mask.sum(), 1)
+    # censored_loss = censored_loss / max(censored_mask.sum(), 1)
+    total_loss = uncensored_loss + censored_loss
+    return total_loss, censored_loss, uncensored_loss
+
+# def ranking_loss(
+#     pmf: torch.Tensor,
+#     t: torch.Tensor,
+#     e: torch.Tensor,
+#     sigma: float = 0.2
+# ) -> torch.Tensor:
+#     """
+#     Ranking loss to encourage correct ordering of predicted risk scores.    
+#     Args:
+#         cif: (batch_size, num_time_bins) - cumulative incidence function (CIF) for each time bin
+#         t: (batch_size,) - true event/censoring times (as indices of time bins)
+#         t_last: (batch_size,) - last observed times (as indices of time bins)
+#         e: (batch_size,) - event indicators (1 if event occurred, 0 if censored)
+#         sigma: float - scaling parameter for the logistic function
+#     """
+#     cif = torch.cumsum(pmf, dim=1)
+#     batch_size, num_bins = cif.shape
+#     t_i = t.unsqueeze(1).expand(-1, batch_size) # (batch_size_i, batch_size_j)
+#     t_j = t.unsqueeze(0).expand(batch_size, -1) # (batch_size_i, batch_size_j)
     
-    e_i = e.unsqueeze(1).expand(-1, batch_size) # (batch_size_i, batch_size_j)
+#     e_i = e.unsqueeze(1).expand(-1, batch_size) # (batch_size_i, batch_size_j)
     
-    # F_ij = cif # (batch_size, num_bins)
-    F_ii = cif[torch.arange(batch_size), t] # (batch_size,)
-    F_ii = F_ii.unsqueeze(1).expand(batch_size, batch_size) # (batch_size_i, batch_size_j) expanded alonng dim1
+#     # F_ij = cif # (batch_size, num_bins)
+#     F_ii = cif[torch.arange(batch_size), t] # (batch_size,)
+#     F_ii = F_ii.unsqueeze(1).expand(batch_size, batch_size) # (batch_size_i, batch_size_j) expanded alonng dim1
     
-    F_ij = cif[:, t].T # (batch_size_i, batch_size_j)
-    def eta(a, b):
-        return torch.exp(-(a-b)/sigma)
+#     F_ij = cif[:, t].T # (batch_size_i, batch_size_j)
+#     def eta(a, b):
+#         return torch.exp(-(a-b)/sigma)
     
-    cif_comparison = eta(F_ii, F_ij)
-    A_ij = ((t_i < t_j) & (e_i==1))
+#     cif_comparison = eta(F_ii, F_ij)
+#     A_ij = ((t_i < t_j) & (e_i==1))
     
-    loss = torch.sum(A_ij * cif_comparison) / (torch.sum(A_ij) + 1e-8)
+#     loss = torch.sum(A_ij * cif_comparison) / (torch.sum(A_ij) + 1e-8)
     
-    return loss
+#     return loss
+
+def ranking_loss(pmf, t, e, sigma=0.2):
+    """
+    Concordance-based ranking loss.
+    For uncensored pairs (i,j) where t_i < t_j:
+    Want median/expected survival time_i < time_j
+    """
+    # Use median instead of mean (more robust)
+    cif = torch.cumsum(pmf, dim=1)
+    median_time = torch.argmax((cif >= 0.5).float(), dim=1).float()
     
+    batch_size = t.shape[0]
+    t_i = t.unsqueeze(1).expand(-1, batch_size)
+    t_j = t.unsqueeze(0).expand(batch_size, -1)
+    e_i = e.unsqueeze(1).expand(-1, batch_size)
+    e_j = e.unsqueeze(0).expand(batch_size, -1)
+    
+    med_i = median_time.unsqueeze(1).expand(batch_size, batch_size)
+    med_j = median_time.unsqueeze(0).expand(batch_size, batch_size)
+    
+    # Only consider comparable pairs (both uncensored, or i uncensored and i < j)
+    comparable = ((t_i < t_j) & (e_i == 1))
+    
+    # Want: median_time_i < median_time_j
+    violation = torch.nn.functional.relu(med_i - med_j + 1.0)  # +1 for margin
+    
+    return (comparable * violation).sum() / (comparable.sum() + 1e-8)
+
     
 def prediction_loss(y: torch.Tensor, x: torch.Tensor, mask: torch.Tensor=None) -> torch.Tensor:
     """MSE loss for RNN networks predictions at next time step.

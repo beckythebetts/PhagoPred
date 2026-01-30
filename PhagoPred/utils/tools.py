@@ -535,6 +535,8 @@ def show_semantic_segmentation(image_array, mask_array, true_mask_array=None):
     return image_array*255
 
 def repack_hdf5(file=SETTINGS.DATASET):
+    if isinstance(file, str):
+        file = Path(file)
     with h5py.File(file, 'r') as f:
         all_groups = list(f.keys())
     temp_file = file.parent / (file.stem + '_temp' + file.suffix) 
@@ -1124,10 +1126,12 @@ def plot_correlations(features='all'):
 
 
 if __name__ == '__main__':
+    repack_hdf5("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_5min.h5")
+    repack_hdf5("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min.h5")
     # copy_hdf5_groups(Path('PhagoPred') / 'Datasets' / 'ExposureTest' / 'old' / '03_10_2500.h5', 
     #                  Path('PhagoPred')/'Datasets'/'ExposureTest'/ 'old' / '03_10_2500_new.h5',
     #                  ['Images'])
-    print_cell_deaths()
+    # print_cell_deaths()
     # hdf5_from_tiffs(Path("D:/27_05_1"), 
     #                 Path('D:/27_05.h5'),
     #                 phase_channel=1,

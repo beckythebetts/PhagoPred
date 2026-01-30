@@ -10,19 +10,19 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 import h5py
 
-from PhagoPred.survival_analysis.data.dataset import CellDataset, collate_fn
+from PhagoPred.survival_analysis.data.dataset import CellDataset, collate_fn, plot_samples_per_bin
 from PhagoPred.survival_analysis.models.dynamic_deephit import model
 from PhagoPred.survival_analysis.models.dynamic_deephit.validate import validate_step, visualize_validation_predictions
 
-
+# === Collate function must pad at end of sequence for LSTM 'pack_padded_sequence' === 
 def train_step(model, dataloader, optimiser, loss_fn, device, max_grad_norm=1.0):
     model.train()
     losses = defaultdict(float)
     
     for batch in dataloader:
         optimiser.zero_grad()
-        outputs, y = model(batch['features'], batch['length'])
-        loss_values = loss_fn(outputs, batch['time_to_event_bin'], batch['event_indicator'], batch['features'], y)
+        outputs, y = model(batch['features'], batch['length'], mask=batch['mask'])
+        loss_values = loss_fn(outputs, batch['time_to_event_bin'], batch['event_indicator'], batch['features'], y, mask=batch['mask'])
         
         loss = loss_values[0]
         loss.backward()
@@ -50,11 +50,15 @@ def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list, fea
         hdf5_paths=train_hdf5_paths,
         features=features,
         num_bins=model_params['output_size'],
-        min_length=100,
+        min_length=500,
         max_time_to_death=100,
         # uncensored_only=True,
     )
+    
+    plot_samples_per_bin(train_dataset, 1000)
 
+    # exit()
+    
     bins = train_dataset.event_time_bins
     print(bins)
     train_dataset.plot_event_vs_censoring_hist(save_path=save_dir / 'train_event_censoring_histogram.png', title='Training Set Event vs Censoring Histogram')
@@ -64,7 +68,9 @@ def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list, fea
     model_params['event_time_bins'] = bins.tolist()
     normalisation_means = torch.tensor(normalisation_means, dtype=torch.float32)
     normalization_stds = torch.tensor(normalization_stds, dtype=torch.float32)
+    
 
+    
     validate_dataset = CellDataset(
         hdf5_paths=val_hdf5_paths,
         features=features,
@@ -73,12 +79,16 @@ def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list, fea
         num_bins=model_params['output_size'],
         event_time_bins=bins,
         uncensored_only=False,
-        min_length=100,
+        min_length=500,
         max_time_to_death=100,
         )
+    
+    plot_samples_per_bin(validate_dataset, 1000)
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size, shuffle=True, collate_fn=lambda x: collate_fn(x, dataset=train_dataset, device=device), num_workers=0)
-    validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size, shuffle=False, collate_fn=lambda x: collate_fn(x, dataset=validate_dataset, device=device), num_workers=0)
+    # exit()
+
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size, shuffle=True, collate_fn=lambda x: collate_fn(x, dataset=train_dataset, device=device, pad_at='end'), num_workers=0)
+    validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size, shuffle=False, collate_fn=lambda x: collate_fn(x, dataset=validate_dataset, device=device, pad_at='end'), num_workers=0)
     
     compute_orcale_losses(validate_dataset, loss_fn, device)
     
@@ -107,7 +117,7 @@ def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list, fea
     plot_training_losses(training_json, save_dir / 'loss_plot.png')
     print(f"Training complete. Model saved to {save_dir}")
 
-    visualize_validation_predictions(model, validate_loader, device, num_examples=20, save_path=save_dir , bin_edges=bins, features=features)
+    visualize_validation_predictions(model, validate_loader, device, num_examples=20, save_path=save_dir , bin_edges=bins, features=features, padding_at='end')
 
 
 def compute_orcale_losses(dataset: CellDataset, loss_fn, device:str):
@@ -117,15 +127,16 @@ def compute_orcale_losses(dataset: CellDataset, loss_fn, device:str):
         dataset, 
         batch_size=256,
         shuffle=False,
-        collate_fn=lambda x: collate_fn(x, dataset=dataset, device=device),
+        collate_fn=lambda x: collate_fn(x, dataset=dataset, device=device, pad_at='end'),
         num_workers=0,
     )
     for batch in tqdm(dataloader, 'Getting oracle losses'):
         pmf = torch.tensor(batch['binned_pmf']).to(device)
         loss_values = loss_fn(
-            pmf, 
+            None, 
             batch['time_to_event_bin'], 
             batch['event_indicator'],
+            pmf=pmf,
             )
         for key, value in zip(
             ['Total Loss', 'NLL Loss', 'Ranking Loss', 'Prediction Loss', 'Censored Loss', 'Uncensored Loss'], loss_values
@@ -133,6 +144,7 @@ def compute_orcale_losses(dataset: CellDataset, loss_fn, device:str):
             losses[key] += value.item() * pmf.size(0)
     loss_values = {key: value / len(dataloader.dataset)  for key, value in losses.items()}
     print(loss_values)
+    # exit()
         
             
             
@@ -188,7 +200,7 @@ def plot_training_losses(losses_json_path: Path, output_path: Path = None):
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.title('Training and Validation Losses Over Epochs')
-    # plt.legend()
+    plt.legend()
     plt.grid(True)
 
     if output_path is None:
@@ -233,14 +245,15 @@ def main():
         ] 
     
     model_params = {
-        'input_size': len(features),  # Features + mask
-        'output_size': 4,  # Number of time bins
-        'lstm_hidden_size': 32,
-        'lstm_dropout': 0.5,
+        'num_features': len(features),  # Features + mask
+        'output_size': 5,  # Number of time bins
+        'lstm_hidden_size': 64,
+        'lstm_dropout': 0.2,
         'predictor_layers': [32],
         'attention_layers': [64, 32],
         'fc_layers': [64, 32],
         'features': features,
+        'mask': False,
     }
     # datasets = list((Path('PhagoPred')/'Datasets'/ 'ExposureTest' / 'Truncated').iterdir())
     # train_datasets = datasets[:-2]
@@ -270,7 +283,7 @@ def main():
         num_epochs=100,
         save_dir=save_dir,
         batch_size=256,
-        lr=1e-3
+        lr=1e-3,
     )
     # compute_orcale_losses(val_datasets)
     # plot_training_losses(save_dir / 'training.jsonl', save_dir / 'loss_plot.png')

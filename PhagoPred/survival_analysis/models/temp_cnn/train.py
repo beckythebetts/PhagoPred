@@ -18,17 +18,17 @@ from PhagoPred.survival_analysis.models.temp_cnn.validate import validate_step, 
 def train_step(model, dataloader, optimiser, loss_fn, device, max_grad_norm=1.0):
     model.train()
     losses = defaultdict(float)
-    
+
     for batch in dataloader:
         optimiser.zero_grad()
         outputs = model(batch['features'], batch['length'])
         loss_values = loss_fn(outputs, batch['time_to_event_bin'], batch['event_indicator'])
-        
+
         loss = loss_values[0]
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
         optimiser.step()
-        
+
         for key, value in zip(
             ['Total Loss', 'NLL Loss', 'Ranking Loss', 'Censored Loss', 'Uncensored Loss'], loss_values
         ):
@@ -106,7 +106,7 @@ def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list, fea
     plot_training_losses(training_json, save_dir / 'loss_plot.png')
     print(f"Training complete. Model saved to {save_dir}")
 
-    visualize_validation_predictions(model, validate_loader, device, num_examples=20, save_path=save_dir , bin_edges=bins, features=features)
+    visualize_validation_predictions(model, validate_loader, device, num_examples=20, save_path=save_dir, bin_edges=bins, features=features, padding_at='start')
 
 
 def compute_orcale_losses(dataset: CellDataset, loss_fn, device:str):
@@ -122,12 +122,13 @@ def compute_orcale_losses(dataset: CellDataset, loss_fn, device:str):
     for batch in tqdm(dataloader, 'Getting oracle losses'):
         pmf = torch.tensor(batch['binned_pmf']).to(device)
         loss_values = loss_fn(
-            pmf, 
-            batch['time_to_event_bin'], 
+            None,
+            batch['time_to_event_bin'],
             batch['event_indicator'],
+            pmf=pmf,
             )
         for key, value in zip(
-            ['Total Loss', 'NLL Loss', 'Ranking Loss', 'Censored Loss', 'Uncensored Loss'], loss_values
+            ['Total Loss', 'NLL Loss', 'Ranking Loss', 'Prediction Loss', 'Censored Loss', 'Uncensored Loss'], loss_values
         ):
             losses[key] += value.item() * pmf.size(0)
     loss_values = {key: value / len(dataloader.dataset)  for key, value in losses.items()}

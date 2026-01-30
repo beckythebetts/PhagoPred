@@ -8,22 +8,38 @@ import matplotlib.pyplot as plt
 class Cell:
     def __init__(self, T: int = 0):
         self.T = T
-        self.pmf = self._generate_base_pmf()
         self.features = self._generate_base_features()
+        self.hazards = self._generate_base_hazards()
     
-    def _generate_base_pmf(self):
-        # pmf = np.ones(self.T) / self.T
+    # def _generate_base_pmf(self):
+    #     # pmf = np.ones(self.T) / self.T
+    #     pmf = np.zeros(self.T)
+    #     # end_peak = np.exp(-0.5 * ((np.arange(self.T) - (self.T-1)) / 50)**2)
+    #     # pmf += end_peak
+    #     return pmf
+
+    def _compute_pmf(self):
+        assert (self.hazards >= 0.0).any(), f"Hazards contain negative values {self.hazards}"
+        assert (self.hazards <= 1.0).any(), "Hazards contain values greater than 1.0"
+        hazards = self.hazards
+        sf = np.cumprod(1 - hazards)
         pmf = np.zeros(self.T)
-        # end_peak = np.exp(-0.5 * ((np.arange(self.T) - (self.T-1)) / 50)**2)
-        # pmf += end_peak
+        pmf[0] = hazards[0]
+        for t in range(1, self.T):
+            pmf[t] = sf[t-1] * hazards[t]
+        # assert pmf.sum() <= 1.0, f"PMF sums to more than 1.0: {pmf.sum()}"
         return pmf
+    
+    def _generate_base_hazards(self):
+        hazards = np.full(self.T, 0.0)
+        return hazards
         
     def _generate_base_features(self):
         features = {
-            '0': 2 + np.random.randn(self.T)*0.1,
-            '1': np.abs(np.random.randn(self.T)),
-            '2': np.arange(self.T) + np.random.randn(self.T)*5,
-            '3': np.arange(self.T)**0.5 + np.random.randn(self.T),
+            '0': 2 + np.random.randn(self.T)*0.01,
+            '1': np.abs(np.random.randn(self.T))*0.01,
+            '2': np.arange(self.T),
+            '3': np.arange(self.T)**0.5 + np.random.randn(self.T)*0.01,
         }
         return features
     
@@ -43,6 +59,12 @@ class Cell:
         for key in self.features:
             self.features[key][:start] = np.nan
             self.features[key][end+1:] = np.nan
+            
+    def apply_masking(self, probability: float = 0.1):
+        """Randomly mask features with NaNs."""
+        for key in self.features:
+            mask = np.random.rand(self.T) < probability
+            self.features[key][mask] = np.nan
 
 
 
@@ -54,7 +76,7 @@ class Rule:
     
 class VariationRule(Rule):
     """Increase hazard {delay} frames after an increase in std of {feature}."""
-    def __init__(self, feature: str = '0', probability: float = 1.0, delay: int = 200, sigma: float = 10.0, max_strength=1.0):
+    def __init__(self, feature: str = '0', probability: float = 1.0, delay: int = 200, sigma: float = 20.0, max_strength=1.0):
         self.feature = feature
         self.probability = probability
         self.delay = delay
@@ -70,19 +92,24 @@ class VariationRule(Rule):
             start_idx = frame - self.delay
             if start_idx < 0:
                 return
-            slice_ = cell[self.feature][start_idx:] 
-            slice_ += np.random.randn(len(slice_))*strength
-            cell[self.feature][start_idx:] = slice_
+            slice_ = cell[self.feature][start_idx:start_idx+100] 
+            slice_ += np.random.randn(len(slice_))*strength*100
+            cell[self.feature][start_idx:start_idx+100] = slice_
             
             t = np.arange(cell.T)
-            gaussian = np.exp(-0.5 * ((t - frame) / self.sigma)**2)
-            gaussian = gaussian / np.sum(gaussian)
-            cell.pmf += gaussian * strength
-            assert np.sum(cell.pmf) <= 1.0, f"PMF exceeds 1.0, {self.max_strength}, {strength}, {np.sum(cell.pmf)}"
+            # gaussian = np.exp(-0.5 * ((t - frame) / self.sigma)**2)
+            # gaussian = gaussian / np.sum(gaussian)
+            # cell.pmf += gaussian * strength
+            
+            # gaussian = np.exp(-0.5 * ((t - frame) / self.sigma)**2)
+            # gaussian = gaussian / np.max(gaussian)
+            # cell.hazards += gaussian * strength
+            cell.hazards += get_gaussian_curve(cell.T, frame, self.sigma) * strength
+            # assert np.sum(cell.pmf) <= 1.0, f"PMF exceeds 1.0, {self.max_strength}, {strength}, {np.sum(cell.pmf)}"
 
 
 class GradualRampRule(Rule):
-    def __init__(self, feature='1', probability=1.0, ramp_length=30, ramp_height=10.0, delay=100, sigma=10.0, max_strength: float=1.0):
+    def __init__(self, feature='1', probability=1.0, ramp_length=30, ramp_height=10.0, delay=100, sigma=30.0, max_strength: float=1.0):
         self.feature = feature
         self.probability = probability
         self.ramp_length = ramp_length
@@ -94,40 +121,57 @@ class GradualRampRule(Rule):
     
     def apply(self, cell: Cell):
         if np.random.rand() < self.probability:
-            strength = np.random.rand()*self.max_strength
-            start = np.random.randint(cell.T - self.ramp_length)
+            strength = (np.random.rand()**0.1)*self.max_strength
+            # start = np.random.randint(cell.T - self.ramp_length)
+            start = np.random.randint(cell.T)
             ramp = np.linspace(0, self.ramp_height*strength, self.ramp_length)
-            cell[self.feature][start:start+self.ramp_length] += ramp
+            ramp_end = min(start+self.ramp_length, cell.T)
+            cell[self.feature][start:ramp_end] += ramp[:ramp_end-start]
             t = np.arange(cell.T)
             hazard_frame = start + self.ramp_length + self.delay
-            gaussian = np.exp(-0.5 * ((t - hazard_frame) / self.sigma)**2)
-            gaussian = gaussian / np.sum(gaussian)
-            cell.pmf += gaussian * strength
-            assert np.sum(cell.pmf) <= 1.0, f"PMF exceeds 1.0, {self.max_strength}, {strength}, {np.sum(cell.pmf)}"
+
+            cell.hazards += get_gaussian_curve(cell.T, hazard_frame, self.sigma) * strength
+
+def get_gaussian_curve(T: int, center: int, sigma: float):
+    t = np.arange(T)
+    gaussian = np.exp(-0.5 * ((t - center) / sigma)**2)
+    gaussian /= (sigma * np.sqrt(2 * np.pi))
+    return gaussian * 5
+
+def pmf_from_hazards(hazards: np.ndarray):
+    sf = np.cumprod(1 - hazards)
+    pmf = np.zeros(len(hazards))
+    pmf[0] = hazards[0]
+    for t in range(1, len(hazards)):
+        pmf[t] = sf[t-1] * hazards[t]
+    # assert pmf.sum() <= 1.0, f"PMF sums to more than 1.0: {pmf.sum()}"
+    return pmf
 
 
-            
 def create_synthetic_dataset(filename: Path, num_cells: int = 1000, num_frames: int = 1000):
     """Create synthetic dataset with given number of cells and frames."""
     
     
     rules = [
-        VariationRule(),
-        GradualRampRule(),
+        VariationRule(feature='3', delay=150, sigma=20.0),
+        GradualRampRule(feature='0', ramp_height=10.0, delay=200, sigma=30.0),
+        GradualRampRule(feature='1', ramp_height=10.0, delay=100 ,sigma=30.0),
     ]
     num_rules = len(rules)
     for rule in rules:
         rule.max_strength = 1 / num_rules
         print(rule.max_strength)
     
-    start_frames = np.random.randint(0, num_frames//2, size=num_cells)
-    end_frames = np.random.randint(num_frames//2, num_frames, size=num_cells)
+    start_frames = np.random.randint(0, 10, size=num_cells)
+    end_frames = np.random.randint(num_frames-10, num_frames, size=num_cells)
     
     features = Cell().features.keys()
     
     all_features = {name: np.empty((num_frames, num_cells), dtype=np.float32) for name in features}
     all_deaths = np.empty(num_cells, dtype=np.float32)
     cifs = np.empty((num_frames, num_cells), dtype=np.float32)
+    pmfs = np.empty((num_frames, num_cells), dtype=np.float32)
+    hazards = np.empty((num_frames, num_cells), dtype=np.float32)
     
     for c in tqdm(range(num_cells), desc='Generating cells'):
         cell = Cell(num_frames)
@@ -139,20 +183,31 @@ def create_synthetic_dataset(filename: Path, num_cells: int = 1000, num_frames: 
             rule.apply(cell)
         # cell.normalise_pmf()
 
-        cif = np.cumsum(cell.pmf)
+        cell.hazards = np.clip(cell.hazards, a_min=0.0, a_max=1.0)
+        pmf = cell._compute_pmf()
+        cif = np.cumsum(pmf)
         # if np.max(cum_event_prob):
         #     raise ValueError(f"prob > 1 {cum_event_prob}")
         # sf = 1 - cum_event_prob
         cifs[:, c] = cif
+        pmfs[:, c] = pmf
+        hazards[:, c] = cell.hazards
         
-        # Sample death time
+        # Sample death time from cif
         u = np.random.rand()
         if u > np.max(cif):
             death_frame = np.nan
         else:
             death_frame = np.argmax(cif >= u)
-            if death_frame < start or death_frame > end:
+            if death_frame > end:
                 death_frame = np.nan
+                
+        
+                
+        # print(np.sum(pmf))
+                
+        # sample death frame from pmf
+        
         
         
         # death_frame = np.random.choice(np.arange(num_frames), p=cell.pmf)
@@ -161,6 +216,7 @@ def create_synthetic_dataset(filename: Path, num_cells: int = 1000, num_frames: 
         
         all_deaths[c] = death_frame
         cell.apply_observation_window(start, end)
+        # cell.apply_masking()
         
         # plt.plot(cell.pmf)
         # plt.axvline(start, color='k', linestyle='--')
@@ -178,6 +234,10 @@ def create_synthetic_dataset(filename: Path, num_cells: int = 1000, num_frames: 
             grp.create_dataset(name, data=all_features[name], dtype=np.float32)
         grp.create_dataset('CellDeath', data=all_deaths[np.newaxis, :], dtype=np.float32)
         grp.create_dataset('CIFs', data=cifs, dtype=np.float32)
+        grp.create_dataset('PMFs', data=pmfs, dtype=np.float32)
+        grp.create_dataset('Hazards', data=hazards, dtype=np.float32)
+        
+        
             
 if __name__ == '__main__':
     create_synthetic_dataset(

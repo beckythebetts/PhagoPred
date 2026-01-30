@@ -19,13 +19,17 @@ from PhagoPred.survival_analysis.models import losses
 if __name__ == '__main__':
     datasets = (Path('PhagoPred')/'Datasets'/ 'ExposureTest').iterdir()
     for dataset in tqdm(
-        datasets
+        # datasets
+        [
         # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / 'old' / '03_10_2500.h5',
         # Path('PhagoPred')/'Datasets'/ 'Prel/
         # Path('PhagoPred')/'Datasets'/ 'Prelims' / '16_09_1 (another copy).h5',
         # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '21_10_2500.h5',
         # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5',
         # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5',
+        # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_5min_short.h5',
+        Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_10min_short.h5',
+        ]
     ):
         # keep_only_group(dataset, ['Images'])
         # repack_hdf5(dataset)
@@ -38,8 +42,8 @@ if __name__ == '__main__':
         # extract_features.extract_features(dataset=dataset, phase_features = [features.FirstLastFrame()])
         # clean_features.remove_bad_frames(dataset=dataset)
         # fill_missing_cells(dataset)
-        # GUI.run(dataset=dataset)
-        truncate_hdf5(dataset, dataset.parent / f"truncated_{dataset.name}", start_frame = 0, end_frame=300)
+        GUI.run(dataset=dataset)
+        # truncate_hdf5(dataset, dataset.parent / f"truncated_{dataset.name}", start_frame = 0, end_frame=300)
         
     # trackpy.run_tracking()
     # extract_features.extract_features()

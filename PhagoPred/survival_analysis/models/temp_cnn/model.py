@@ -67,7 +67,7 @@ class TemporalCNN(torch.nn.Module):
         
         x = x.permute(0, 2, 1) # (batchsize, features, seq_length)
         for layer in self.cn_layers:
-            x = layer(x)
+            x = torch.nn.functional.relu(layer(x))
         x = x.permute(0, 2, 1) # (batchsize, seq_len, features)
 
         # attn_weights = self.attention(x).squeeze(-1) # (B, T)
@@ -77,32 +77,28 @@ class TemporalCNN(torch.nn.Module):
         
         attn_weights = torch.einsum("btc,c->bt", x, self.attention_vector)
         attn_weights = attn_weights.masked_fill(~mask, -1e9)
-        attn_weights = torch.nn.functional.softmax(attn_weights)
+        attn_weights = torch.nn.functional.softmax(attn_weights, dim=1)
 
         context_vector = torch.sum(attn_weights.unsqueeze(-1)*x, dim=1) # (B, channels)
         output = self.fc(context_vector)
-        output = torch.nn.functional.sigmoid(output)
+        # output = torch.nn.functional.sigmoid(output)
 
         if return_attention:
             return output, attn_weights
         else:
             return output
 
-def estimated_cif(
-    outputs: torch.Tensor,
-    # t: torch.Tensor
-    ) -> torch.Tensor:
-    """Cumulative incidence function from Dynamic DeepHit outputs.
+# === Model outputs pmf ===
+def estimated_pmf(outputs: torch.Tensor) -> torch.Tensor:
+    """Probability mass function from Dynamic DeepHit outputs.
     Args:
         outputs: (batch_size, num_time_bins) - predicted probabilities for each time bin
-        t: (batch_size,) - true event/censoring times (as indices of time bins)
 
     Returns:
-        CIF: (torch.Tensor) - Probabality of event occuring on or before time indexed by dim=1
+        PMF: (torch.Tensor) - Probabality of event occuring at time indexed by dim=1
     """
-
-    cif = torch.cumsum(outputs, dim=1)
-    return cif
+    pmf = torch.nn.functional.softmax(outputs, dim=1)
+    return pmf
 
 import torch
 import torch.nn.functional as F
@@ -173,30 +169,34 @@ def compute_loss(
     outputs: torch.Tensor,
     t: torch.Tensor,
     e: torch.Tensor,
+    x: torch.Tensor = None,
+    y: torch.Tensor = None,
+    pmf: torch.Tensor = None,
+    mask: torch.Tensor = None,
 ) -> torch.Tensor:
-
 
     t = t.long()
 
-    # outputs = torch.nn.functional.softmax(outputs, dim=1)
-    # cif = estimated_cif(outputs)
-    # cif = outputs
+    if pmf is None:
+        pmf = estimated_pmf(outputs)
+    # assert (pmf >= 0.0).all(), f"PMF has negative values: {pmf}"
+    pmf = torch.clamp(pmf, min=0.0, max=1.0)
 
-    negative_log_likelihood, censored_loss, uncesnored_loss = losses.negative_log_likelihood(outputs, t, e)
-    # negative_log_likelihood, censored_loss, uncesnored_loss = losses.soft_NLL(outputs, cif, t, e)
+    negative_log_likelihood, censored_loss, uncesnored_loss = losses.negative_log_likelihood(pmf, t, e)
 
-    ranking_loss = losses.ranking_loss(outputs, t, e)
+    ranking_loss = losses.ranking_loss(pmf, t, e)
 
     loss = negative_log_likelihood + ranking_loss
+
     if torch.isnan(loss) or torch.isinf(loss):
-        print("NaN or inf loss encountered in final loss!")
         print("NaN or inf loss encountered:")
         print(f"  Negative Log Likelihood: {negative_log_likelihood.item()}")
         print(f"  Ranking Loss: {ranking_loss.item()}")
         print(f"  NLL censored: {censored_loss.item()}")
         print(f"  NLL uncensored: {uncesnored_loss.item()}")
+        print(f"  Inputs: {x}")
         print(f"  Outputs: {outputs}")
-        print(f"  CIF: {cif}")
+        print(f"  PMF: {pmf}")
         print(f"  t: {t}")
         print(f"  e: {e}")
         raise ValueError("NaN or inf loss encountered in compute_loss")
