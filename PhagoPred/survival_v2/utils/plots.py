@@ -2,46 +2,77 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights, feature_names, save_path) -> None:
+def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights=None, feature_names=None, save_path=None) -> None:
     """
-    Plot observed features, attention weights and predicted (and underlying) PMF.
-    
+    Plot observed features, attention weights (if available) and predicted (and underlying) PMF.
+
     Args:
         sample: dict with keys:
-            - features: (seq_len, num_features) tensor of observed features
-            - time_to_event_bin: scalar tensor of true time bin
-            - event_indicator: scalar tensor, 1 if event, 0 if censored
-            - (optional) attention_weights: (seq_len,) tensor of attention weights
-        predicted_pmf: (num_bins,) tensor of predicted PMF
+            - features: (seq_len, num_features) tensor/array of observed features
+            - time_to_event_bin: scalar tensor/value of true time bin
+            - event_indicator: scalar tensor/value, 1 if event, 0 if censored
+            - (optional) binned_pmf: true PMF distribution
+        predicted_pmf: (num_bins,) tensor/array of predicted PMF
+        bin_edges: bin edge positions
+        attn_weights: (seq_len,) tensor/array of attention weights, or None
+        feature_names: list of feature names, or None
         save_path: Path to save figure, or None to not save
     """
-    
-    features = sample['features'].cpu().numpy()
-    true_pmf = sample['binned_pmf'] if 'binned_pmf' in sample.keys() else None
-    time_to_event = sample['time_to_event'].cpu().numpy()
-    cell_idx = sample['cell_idx']
-    cell_file = sample['hdf5_path']
-    length = sample['length'].cpu().numpy()
-    event_indicator = sample['event_indicator'].cpu().numpy()
-    
-    attn_weights = attn_weights.cpu().numpy()
-    predicted_pmf = predicted_pmf.cpu().numpy()
-    
+
+    # Helper function to convert to numpy if needed
+    def to_numpy(x):
+        if x is None:
+            return None
+        if hasattr(x, 'cpu'):  # torch tensor
+            return x.cpu().numpy()
+        elif isinstance(x, np.ndarray):
+            return x
+        else:
+            return np.array(x)
+
+    # Convert all inputs to numpy arrays
+    features = to_numpy(sample['features'])
+    true_pmf = to_numpy(sample.get('binned_pmf'))
+    time_to_event = to_numpy(sample['time_to_event'])
+    cell_idx = sample.get('cell_idx', 'N/A')
+    cell_file = sample.get('hdf5_path', 'N/A')
+    length = to_numpy(sample['length'])
+    if length is None or (isinstance(length, np.ndarray) and length.size == 0):
+        length = len(features)
+    elif isinstance(length, np.ndarray):
+        length = int(length.item())
+    else:
+        length = int(length)
+    event_indicator = to_numpy(sample['event_indicator'])
+    if isinstance(event_indicator, np.ndarray):
+        event_indicator = event_indicator.item()
+
+    attn_weights = to_numpy(attn_weights)
+    predicted_pmf = to_numpy(predicted_pmf)
+
     padding_slice = slice(None, length)
-    
-    fig = plt.figure(figsize=(14, 6))
-    gs = fig.add_gridspec(2, 2, width_ratios=[2, 1], height_ratios=[1, 1.2])
 
-    # ====== (1) Attention Values ======
-    attn_weights  = attn_weights[padding_slice]
-    ax_att = fig.add_subplot(gs[0, 0])
-    ax_att.scatter(np.arange(length), attn_weights, color='k', marker='o', label='Attention Weights')
-    ax_att.set_ylabel("Attention")
+    # Adjust layout based on whether we have attention weights
+    if attn_weights is not None:
+        fig = plt.figure(figsize=(14, 6))
+        gs = fig.add_gridspec(2, 2, width_ratios=[2, 1], height_ratios=[1, 1.2])
 
-    # ===== (2) Features =====
-    
-    ax_feat = fig.add_subplot(gs[1, 0])
-    feats = features[padding_slice, :]
+        # ====== (1) Attention Values ======
+        attn_weights_trimmed = attn_weights[padding_slice]
+        ax_att = fig.add_subplot(gs[0, 0])
+        ax_att.scatter(np.arange(length), attn_weights_trimmed, color='k', marker='o', label='Attention Weights')
+        ax_att.set_ylabel("Attention")
+
+        # ===== (2) Features =====
+        ax_feat = fig.add_subplot(gs[1, 0])
+    else:
+        # No attention weights - simpler layout
+        fig = plt.figure(figsize=(14, 4))
+        gs = fig.add_gridspec(1, 2, width_ratios=[2, 1])
+        ax_feat = fig.add_subplot(gs[0, 0])
+
+    # ===== Features =====
+    feats = features[padding_slice, :] if features.ndim > 1 else features[padding_slice].reshape(-1, 1)
     for f_idx in range(feats.shape[1]):
         ax_feat.plot(np.arange(length), feats[:, f_idx], label=(feature_names[f_idx] if feature_names else f"F{f_idx}"), alpha=0.7)
 
@@ -50,8 +81,11 @@ def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights, feature
     ax_feat.legend(fontsize=8, ncol=2)
     ax_feat.grid(True)
 
-    # ====== (3) PMFS ======
-    ax_sd = fig.add_subplot(gs[:, 1])  # span both rows
+    # ====== PMFS ======
+    if attn_weights is not None:
+        ax_sd = fig.add_subplot(gs[:, 1])  # span both rows
+    else:
+        ax_sd = fig.add_subplot(gs[0, 1])
     abs_bin_edges = bin_edges + length
     bin_widths = np.diff(abs_bin_edges)
     bin_widths[-1] = bin_widths[-2]  # make last bin same width for visualization

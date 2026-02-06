@@ -12,11 +12,11 @@ from PhagoPred.survival_v2.experiments.run_experiments import run_experiment_sui
 from PhagoPred.survival_v2.interpret import SurvivalSHAP, create_background_from_dataset
 
 def train():
-        results = run_experiment_suite(
+    results = run_experiment_suite(
         suite_name='classical_comparison',
         output_dir='PhagoPred/survival_v2/experiments/results',
         device='cuda',
-        repeats=5,
+        repeats=3,
     )
 
 def eval():

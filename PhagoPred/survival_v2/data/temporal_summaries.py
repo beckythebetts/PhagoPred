@@ -1,5 +1,7 @@
 import numpy as np
 from tqdm import tqdm
+from functools import partial
+
 
 class TemporalSummary:
     """Summary statistics for temporal data.
@@ -17,47 +19,56 @@ class TemporalSummary:
         self.feature_names = None
         
         self.summary_stats = {
-            'mean': lambda x: np.nanmean(x, axis=1),
-            'std': lambda x: np.nanstd(x, axis=1),
+            # 'mean': lambda x: np.nanmean(x, axis=1),
+            # 'std': lambda x: np.nanstd(x, axis=1),
+            'mean': partial(np.nanmean, axis=1), #lamda functions cannot be pickled
+            'std': partial(np.nanstd, axis=1),
             'slope': self._slope,
             'dom_freq': self._dom_freq,
         }
         
+        self.full_seq_len = None
+        
     def convert_ds(self, ds: 'CellDataset', num_landmarks_per_sample: int = 2) -> np.ndarray:
         """
-        
+
         """
         self.base_feature_names = ds.features
         self.full_seq_len = ds.fixed_len
-        
+
         features = []
+        raw_features = []
         time_to_event = []
         event_indicator = []
         time_to_event_bin = []
-        
+        lengths = []
+
         progress_bar = tqdm(total=num_landmarks_per_sample * len(ds), desc="Generating temporal summaries")
         for _ in range(num_landmarks_per_sample):
             for idx in range(len(ds)):
                 sample = ds[idx]
                 sample_features = sample['features']
                 sample_temporal_summary = self._apply_sliding_windows(sample_features)
-                
+
                 features.append(sample_temporal_summary)
+                raw_features.append(sample_features)
                 time_to_event.append(sample['time_to_event'])
                 event_indicator.append(sample['event_indicator'])
                 time_to_event_bin.append(sample['time_to_event_bin'])
+                lengths.append(sample['length'])
                 progress_bar.update(1)
-                
+
         progress_bar.close()
-        
+
         return {
             'features': np.array(features),
+            'raw_features': np.array(raw_features),
             'time_to_event': np.array(time_to_event),
             'event_indicator': np.array(event_indicator),
             'time_to_event_bin': np.array(time_to_event_bin),
+            'lengths': np.array(lengths),
         }
-                
-                
+                         
     def get_feature_names(self) -> list[str]:
         if self.feature_names is None:
             self.feature_names = self._generate_feature_names()

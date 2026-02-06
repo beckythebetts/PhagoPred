@@ -54,84 +54,82 @@ MODELS = {
     # ========== Classical ML Models ==========
 
     # Random Forest variants
-    'rf_summary': {
-        'type': 'random_forest',
-        'n_estimators': 100,
-        'max_depth': 10,
-        'feature_extraction': 'summary'
-    },
-    'rf_segments': {
-        'type': 'random_forest',
-        'n_estimators': 100,
-        'max_depth': 10,
-        'feature_extraction': 'segments',
-        'n_segments': 10
-    },
-    'rf_temporal': {
-        'type': 'random_forest',
-        'n_estimators': 200,
-        'max_depth': 15,
-        'feature_extraction': 'temporal_full',
-        'n_segments': 5,
-        'n_lags': 10
-    },
+    # 'rf_summary': {
+    #     'type': 'random_forest',
+    #     'n_estimators': 100,
+    #     'max_depth': 10,
+    #     'feature_extraction': 'summary'
+    # },
+    # 'rf_segments': {
+    #     'type': 'random_forest',
+    #     'n_estimators': 100,
+    #     'max_depth': 10,
+    #     'feature_extraction': 'segments',
+    #     'n_segments': 10
+    # },
+    # 'rf_temporal': {
+    #     'type': 'random_forest',
+    #     'n_estimators': 200,
+    #     'max_depth': 15,
+    #     'feature_extraction': 'temporal_full',
+    #     'n_segments': 5,
+    #     'n_lags': 10
+    # },
 
-    # XGBoost variants
-    'xgb_summary': {
-        'type': 'xgboost',
-        'n_estimators': 100,
-        'max_depth': 6,
-        'learning_rate': 0.1,
-        'feature_extraction': 'summary'
-    },
-    'xgb_temporal': {
-        'type': 'xgboost',
-        'n_estimators': 200,
-        'max_depth': 8,
-        'learning_rate': 0.1,
-        'feature_extraction': 'temporal_full',
-        'n_segments': 5,
-        'n_lags': 10
-    },
+    # # XGBoost variants
+    # 'xgb_summary': {
+    #     'type': 'xgboost',
+    #     'n_estimators': 100,
+    #     'max_depth': 6,
+    #     'learning_rate': 0.1,
+    #     'feature_extraction': 'summary'
+    # },
+    # 'xgb_temporal': {
+    #     'type': 'xgboost',
+    #     'n_estimators': 200,
+    #     'max_depth': 8,
+    #     'learning_rate': 0.1,
+    #     'feature_extraction': 'temporal_full',
+    #     'n_segments': 5,
+    #     'n_lags': 10
+    # },
 
-    # LightGBM variants
-    'lgbm_summary': {
-        'type': 'lightgbm',
-        'n_estimators': 100,
-        'max_depth': -1,
-        'num_leaves': 31,
-        'learning_rate': 0.1,
-        'feature_extraction': 'summary'
-    },
-    'lgbm_temporal': {
-        'type': 'lightgbm',
-        'n_estimators': 200,
-        'max_depth': -1,
-        'num_leaves': 63,
-        'learning_rate': 0.1,
-        'feature_extraction': 'temporal_full',
-        'n_segments': 5,
-        'n_lags': 10
-    },
+    # # LightGBM variants
+    # 'lgbm_summary': {
+    #     'type': 'lightgbm',
+    #     'n_estimators': 100,
+    #     'max_depth': -1,
+    #     'num_leaves': 31,
+    #     'learning_rate': 0.1,
+    #     'feature_extraction': 'summary'
+    # },
+    # 'lgbm_temporal': {
+    #     'type': 'lightgbm',
+    #     'n_estimators': 200,
+    #     'max_depth': -1,
+    #     'num_leaves': 63,
+    #     'learning_rate': 0.1,
+    #     'feature_extraction': 'temporal_full',
+    #     'n_segments': 5,
+    #     'n_lags': 10
+    # },
 
     # Scikit-survival models (proper survival analysis)
     'rsf': {
         'type': 'random_survival_forest',
         'n_estimators': 100,
         'max_depth': None,
-        'feature_extraction': 'temporal_full',
-        'n_segments': 5,
-        'n_lags': 10
+        'window_sizes': [25, 100, 500, 1000],
     },
-    'gbsa': {
-        'type': 'gradient_boosting_survival',
-        'n_estimators': 100,
-        'max_depth': 3,
-        'learning_rate': 0.1,
-        'feature_extraction': 'temporal_full',
-        'n_segments': 5,
-        'n_lags': 10
-    },
+    # 'gbsa': {
+    #     'type': 'gradient_boosting_survival',
+    #     'n_estimators': 100,
+    #     'max_depth': 3,
+    #     'learning_rate': 0.1,
+    #     'feature_extraction': 'temporal_full',
+    #     'n_segments': 5,
+    #     'n_lags': 10
+    # },
 }
 
 # Attention mechanisms
@@ -445,15 +443,15 @@ def generate_experiment_grid(
     """
     # print(models, feature_combos)
     if models is None:
-        models = list(MODELS.keys())
+        models = list(MODELS.keys())[0:1]
     if attentions is None:
-        attentions = list(ATTENTION.keys())
+        attentions = list(ATTENTION.keys())[0:1]
     if losses is None:
-        losses = list(LOSSES.keys())
+        losses = list(LOSSES.keys())[0:1]
     if datasets is None:
-        datasets = list(DATASETS.keys())
+        datasets = list(DATASETS.keys())[0:1]
     if trainings is None:
-        trainings = list(TRAINING.keys())
+        trainings = list(TRAINING.keys())[0:1]
     if feature_combos is None:
         feature_combos = list(FEATURE_COMBOS.keys())[0:1]    
     
@@ -638,11 +636,11 @@ EXPERIMENT_SUITES = {
 
     # Full classical model comparison
     'classical_comparison': generate_experiment_grid(
-        models=['rf_summary', 'rf_temporal', 'xgb_summary', 'xgb_temporal'],
-        attentions=['none_mean'],
-        losses=['nll_only'],
+        models=['rsf', 'cnn_medium'],
+        attentions=['none_last'],
+        losses=['soft_target'],
         datasets=['baseline', 'late_entry_extreme'],
-        trainings=['standard']
+        trainings=['standard'],
     ),
 
     # Classical models on different datasets

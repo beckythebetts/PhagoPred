@@ -27,7 +27,7 @@ from PhagoPred.survival_v2.models.survival_forest import RandomSurvivalForestMod
 from PhagoPred.survival_v2.models.classical_base import ClassicalSurvivalModel
 from PhagoPred.survival_v2.losses.survival_losses import compute_loss, LOSS_CONFIGS
 from PhagoPred.survival_v2.utils.training import train_model
-from PhagoPred.survival_v2.utils.evaluation import evaluate_model
+from PhagoPred.survival_v2.utils.evaluation import evaluate_model, evaluate_classical_model
 from PhagoPred.survival_v2.data.dataset import CellDataset, collate_fn
 from PhagoPred.survival_v2.utils.plots import plot_losses
 from PhagoPred.survival_v2.experiments.plot_experiments import plot_experiment_results, plot_confusion_matrices, plot_experiment_losses
@@ -100,7 +100,8 @@ def build_model(model_config, attention_config, num_features, num_bins, device, 
             feature_extraction=model_config.get('feature_extraction', 'temporal_full'),
             n_segments=model_config.get('n_segments', 5),
             n_lags=model_config.get('n_lags', 10),
-            feature_names=feature_names
+            feature_names=feature_names,
+            window_sizes=model_config.get('window_sizes', [10, 20, 50]),
         )
         return model
 
@@ -139,7 +140,8 @@ def build_model(model_config, attention_config, num_features, num_bins, device, 
             feature_extraction=model_config.get('feature_extraction', 'temporal_full'),
             n_segments=model_config.get('n_segments', 5),
             n_lags=model_config.get('n_lags', 10),
-            feature_names=feature_names
+            feature_names=feature_names,
+            window_sizes=model_config.get('window_sizes', [10, 20, 50]),
         )
         return model
 
@@ -169,121 +171,28 @@ def is_classical_model(model_config):
     return model_config['type'] in classical_types
 
 
-def evaluate_classical_model(model, val_loader, device, visualise_predictions=10, save_dir=None):
-    """
-    Evaluate a classical ML model on the validation set.
-
-    Args:
-        model: ClassicalSurvivalModel instance
-        val_loader: DataLoader for validation data
-        device: Device (unused, for API compatibility)
-        visualise_predictions: Number of predictions to visualize
-        save_dir: Directory to save plots
-
-    Returns:
-        dict with evaluation metrics
-    """
-    from PhagoPred.survival_v2.utils.metrics import concordance_index, integrated_brier_score
-
-    if save_dir is not None:
-        save_dir = Path(save_dir)
-        save_dir.mkdir(parents=True, exist_ok=True)
-
-    all_pmf = []
-    all_times = []
-    all_events = []
-    all_true_pmf = []
-    
-    bin_edges = val_loader.dataset.event_time_bins
-
-    for batch in val_loader:
-        features = batch['features']
-        lengths = batch['length']
-        time_bins = batch['time_to_event_bin']
-        events = batch['event_indicator']
-
-        # Get predictions from classical model
-        pmf = model.predict_pmf(features, lengths)
-
-        all_pmf.append(pmf)
-        all_times.append(time_bins.cpu().numpy() if hasattr(time_bins, 'cpu') else time_bins)
-        all_events.append(events.cpu().numpy() if hasattr(events, 'cpu') else events)
-
-        if 'binned_pmf' in batch and batch['binned_pmf'] is not None:
-            true_pmf = batch['binned_pmf']
-            all_true_pmf.append(true_pmf.cpu().numpy() if hasattr(true_pmf, 'cpu') else true_pmf)
-
-    # Concatenate all predictions
-    all_pmf = np.concatenate(all_pmf, axis=0)
-    all_times = np.concatenate(all_times, axis=0)
-    all_events = np.concatenate(all_events, axis=0)
-
-    # Compute predicted times (expected value)
-    bins = np.arange(model.num_bins)
-    predicted_times = np.sum(all_pmf * bins, axis=-1)
-
-    # Compute metrics
-    # c_index = concordance_index(all_times, all_events, predicted_times)
-    c_index = concordance_index(all_pmf, all_times, all_events, bin_edges)
-    brier_score = integrated_brier_score(all_pmf, all_times, all_events, bin_edges)
-
-    # Compute accuracy (predicted bin vs actual bin)
-    predicted_bins = np.argmax(all_pmf, axis=-1)
-    accuracy = np.mean(predicted_bins == all_times)
-
-    metrics = {
-        'c_index': float(c_index),
-        'brier_score': float(brier_score),
-        'accuracy': float(accuracy),
-        'n_samples': len(all_times),
-        'n_events': int(all_events.sum())
-    }
-
-    # Compute optimal metrics if true PMF is available
-    # if len(all_true_pmf) > 0:
-    #     all_true_pmf = np.concatenate(all_true_pmf, axis=0)
-    #     optimal_predicted_times = np.sum(all_true_pmf * bins, axis=-1)
-    #     optimal_c_index = compute_c_index(all_times, all_events, optimal_predicted_times)
-    #     optimal_brier = compute_brier_score(all_true_pmf, all_times, all_events, model.num_bins)
-    #     optimal_bins = np.argmax(all_true_pmf, axis=-1)
-    #     optimal_accuracy = np.mean(optimal_bins == all_times)
-
-    #     metrics['optimal_c_index'] = float(optimal_c_index)
-    #     metrics['optimal_brier_score'] = float(optimal_brier)
-    #     metrics['optimal_accuracy'] = float(optimal_accuracy)
-
-    # Visualize predictions if requested
-    if visualise_predictions > 0 and save_dir is not None:
-        import matplotlib.pyplot as plt
-
-        for i in range(min(visualise_predictions, len(all_pmf))):
-            fig, ax = plt.subplots(figsize=(8, 4))
-            ax.bar(bins, all_pmf[i], alpha=0.7, label='Predicted PMF')
-            ax.axvline(all_times[i], color='red', linestyle='--',
-                       label=f'True bin ({all_times[i]})')
-            ax.set_xlabel('Time Bin')
-            ax.set_ylabel('Probability')
-            ax.set_title(f'Sample {i+1} - Event: {bool(all_events[i])}')
-            ax.legend()
-            plt.tight_layout()
-            plt.savefig(save_dir / f'val_pred_{i+1}.png', dpi=100)
-            plt.close()
-
-    return metrics
-
-
-def build_datasets(dataset_config: dict, feature_combo: list):
+def build_datasets(dataset_config: dict, feature_combo: list, is_classical: bool=False):
     """
     Build train and validation datasets.
 
     Args:
         dataset_config: dict with dataset parameters
         feature_combo: list of feature names to include
+        is_classical: If false, normalise dataset and don't use fixed length
 
     Returns:
         train_dataset: CellDataset for training
         val_dataset: CellDataset for validation
     """
+    # print('DATASET CONFIG:', dataset_config)
+    # model = dataset_config.get('model', None)
+    if is_classical:
+        normalise = False
+        fixed_length = 1000
+    else:
+        normalise = False
+        fixed_length = None
+        
     # Build training dataset
     train_dataset = CellDataset(
         hdf5_paths=dataset_config['train_paths'],
@@ -293,7 +202,9 @@ def build_datasets(dataset_config: dict, feature_combo: list):
         max_time_to_death=dataset_config.get('max_time_to_death', 100),
         preload_data=True,
         interpolate_nan=False,
-        add_start_frame_feature=dataset_config.get('add_start_frame_feature', False)
+        add_start_frame_feature=dataset_config.get('add_start_frame_feature', False),
+        normalise=normalise,
+        fixed_len=fixed_length,
     )
 
     # Compute normalization stats from training data
@@ -311,7 +222,9 @@ def build_datasets(dataset_config: dict, feature_combo: list):
         event_time_bins=train_dataset.event_time_bins,
         preload_data=True,
         interpolate_nan=False,
-        add_start_frame_feature=dataset_config.get('add_start_frame_feature', False)
+        add_start_frame_feature=dataset_config.get('add_start_frame_feature', False),
+        normalise=normalise,
+        fixed_len=fixed_length,
     )
 
     return train_dataset, val_dataset
@@ -359,7 +272,7 @@ def run_single_experiment(
 
     # Build datasets
     print("Building datasets...")
-    train_dataset, val_dataset = build_datasets(dataset_config, feature_combo)
+    train_dataset, val_dataset = build_datasets(dataset_config, feature_combo, is_classical=is_classical_model(model_config))
     experiment_config['normlisation_means'] = train_dataset.means.tolist()
     experiment_config['normlisation_stds'] = train_dataset.stds.tolist()
 

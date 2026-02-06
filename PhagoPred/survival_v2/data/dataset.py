@@ -418,6 +418,7 @@ class CellDataset(torch.utils.data.Dataset):
             'pmf': pmf,
             'binned_pmf': binned_pmf,
             'mask': ~np.isnan(cell_features),
+            'length': cell_features.shape[0],
         }
         return item
         
@@ -606,7 +607,7 @@ def collate_fn(batch, dataset: CellDataset = None, device: str = 'cpu', pad_at: 
     for sample in batch:
         while sample is None:
             sample = dataset[np.random.randint(len(dataset))]
-            raise 'Warning! Invalid sample'
+            # raise ValueError('Warning! Invalid sample')
         new_batch.append(sample)
     batch=new_batch
 

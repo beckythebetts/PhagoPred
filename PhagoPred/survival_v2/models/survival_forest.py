@@ -6,6 +6,7 @@ censoring natively rather than using IPCW approximations.
 
 from typing import Dict, List, Optional
 import numpy as np
+from sksurv.ensemble import RandomSurvivalForest
 
 from .classical_base import ClassicalSurvivalModel
 
@@ -31,9 +32,6 @@ class RandomSurvivalForestModel(ClassicalSurvivalModel):
         max_features: str = 'sqrt',
         n_jobs: int = -1,
         random_state: Optional[int] = 42,
-        feature_extraction: str = 'temporal_full',
-        n_segments: int = 5,
-        n_lags: int = 10,
         window_sizes: List[int] = None,
         feature_names: List[str] = None,
         **kwargs
@@ -58,9 +56,6 @@ class RandomSurvivalForestModel(ClassicalSurvivalModel):
         """
         super().__init__(
             num_bins=num_bins,
-            feature_extraction=feature_extraction,
-            n_segments=n_segments,
-            n_lags=n_lags,
             window_sizes=window_sizes,
             feature_names=feature_names
         )
@@ -78,13 +73,6 @@ class RandomSurvivalForestModel(ClassicalSurvivalModel):
 
     def _init_model(self):
         """Initialize the Random Survival Forest model."""
-        try:
-            from sksurv.ensemble import RandomSurvivalForest
-        except ImportError:
-            raise ImportError(
-                "scikit-survival is required for RandomSurvivalForestModel. "
-                "Install it with: pip install scikit-survival"
-            )
 
         self.model = RandomSurvivalForest(
             n_estimators=self.n_estimators,
@@ -96,7 +84,7 @@ class RandomSurvivalForestModel(ClassicalSurvivalModel):
             random_state=self.random_state
         )
 
-    def _fit_model(self, X: np.ndarray, y: np.ndarray, events: np.ndarray) -> Dict:
+    def _fit_model(self, train_data: Dict) -> Dict:
         """
         Fit the Random Survival Forest.
 
@@ -108,80 +96,98 @@ class RandomSurvivalForestModel(ClassicalSurvivalModel):
         Returns:
             Training history dictionary
         """
-        # Create structured array for scikit-survival
-        # It expects (event, time) structured array
+        print('Fitting model...')
+        features = train_data['features']
+        times = train_data['time_to_event_bin']
+        events = train_data['event_indicator']
+        
         y_structured = np.array(
-            [(bool(e), t) for e, t in zip(events, y)],
+            [(bool(e), t) for e, t in zip(events, times)],
             dtype=[('event', bool), ('time', float)]
         )
 
         # Fit model
-        self.model.fit(X, y_structured)
+        self.model.fit(features, y_structured)
 
         # Store the unique event times for prediction
         self._time_bins = np.arange(self.num_bins)
 
         return {
-            'n_samples': len(y),
+            'n_samples': len(times),
             'n_events': int(events.sum()),
             'n_censored': int(len(events) - events.sum())
         }
 
-    def _predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """
-        Predict PMF over time bins.
+    # def _predict_proba(self, X: np.ndarray) -> np.ndarray:
+    #     """
+    #     Predict PMF over time bins.
 
-        Converts survival function to PMF:
-        PMF(t) = S(t-1) - S(t)
+    #     Converts survival function to PMF:
+    #     PMF(t) = S(t-1) - S(t)
 
+    #     Args:
+    #         X: Tabular features (n_samples, n_features)
+
+    #     Returns:
+    #         PMF predictions (n_samples, num_bins)
+    #     """
+    #     # Get survival functions
+    #     surv_funcs = self.model.predict_survival_function(X)
+
+    #     # Convert to PMF
+    #     pmf = np.zeros((X.shape[0], self.num_bins))
+
+    #     for i, sf in enumerate(surv_funcs):
+    #         # Evaluate survival function at each bin
+    #         surv_at_bins = np.array([sf(t) for t in self._time_bins])
+
+    #         # PMF is the negative derivative of survival function
+    #         # PMF(t) = S(t-1) - S(t)
+    #         pmf[i, 0] = 1.0 - surv_at_bins[0]
+    #         pmf[i, 1:] = surv_at_bins[:-1] - surv_at_bins[1:]
+
+    #         # Ensure non-negative and normalize
+    #         pmf[i] = np.maximum(pmf[i], 0)
+    #         if pmf[i].sum() > 0:
+    #             pmf[i] /= pmf[i].sum()
+    #         else:
+    #             # Fallback: uniform distribution
+    #             pmf[i] = 1.0 / self.num_bins
+
+    #     return pmf
+
+    def _predict_pmfs(self, input_features: np.ndarray):
+        """PRedict PMFS from model
         Args:
-            X: Tabular features (n_samples, n_features)
-
+            input_features: Tabular features (n_samples, n_features)
         Returns:
             PMF predictions (n_samples, num_bins)
         """
-        # Get survival functions
-        surv_funcs = self.model.predict_survival_function(X)
+        survival_funcs = self.model.predict_survival_function(input_features, return_array=True)
+        print(input_features.shape, survival_funcs.shape)
+        # P(T=t) = S(t-1) - S(t)
+        pmf = survival_funcs[:, :-1] - survival_funcs[:, 1:]
+        pmf = np.concatenate((1-survival_funcs[:, 0][:, np.newaxis], pmf), axis=1)
+        return pmf #(n_smaples, num_bins)
+        
+        
+    # def predict_survival_function(self, x, lengths) -> List:
+    #     """
+    #     Get the full survival function predictions.
 
-        # Convert to PMF
-        pmf = np.zeros((X.shape[0], self.num_bins))
+    #     Args:
+    #         x: Sequences of shape (batch, seq_len, num_features)
+    #         lengths: Valid lengths for each sequence (batch,)
 
-        for i, sf in enumerate(surv_funcs):
-            # Evaluate survival function at each bin
-            surv_at_bins = np.array([sf(t) for t in self._time_bins])
+    #     Returns:
+    #         List of survival function objects from scikit-survival
+    #     """
+    #     if not self._is_fitted:
+    #         raise RuntimeError("Model must be fitted first")
 
-            # PMF is the negative derivative of survival function
-            # PMF(t) = S(t-1) - S(t)
-            pmf[i, 0] = 1.0 - surv_at_bins[0]
-            pmf[i, 1:] = surv_at_bins[:-1] - surv_at_bins[1:]
-
-            # Ensure non-negative and normalize
-            pmf[i] = np.maximum(pmf[i], 0)
-            if pmf[i].sum() > 0:
-                pmf[i] /= pmf[i].sum()
-            else:
-                # Fallback: uniform distribution
-                pmf[i] = 1.0 / self.num_bins
-
-        return pmf
-
-    def predict_survival_function(self, x, lengths) -> List:
-        """
-        Get the full survival function predictions.
-
-        Args:
-            x: Sequences of shape (batch, seq_len, num_features)
-            lengths: Valid lengths for each sequence (batch,)
-
-        Returns:
-            List of survival function objects from scikit-survival
-        """
-        if not self._is_fitted:
-            raise RuntimeError("Model must be fitted first")
-
-        X = self.extract_features(x, lengths)
-        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-        return self.model.predict_survival_function(X)
+    #     X = self.extract_features(x, lengths)
+    #     X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+    #     return self.model.predict_survival_function(X)
 
 
 class GradientBoostingSurvivalModel(ClassicalSurvivalModel):
