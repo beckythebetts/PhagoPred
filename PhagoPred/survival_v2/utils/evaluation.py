@@ -213,13 +213,15 @@ def evaluate_model(model, dataloader, device, visualise_predictions: int = 10, s
                         save_path = None
                         
                     single_sample = {batch_key: batch[batch_key][i] for batch_key in batch.keys()}
+                    start_frame = single_sample['start_frame']
                     visualise_prediction(
                         single_sample,
                         predicted_pmf=pmf[i],
                         bin_edges=bin_edges,
-                        attn_weights=attn_weights[i],
+                        # attn_weights=attn_weights[i],
                         feature_names=feature_names, 
-                        save_path=save_path
+                        save_path=save_path,
+                        start_frame=start_frame,
                     )
                     visualised_predictions_count += 1
                     
@@ -279,6 +281,7 @@ def evaluate_classical_model(model, val_loader, device, visualise_predictions=10
     all_times = test_data['time_to_event']
     all_events = test_data['event_indicator']
     all_times_binned = test_data['time_to_event_bin']
+    all_true_pmfs = test_data.get('binned_pmf', None)
 
     print(all_pmf.shape, all_times.shape, all_events.shape)
 
@@ -294,8 +297,10 @@ def evaluate_classical_model(model, val_loader, device, visualise_predictions=10
                 'time_to_event': all_times[i],
                 'time_to_event_bin': all_times_binned[i],
                 'event_indicator': all_events[i],
-                'length': test_data['lengths'][i],
+                'landmark_frame': test_data['landmark_frames'][i]
             }
+            if all_true_pmfs is not None:
+                sample['binned_pmf'] = all_true_pmfs[i]
 
             visualise_prediction(
                 sample=sample,
@@ -303,7 +308,8 @@ def evaluate_classical_model(model, val_loader, device, visualise_predictions=10
                 bin_edges=bin_edges,
                 attn_weights=None,  # Classical models don't have attention
                 feature_names=feature_names,
-                save_path=save_dir / f'val_pred_{i+1}.png'
+                save_path=save_dir / f'val_pred_{i+1}.png',
+                start_frame=0,
             )
 
     # Use shared function to compute metrics and generate plots
@@ -312,7 +318,7 @@ def evaluate_classical_model(model, val_loader, device, visualise_predictions=10
         all_true_bins=all_times_binned,
         all_true_times=all_times,
         all_events=all_events,
-        all_true_pmfs=None,  # Classical models don't have true PMFs
+        all_true_pmfs=all_true_pmfs,
         bin_edges=bin_edges,
         save_dir=save_dir
     )

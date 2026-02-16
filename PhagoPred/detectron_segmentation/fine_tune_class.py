@@ -442,27 +442,27 @@ class ClassifierHeadFineTuner(train.MyTrainer):
         ))
         return hooks
     
-    @classmethod
-    def build_optimizer(cls, cfg, model):
-        """Freezes everything but classification head
-        Freezes only RPN."""
-        for name, param in model.named_parameters():
-            param.requires_grad = True
-            # if 'proposal_generator' in name:
-            #     param.requires_grad = False
-            # else:
-            #     param.requires_grad = True
-            # if "roi_heads.box_predictor.cls_score" in name:
-            # # if "roi_heads.box_predictor" in name:
-            #     param.requires_grad = True
+    # @classmethod
+    # def build_optimizer(cls, cfg, model):
+    #     """Freezes everything but classification head
+    #     Freezes only RPN."""
+    #     for name, param in model.named_parameters():
+    #         param.requires_grad = True
+    #         # if 'proposal_generator' in name:
+    #         #     param.requires_grad = False
+    #         # else:
+    #         #     param.requires_grad = True
+    #         # if "roi_heads.box_predictor.cls_score" in name:
+    #         # # if "roi_heads.box_predictor" in name:
+    #         #     param.requires_grad = True
 
-            # else:
-            #     param.requires_grad = False
+    #         # else:
+    #         #     param.requires_grad = False
         
-        return torch.optim.Adam(
-            [p for p in model.parameters() if p.requires_grad],
-            lr=cfg.SOLVER.BASE_LR
-        )
+    #     return torch.optim.Adam(
+    #         [p for p in model.parameters() if p.requires_grad],
+    #         lr=cfg.SOLVER.BASE_LR
+    #     )
     
     # @classmethod
     # def build_model(cls, cfg):
@@ -568,10 +568,10 @@ def fine_tune(directory=SETTINGS.MASK_RCNN_MODEL):
     cfg.merge_from_file(str(directory / 'Model' / 'config.yaml'))
     cfg.OUTPUT_DIR = str(directory / 'Model')
     cfg.MODEL.WEIGHTS = str(directory / 'Model' / 'model_final.pth')
-    cfg.SOLVER.BASE_LR = 1e-5 # Decrease learnign rate for fine tuning (was 0.00025 for main training)
-    cfg.SOLVER.IMS_PER_BATCH = 8 # Avoids issues with collating images of different sizes
-    cfg.SOLVER.MAX_ITER = 500
-    cfg.TEST.EVAL_PERIOD = 100
+    cfg.SOLVER.BASE_LR = 2.5e-4 # Decrease learnign rate for fine tuning (was 0.00025 for main training)
+    cfg.SOLVER.IMS_PER_BATCH = 2 # Avoids issues with collating images of different sizes
+    cfg.SOLVER.MAX_ITER = 1000
+    cfg.TEST.EVAL_PERIOD = 10000
     cfg.DATASETS.TRAIN = ("my_dataset_train",)
     cfg.DATASETS.TEST = ("my_dataset_val",)
     # cfg.MODEL.ROI_HEADS.NAME = "CustomWeightedROIHeads"

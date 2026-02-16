@@ -7,7 +7,7 @@ import pandas as pd
 from PhagoPred import SETTINGS
 from PhagoPred.feature_extraction import extract_features, features
 
-tp.linking.Linker.MAX_SUB_NET_SIZE = 35 # Only include for datasets with many cells
+# tp.linking.Linker.MAX_SUB_NET_SIZE = 35 # Only include for datasets with many cells
 # tp.link()
 
 class TrackerWithTrackpy:
@@ -33,34 +33,33 @@ class TrackerWithTrackpy:
                 X = f[f'{self.cells_group}/X'][frame]
                 Y = f[f'{self.cells_group}/Y'][frame]
                 areas = f[f'{self.cells_group}/Area'][frame]
-                # Filter out NaNs or invalid points (assuming nan means missing)
+
                 valid_idxs = np.nonzero(~np.isnan(X) & ~np.isnan(Y) & (areas > self.min_cell_size))[0]
-                # print(valid_idxs)
-                # frame_coords = np.vstack((X, Y)).T
+
                 for idx in valid_idxs:
                     coords.append({'frame': frame, 'x': X[idx], 'y': Y[idx], 'cell_index': idx})
-                # for idx(valid_cell, (x, y)) in zip(valid, frame_coords)
-                # frame_coords = np.vstack((X[valid], Y[valid])).T
-                # for idx, (x, y) in enumerate(frame_coords):
-                #     coords.append({'frame': frame, 'x': x, 'y': y, 'cell_index': idx})
-                # try:
-                #     test = pd.DataFrame(coords)
-                #     print(test)
-                # except:
-                #     print(coords)
-                #     raise 'Error'
+
         return coords, num_frames
 
-    def track(self, search_range=10, memory=3):
+    def track(self, search_range=10, memory=3, scale_coords=1):
         """
         Run tracking with trackpy and store mapping of cell indices to track IDs
+        scale_coords, allows larger search_range iwhtout rquiring more memoery
         """
         coords, num_frames = self.extract_features_for_tracking()
+        search_range /= scale_coords  # Adjust search range based on coordinate scaling
 
-        tp.linking.utils.MAX_SUB_NET_SIZE = 35
+        # tp.linking.utils.MAX_SUB_NET_SIZE = 50
+        tp.linking.Linker.MAX_SUB_NET_SIZE = 50
+        # tp.link()
         # Run trackpy linking
+        coords = pd.DataFrame(coords)
+        coords['x'] /= scale_coords
+        coords['y'] /= scale_coords
         df = tp.link_df(pd.DataFrame(coords), search_range=search_range, memory=memory)
 
+        df['x'] *= scale_coords
+        df['y'] *= scale_coords
         # Find max track id assigned
         self.max_track_id = df['particle'].max()
 
@@ -165,3 +164,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

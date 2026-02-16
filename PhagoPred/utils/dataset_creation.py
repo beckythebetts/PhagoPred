@@ -476,21 +476,21 @@ if __name__ == '__main__':
     # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/07_10_0.h5")
     # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_5min.h5")
     # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min.h5")
-    make_short_test_copy(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_5min.h5"),
-                         Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_5min_short.h5"),
-                         start_frame=0,
-                         end_frame=200)
-    make_short_test_copy(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min.h5"),
-                         Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min_short.h5"),
-                         start_frame=0,
-                         end_frame=100)
-    # hdf5_from_tiffs(Path("~/thor_server/MacrophageData/28_10_no_staph_1").expanduser(), 
-    #                 # Path('D:/27_05.h5'),
-    #                 Path("~/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_5min.h5").expanduser(),
-    #                 phase_channel=2,
-    #                 epi_channel=1,
-    #                 frame_step_size=1,
-                    # )
+    # make_short_test_copy(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_5min.h5"),
+    #                      Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_5min_short.h5"),
+    #                      start_frame=0,
+    #                      end_frame=200)
+    # make_short_test_copy(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min.h5"),
+    #                      Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min_short.h5"),
+    #                      start_frame=0,
+    #                      end_frame=100)
+    hdf5_from_tiffs(Path("~/thor_server/06_02_26/06_02_26_1").expanduser(), 
+                    # Path('D:/27_05.h5'),
+                    Path("~/PhagoPred/PhagoPred/Datasets/06_02.h5").expanduser(),
+                    phase_channel=2,
+                    epi_channel=1,
+                    frame_step_size=1,
+                    )
     # hdf5_from_tiffs(Path("~/thor_server/MacrophageData/28_10_no_staph_1").expanduser(), 
     #             # Path('D:/27_05.h5'),
     #             Path("~/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min.h5").expanduser(),

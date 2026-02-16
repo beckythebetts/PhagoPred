@@ -30,7 +30,7 @@ except:
 # DATASET = Path('PhagoPred')/'Datasets'/'mac_short_seg.h5'
 # MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'mac_20x'
 
-MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / '27_05_mac_fine_tuned_16_10'
+MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / '16_02_26'
 CELLPOSE_MODEL = Path("PhagoPred") / 'cellpose_segmentation' / 'Models' / 'ash'
 UNET_MODEL = Path("PhagoPred") / 'unet_segmentation' / 'models' / '20x_flir_8'
 TRAINING_DATA = Path("PhagoPred") / 'segmentation' / 'models' / '20x_flir_8'
@@ -44,10 +44,10 @@ UMAP_MODEL = Path('PhagoPred') / 'feature_extraction' / 'morphology' / 'UMAP_mod
 THRESHOLD = 250
 
 # ******* TRACKING *******
-MAXIMUM_DISTANCE_THRESHOLD = 30
-FRAME_MEMORY = 10
+MAXIMUM_DISTANCE_THRESHOLD = 60
+FRAME_MEMORY = 5
 CLEAN_TRACKS = True
-MINIMUM_TRACK_LENGTH = 50*2
+MINIMUM_TRACK_LENGTH = 25
 
 
 VIEW_TRACKS = True # Save labelled tracked images

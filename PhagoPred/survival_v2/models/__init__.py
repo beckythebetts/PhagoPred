@@ -6,24 +6,18 @@ from .lstm_survival import LSTMSurvival
 from .cnn_survival import CNNSurvival
 from .base import SurvivalModel
 
-# Classical ML models
+# Classical ML models (scikit-survival based)
 from .classical_base import ClassicalSurvivalModel
-from .random_forest import RandomForestSurvival
-from .gradient_boosting import XGBoostSurvival, LightGBMSurvival, GradientBoostingSurvival
-from .survival_forest import RandomSurvivalForestModel, GradientBoostingSurvivalModel
+from .survival_forest import RandomSurvivalForestModel, GradientBoostingSurvivalModel, CoxPHModel
 
 __all__ = [
     # Deep learning models
     'LSTMSurvival',
     'CNNSurvival',
     'SurvivalModel',
-    # Classical ML models
+    # Classical ML models (scikit-survival)
     'ClassicalSurvivalModel',
-    'RandomForestSurvival',
-    'XGBoostSurvival',
-    'LightGBMSurvival',
-    'GradientBoostingSurvival',
-    # Scikit-survival models
     'RandomSurvivalForestModel',
     'GradientBoostingSurvivalModel',
+    'CoxPHModel',
 ]

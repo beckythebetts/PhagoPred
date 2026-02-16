@@ -30,7 +30,9 @@ from detectron2.data import build_detection_train_loader
 from detectron2.modeling.roi_heads.mask_head import MaskRCNNConvUpsampleHead
 from detectron2.structures import Instances
 from detectron2.modeling.roi_heads.mask_head import ROI_MASK_HEAD_REGISTRY
+from detectron2.data import detection_utils as utils
 
+import copy
 import numpy as np
 import os, json, cv2, random, shutil
 from pathlib import Path
@@ -114,38 +116,88 @@ class LossEvalHook(HookBase):
 
 class MyTrainer(DefaultTrainer):
 
-    def build_hooks(self):
-        hooks = super().build_hooks()
-        hooks.insert(-1, LossEvalHook(
-            self.cfg.TEST.EVAL_PERIOD,
-            self.model,
-            build_detection_test_loader(
-                self.cfg,
-                self.cfg.DATASETS.TEST[0],
-                DatasetMapper(self.cfg, True)
-            )
-        ))
-        return hooks
+    # def build_hooks(self):
+    #     hooks = super().build_hooks()
+    #     hooks.insert(-1, LossEvalHook(
+    #         self.cfg.TEST.EVAL_PERIOD,
+    #         self.model,
+    #         build_detection_test_loader(
+    #             self.cfg,
+    #             self.cfg.DATASETS.TEST[0],
+    #             # DatasetMapper(self.cfg, True)
+    #             mapper=no_resize_mapper,
+    #         )
+    #     ))
+    #     return hooks
     
 
 
+    # @classmethod
+    # def build_train_loader(cls, cfg):
+    #     augmentations = [
+    #         # Add your augmentations here, for example:
+    #         # T.RandomRotation(angle=[-10, 10]),
+    #         # #T.RandomBrightness(0.8, 1.2),
+    #         # T.RandomContrast(0.8, 1.2),
+    #         #T.RandomResize(shape_list=[(800, 800), (1200, 1200), (1600, 1600)])
+    #     ]
+    #     mapper = DatasetMapper(cfg, is_train=True, augmentations=augmentations)
+    #     return build_detection_train_loader(cfg, mapper=mapper)
+
     @classmethod
     def build_train_loader(cls, cfg):
-        augmentations = [
-            # Add your augmentations here, for example:
-            # T.RandomRotation(angle=[-10, 10]),
-            # #T.RandomBrightness(0.8, 1.2),
-            # T.RandomContrast(0.8, 1.2),
-            #T.RandomResize(shape_list=[(800, 800), (1200, 1200), (1600, 1600)])
-        ]
-        mapper = DatasetMapper(cfg, is_train=True, augmentations=augmentations)
-        return build_detection_train_loader(cfg, mapper=mapper)
-
+        """Set mapper as no resize mapper,"""
+        return build_detection_train_loader(cfg, mapper=no_resize_mapper)
+    
+    @classmethod
+    def build_test_loader(cls, cfg, dataset_name):
+        # if dataset_name is None:
+        #     dataset_name = cfg.DATASETS.TEST[0]
+        return build_detection_test_loader(cfg, 
+                                           dataset_name,
+                                        #    mapper=DatasetMapper(cfg, is_train=False),
+                                           mapper=no_resize_mapper,
+                                           )
+        
     @classmethod
     def build_evaluator(cls, cfg, dataset_name, output_folder=None):
         if output_folder is None:
             output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
         return COCOEvaluator(dataset_name, cfg, True, output_folder, max_dets_per_image=1000)
+
+def no_resize_mapper(dataset_dict):
+    """
+    A custom mapper that loads image and annotations *without* resizing.
+    Assumes dataset_dict is in Detectron2 standard format.
+    """
+    dataset_dict = copy.deepcopy(dataset_dict)  # don't modify original dict
+
+    # Load image from file
+    image = utils.read_image(dataset_dict["file_name"], format="BGR")
+
+    # augs = T.AugmentationList([
+    #                         T.RandomFlip(prob=0.5, horizontal=True, vertical=False),
+    #                         T.RandomFlip(prob=0.5, horizontal=False, vertical=True),
+    #                            ])
+    augs = T.AugmentationList([])
+    
+    aug_input = T.AugInput(image)
+
+    h, w = aug_input.image.shape[:2]
+
+    transforms = augs(aug_input)
+    image = torch.as_tensor(aug_input.image.transpose(2, 0, 1).copy())
+    dataset_dict["image"] = image
+    # image, transforms = T.apply_augmentations(augs, image)
+    # Load annotations (if training)
+    if "annotations" in dataset_dict:
+        annos = [
+            utils.transform_instance_annotations(obj, transforms, (h, w))
+            for obj in dataset_dict.pop("annotations")
+        ]
+        dataset_dict["instances"] = utils.annotations_to_instances(annos, (h, w))
+
+    return dataset_dict
 
 def soft_dice_loss(pred_logits, target_masks, eps=1e-6):
     """
@@ -229,21 +281,31 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
 
     cfg.MODEL.DEVICE = "cuda"
     cfg.OUTPUT_DIR = str(config_directory)
-    cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_DC5_3x.yaml")) # pretrained model to use, doesn't make much difference which you pick
-    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-InstanceSegmentation/mask_rcnn_R_50_DC5_3x.yaml")
+    cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_C4_3x.yaml"))
+    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-InstanceSegmentation/mask_rcnn_R_50_C4_3x.yaml")
     cfg.DATASETS.TRAIN = ("my_dataset_train",)
     cfg.DATASETS.TEST = ("my_dataset_val",)
     cfg.DATALOADER.NUM_WORKERS = 1
-    cfg.SOLVER.IMS_PER_BATCH = 2  
+    cfg.SOLVER.IMS_PER_BATCH = 1
     cfg.SOLVER.BASE_LR = 0.00025 
     cfg.SOLVER.MAX_ITER = 1000 
     cfg.SOLVER.STEPS = []  
     cfg.SOLVER.WEIGHT_DECAY = 1e-4
-    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 32  
+    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 1024
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = 2
     # cfg.MODEL.BACKBONE.FREEZE_AT = 5
-    cfg.TEST.DETECTIONS_PER_IMAGE = 500 
+    cfg.TEST.DETECTIONS_PER_IMAGE = 1000 
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
+    cfg.SOLVER.AMP.ENABLED = True
+    cfg.MODEL.ROI_MASK_HEAD.POOLER_RESOLUTION = 14  # default 14 for FPN
+    # The output mask resolution is 2x pooler_resolution = 28 by default
+
+
+    cfg.MODEL.RPN.PRE_NMS_TOPK_TRAIN = 12000   # default 12000, fine
+    cfg.MODEL.RPN.POST_NMS_TOPK_TRAIN = 2000   # default 2000, fine
+    cfg.MODEL.RPN.PRE_NMS_TOPK_TEST = 6000     # default 6000
+    cfg.MODEL.RPN.POST_NMS_TOPK_TEST = 1000    # default 1000
+    cfg.MODEL.RPN.NMS_THRESH = 0.8             # default 0.7
 
     # The default settings apply some size augmenations to the images. I've found this decreases performance so this section makes sure all images are the same size
     with open(dataset_dir / 'train' / 'labels.json', 'r') as f:
@@ -261,7 +323,7 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
     cfg.TEST.AUG["MAX_SIZE"] = max_size 
     cfg.TEST.AUG["MIN_SIZES"] = [min_size] 
 
-    cfg.TEST.EVAL_PERIOD = 100
+    cfg.TEST.EVAL_PERIOD = 10000
 
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
     trainer = MyTrainer(cfg)

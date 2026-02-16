@@ -24,21 +24,21 @@ dataset_configs = {
         'seed': 42,
     },
 
-    # Single rule variants
-    'single_rule_variation': {
-        'num_cells': 2000,
-        'num_frames': 1000,
-        'rules': [VariationRule(feature='3', delay=150, sigma=20.0)],
-        'noise_level': 0.01,
-        'seed': 42,
-    },
-    'single_rule_ramp': {
-        'num_cells': 2000,
-        'num_frames': 1000,
-        'rules': [GradualRampRule(feature='0', ramp_height=10.0, delay=200, sigma=30.0)],
-        'noise_level': 0.01,
-        'seed': 42,
-    },
+    # # Single rule variants
+    # 'single_rule_variation': {
+    #     'num_cells': 2000,
+    #     'num_frames': 1000,
+    #     'rules': [VariationRule(feature='3', delay=150, sigma=20.0)],
+    #     'noise_level': 0.01,
+    #     'seed': 42,
+    # },
+    # 'single_rule_ramp': {
+    #     'num_cells': 2000,
+    #     'num_frames': 1000,
+    #     'rules': [GradualRampRule(feature='0', ramp_height=10.0, delay=200, sigma=30.0)],
+    #     'noise_level': 0.01,
+    #     'seed': 42,
+    # },
 
     # No rules (pure noise)
     'no_rules': {

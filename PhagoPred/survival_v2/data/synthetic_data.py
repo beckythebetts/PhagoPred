@@ -2,6 +2,7 @@ import numpy as np
 import h5py
 from pathlib import Path
 from tqdm import tqdm
+from scipy.ndimage import gaussian_filter1d
 
 import matplotlib.pyplot as plt
 
@@ -11,13 +12,6 @@ class Cell:
         self.noise_level = noise_level
         self.features = self._generate_base_features(noise_level)
         self.hazards = self._generate_base_hazards()
-    
-    # def _generate_base_pmf(self):
-    #     # pmf = np.ones(self.T) / self.T
-    #     pmf = np.zeros(self.T)
-    #     # end_peak = np.exp(-0.5 * ((np.arange(self.T) - (self.T-1)) / 50)**2)
-    #     # pmf += end_peak
-    #     return pmf
 
     def _compute_pmf(self):
         assert (self.hazards >= 0.0).any(), f"Hazards contain negative values {self.hazards}"
@@ -36,12 +30,22 @@ class Cell:
         return hazards
         
     def _generate_base_features(self, noise_level=0.01):
+        # features = {
+        #     '0': 2 + np.random.randn(self.T)*noise_level,
+        #     '1': np.abs(np.random.randn(self.T))*noise_level,
+        #     '2': np.arange(self.T) + np.random.randn(self.T)*noise_level,
+        #     '3': np.random.randn(self.T)*noise_level,
+        # }
         features = {
-            '0': 2 + np.random.randn(self.T)*noise_level,
-            '1': np.abs(np.random.randn(self.T))*noise_level,
-            '2': np.arange(self.T) + np.random.randn(self.T)*noise_level,
-            '3': np.random.randn(self.T)*noise_level,
+            'random_walk': generate_random_walk(self.T, volatility=10),
+            'oscillation': generate_stochastic_oscillation(self.T, noise_level=noise_level, base_freq=0.002, freq_volatility=0.005, amplitude=5.0),
+            'linear_trend': generate_linear_trend(self.T, slope_range=(0.01, 0.1), noise_level=noise_level),
+            'frame_count': np.arange(self.T),
+            'polynomial_trend': generate_polynomial_trend(self.T, degrees=7, noise_level=noise_level),
+            'oscillation + linear': generate_stochastic_oscillation(self.T, noise_level=noise_level, base_freq=0.02, freq_volatility=0.005, amplitude=5.0) + generate_linear_trend(self.T),
         }
+        for key in features:
+            features[key] = features[key].astype(np.float32)
         return features
     
     def __getitem__(self, key):
@@ -67,14 +71,102 @@ class Cell:
             mask = np.random.rand(self.T) < probability
             self.features[key][mask] = np.nan
 
+# funciotns genertaing random features
+def generate_random_walk(T: int, volatility: float = 0.01):
+    walk = np.cumsum(np.random.randn(T) * volatility)
+    return walk
 
+def generate_stochastic_oscillation(T: int, noise_level: float = 0.01, base_freq: float = 0.05, freq_volatility: float = 0.01, amplitude: float = 1.0):
+    freq = base_freq + np.cumsum(np.random.randn(T) * freq_volatility)
+    freq = np.clip(freq, 0.01, 0.2)  # keep frequency reasonable
+    phase = np.cumsum(freq)
+    return amplitude * np.sin(2 * np.pi * phase) + np.random.randn(T) * noise_level
+
+def generate_linear_trend(T: int, slope_range: tuple = (0.01, 0.1), noise_level: float = 0.01):
+    slope = np.random.uniform(*slope_range)
+    trend = slope * np.arange(T)
+    return trend + np.random.randn(T) * noise_level
+
+def generate_polynomial_trend(T: int, degrees: int = 7, noise_level: float = 0.01):
+    x = np.linspace(0, 1, T)  # normalize to [0, 1] for stability
+    coeffs = np.random.randn(degrees + 1)
+    trend = np.polyval(coeffs, x)
+    return trend + np.random.randn(T) * noise_level
 
 class Rule:
     def apply(self, cell: Cell) -> None:
         """Modify features and pmf"""
         pass
     
-    
+# == Hazard only rules ==
+class ThresholdRule(Rule):
+    """Increase hazard by {amount} when {feature} exceeds {threshold}."""
+    def __init__(self, feature: str = '0', threshold: float = 1.0, hazard_increase: float = 0.1, probability: float = 1.0):
+        self.feature = feature
+        self.threshold = threshold
+        self.hazard_increase = hazard_increase
+        self.probability = probability
+        
+    def apply(self, cell: Cell) -> None:
+        if np.random.rand() < self.probability:
+            exceed_idxs = np.where(cell[self.feature] > self.threshold)[0]
+            cell.hazards[exceed_idxs] += self.hazard_increase
+
+class CumulativeEffectRule(Rule):
+    """Increase hazard by {amount} for every {window} frames where {feature} exceeds {threshold}."""
+    def __init__(self, feature: str = '0', threshold: float = 1.0, hazard_increase: float = 0.05, probability: float = 1.0):
+        self.feature = feature
+        self.threshold = threshold
+        self.hazard_increase = hazard_increase
+        self.probability = probability
+        
+    def apply(self, cell: Cell) -> None:
+        if np.random.rand() < self.probability:
+            exceed_mask = cell[self.feature] > self.threshold
+            cumulative_exceed = np.cumsum(exceed_mask)
+            cell.hazards += (cumulative_exceed * self.hazard_increase)
+
+class InteractionRule(Rule):
+    """Increase hazard by {amount} when both {feature1} and {feature2} exceed their thresholds."""
+    def __init__(self, feature1: str = '0', threshold1: float = 1.0, feature2: str = '1', threshold2: float = 1.0, hazard_increase: float = 0.1, probability: float = 1.0):
+        self.feature1 = feature1
+        self.threshold1 = threshold1
+        self.feature2 = feature2
+        self.threshold2 = threshold2
+        self.hazard_increase = hazard_increase
+        self.probability = probability
+        
+    def apply(self, cell: Cell) -> None:
+        if np.random.rand() < self.probability:
+            interaction_mask = (cell[self.feature1] > self.threshold1) & (cell[self.feature2] > self.threshold2)
+            cell.hazards[interaction_mask] += self.hazard_increase
+
+class RandomSpikeRule(Rule):
+    """Randomly add a hazard spike of {height} at a random time point."""
+    def __init__(self, height: float = 0.5, probability: float = 0.1):
+        self.height = height
+        self.probability = probability
+        
+    def apply(self, cell: Cell) -> None:
+        if np.random.rand() < self.probability:
+            spike_time = np.random.randint(cell.T)
+            cell.hazards += get_gaussian_curve(cell.T, spike_time, sigma=5) * self.height
+
+class GradientRule(Rule):
+    """Increase hazard when graidient exceeds threshold."""
+    def __init__(self, feature: str = '0', gradient_threshold: float = 1.0, max_increase: float = 0.5, probability: float = 1.0):
+        self.feature = feature
+        self.gradient_threshold = gradient_threshold
+        self.max_increase = max_increase
+        self.probability = probability
+        
+    def apply(self, cell: Cell) -> None:
+        if np.random.rand() < self.probability:
+            feature_gradient = np.diff(cell[self.feature], prepend=cell[self.feature][0])
+            mask = feature_gradient > self.gradient_threshold
+            cell.hazards[mask] += feature_gradient[mask] / np.max(feature_gradient) * self.max_increase
+            
+# == Feature modifying rules (with delayed hazard effect) ==
 class VariationRule(Rule):
     """Increase hazard {delay} frames after an increase in std of {feature}."""
     def __init__(self, feature: str = '0', probability: float = 1.0, delay: int = 200, sigma: float = 20.0, max_strength=1.0):
@@ -98,16 +190,7 @@ class VariationRule(Rule):
             cell[self.feature][start_idx:start_idx+100] = slice_
             
             t = np.arange(cell.T)
-            # gaussian = np.exp(-0.5 * ((t - frame) / self.sigma)**2)
-            # gaussian = gaussian / np.sum(gaussian)
-            # cell.pmf += gaussian * strength
-            
-            # gaussian = np.exp(-0.5 * ((t - frame) / self.sigma)**2)
-            # gaussian = gaussian / np.max(gaussian)
-            # cell.hazards += gaussian * strength
             cell.hazards += get_gaussian_curve(cell.T, frame, self.sigma) * strength
-            # assert np.sum(cell.pmf) <= 1.0, f"PMF exceeds 1.0, {self.max_strength}, {strength}, {np.sum(cell.pmf)}"
-
 
 class GradualRampRule(Rule):
     def __init__(self, feature='1', probability=1.0, ramp_length=30, ramp_height=10.0, delay=100, sigma=30.0, max_strength: float=1.0):
@@ -132,6 +215,7 @@ class GradualRampRule(Rule):
             hazard_frame = start + self.ramp_length + self.delay
 
             cell.hazards += get_gaussian_curve(cell.T, hazard_frame, self.sigma) * strength
+            
 
 def get_gaussian_curve(T: int, center: int, sigma: float):
     t = np.arange(T)
@@ -179,10 +263,17 @@ def create_synthetic_dataset(
 
     # Default rules if none provided
     if rules is None:
+        # rules = [
+        #     VariationRule(feature='3', delay=300, sigma=5.0),
+        #     GradualRampRule(feature='0', ramp_height=10.0, delay=450, sigma=5.0),
+        #     GradualRampRule(feature='1', ramp_height=10.0, delay=400, sigma=5.0),
+        # ]
         rules = [
-            VariationRule(feature='3', delay=150, sigma=5.0),
-            GradualRampRule(feature='0', ramp_height=10.0, delay=200, sigma=5.0),
-            GradualRampRule(feature='1', ramp_height=10.0, delay=100, sigma=5.0),
+            ThresholdRule(feature='random_walk', threshold=200, hazard_increase=5e-3, probability=1.0),
+            CumulativeEffectRule(feature='oscillation', threshold=4.0, hazard_increase=5e-7, probability=1.0),
+            InteractionRule(feature1='random_walk', threshold1=5.0, feature2='oscillation', threshold2=2.0, hazard_increase=-4e-2, probability=1.0),
+            RandomSpikeRule(height=1e-3, probability=0.1),
+            GradientRule(feature='polynomial_trend', gradient_threshold=0.5, max_increase=5e-3, probability=1.0),
         ]
 
     num_rules = len(rules) if rules else 1
@@ -217,10 +308,17 @@ def create_synthetic_dataset(
         start = start_frames[c]
         end = end_frames[c]
 
-        # Apply rules
+        # Apply rules and track per-rule hazard contribution
         for rule in rules:
+            hazards_before = cell.hazards.copy()
             rule.apply(cell)
+            delta = cell.hazards - hazards_before
+            rule_name = rule.__class__.__name__
+            if not hasattr(rule, '_hazard_deltas'):
+                rule._hazard_deltas = []
+            rule._hazard_deltas.append(delta.mean())
 
+        cell.hazards = gaussian_filter1d(cell.hazards, sigma=10)
         cell.hazards = np.clip(cell.hazards, a_min=0.0, a_max=1.0)
         pmf = cell._compute_pmf()
         cif = np.cumsum(pmf)
@@ -245,7 +343,6 @@ def create_synthetic_dataset(
         all_deaths[c] = death_frame
         cell.apply_observation_window(start, end)
 
-        # Apply random feature masking if requested
         if feature_mask_prob > 0:
             cell.apply_masking(probability=feature_mask_prob)
         
@@ -259,6 +356,14 @@ def create_synthetic_dataset(
         for name in features:
             all_features[name][:, c] = cell[name]
             
+    # Print per-rule hazard contribution summary
+    print("\n--- Per-rule mean hazard contribution ---")
+    for rule in rules:
+        deltas = np.array(rule._hazard_deltas)
+        name = rule.__class__.__name__
+        print(f"  {name:30s}  mean={deltas.mean():.2e}  std={deltas.std():.2e}  max={deltas.max():.2e}")
+        del rule._hazard_deltas  # clean up
+
     with h5py.File(filename, 'w') as f:
         grp = f.create_group('Cells/Phase')
         for name in features:

@@ -21,9 +21,9 @@ from PhagoPred.survival_v2.configs.experiment_config import (
 )
 from PhagoPred.survival_v2.models.lstm_survival import LSTMSurvival
 from PhagoPred.survival_v2.models.cnn_survival import CNNSurvival
-from PhagoPred.survival_v2.models.random_forest import RandomForestSurvival
-from PhagoPred.survival_v2.models.gradient_boosting import XGBoostSurvival, LightGBMSurvival
-from PhagoPred.survival_v2.models.survival_forest import RandomSurvivalForestModel, GradientBoostingSurvivalModel
+# from PhagoPred.survival_v2.models.random_forest import RandomForestSurvival
+# from PhagoPred.survival_v2.models.gradient_boosting import XGBoostSurvival, LightGBMSurvival
+from PhagoPred.survival_v2.models.survival_forest import RandomSurvivalForestModel, GradientBoostingSurvivalModel, CoxPHModel
 from PhagoPred.survival_v2.models.classical_base import ClassicalSurvivalModel
 from PhagoPred.survival_v2.losses.survival_losses import compute_loss, LOSS_CONFIGS
 from PhagoPred.survival_v2.utils.training import train_model
@@ -42,6 +42,8 @@ def to_json_safe(obj):
         return [to_json_safe(v) for v in obj]
     elif isinstance(obj, np.generic):
         return obj.item()  # converts np.float32 → float
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
     else:
         return obj
     
@@ -92,45 +94,6 @@ def build_model(model_config, attention_config, num_features, num_bins, device, 
         return model.to(device)
 
     # Classical ML models
-    elif model_type == 'random_forest':
-        model = RandomForestSurvival(
-            num_bins=num_bins,
-            n_estimators=model_config.get('n_estimators', 100),
-            max_depth=model_config.get('max_depth', None),
-            feature_extraction=model_config.get('feature_extraction', 'temporal_full'),
-            n_segments=model_config.get('n_segments', 5),
-            n_lags=model_config.get('n_lags', 10),
-            feature_names=feature_names,
-            window_sizes=model_config.get('window_sizes', [10, 20, 50]),
-        )
-        return model
-
-    elif model_type == 'xgboost':
-        model = XGBoostSurvival(
-            num_bins=num_bins,
-            n_estimators=model_config.get('n_estimators', 100),
-            max_depth=model_config.get('max_depth', 6),
-            learning_rate=model_config.get('learning_rate', 0.1),
-            feature_extraction=model_config.get('feature_extraction', 'temporal_full'),
-            n_segments=model_config.get('n_segments', 5),
-            n_lags=model_config.get('n_lags', 10),
-            feature_names=feature_names
-        )
-        return model
-
-    elif model_type == 'lightgbm':
-        model = LightGBMSurvival(
-            num_bins=num_bins,
-            n_estimators=model_config.get('n_estimators', 100),
-            max_depth=model_config.get('max_depth', -1),
-            num_leaves=model_config.get('num_leaves', 31),
-            learning_rate=model_config.get('learning_rate', 0.1),
-            feature_extraction=model_config.get('feature_extraction', 'temporal_full'),
-            n_segments=model_config.get('n_segments', 5),
-            n_lags=model_config.get('n_lags', 10),
-            feature_names=feature_names
-        )
-        return model
 
     elif model_type == 'random_survival_forest':
         model = RandomSurvivalForestModel(
@@ -141,7 +104,7 @@ def build_model(model_config, attention_config, num_features, num_bins, device, 
             n_segments=model_config.get('n_segments', 5),
             n_lags=model_config.get('n_lags', 10),
             feature_names=feature_names,
-            window_sizes=model_config.get('window_sizes', [10, 20, 50]),
+             window_sizes=model_config.get('window_sizes', [25, 100, 500, 1000]),
         )
         return model
 
@@ -154,7 +117,20 @@ def build_model(model_config, attention_config, num_features, num_bins, device, 
             feature_extraction=model_config.get('feature_extraction', 'temporal_full'),
             n_segments=model_config.get('n_segments', 5),
             n_lags=model_config.get('n_lags', 10),
-            feature_names=feature_names
+            feature_names=feature_names,
+            window_sizes=model_config.get('window_sizes', [25, 100, 500, 1000]),
+        )
+        return model
+
+    elif model_type == 'coxph':
+        model = CoxPHModel(
+            num_bins=num_bins,
+            alpha=model_config.get('alpha', 0.0),
+            ties=model_config.get('ties', 'breslow'),
+            n_iter=model_config.get('n_iter', 100),
+            tol=model_config.get('tol', 1e-9),
+            feature_names=feature_names,
+            window_sizes=model_config.get('window_sizes', [25, 100, 500, 1000]),
         )
         return model
 
@@ -166,7 +142,7 @@ def is_classical_model(model_config):
     """Check if model configuration is for a classical ML model."""
     classical_types = [
         'random_forest', 'xgboost', 'lightgbm',
-        'random_survival_forest', 'gradient_boosting_survival'
+        'random_survival_forest', 'gradient_boosting_survival', 'coxph'
     ]
     return model_config['type'] in classical_types
 
@@ -203,7 +179,6 @@ def build_datasets(dataset_config: dict, feature_combo: list, is_classical: bool
         preload_data=True,
         interpolate_nan=False,
         add_start_frame_feature=dataset_config.get('add_start_frame_feature', False),
-        normalise=normalise,
         fixed_len=fixed_length,
     )
 
@@ -223,9 +198,11 @@ def build_datasets(dataset_config: dict, feature_combo: list, is_classical: bool
         preload_data=True,
         interpolate_nan=False,
         add_start_frame_feature=dataset_config.get('add_start_frame_feature', False),
-        normalise=normalise,
         fixed_len=fixed_length,
     )
+    if normalise:
+        train_dataset.apply_normalisation()
+        val_dataset.apply_normalisation()
 
     return train_dataset, val_dataset
 
@@ -598,23 +575,6 @@ def interpret_model(model_path: Path) -> None:
             max_time_to_death=DATASETS[config['dataset']]['max_time_to_death'],
             preload_data=True,
         )
-    
-    background_data = create_background_from_dataset(
-        dataset=test_dataset,
-        num_samples=100,
-        sample_type='sample',
-        max_len=1000
-    )
-    
-    # explainer = SurvivalSHAP(
-    #     model=model,
-    #     background_data=background_data,
-    #     feature_names=FEATURE_COMBOS[config['feature_combo']],
-    #     device=device,
-    # )
-    
-    # results = explainer.analyse(test_dataset, method="gradient", num_time_bins=10, num_samples=500)
-    # explainer.plot_summary(results, save_path=model_path / 'shap_summary.png')
          
     explainer = KernelSHAP(
         model=model,
@@ -622,8 +582,24 @@ def interpret_model(model_path: Path) -> None:
         feature_names=FEATURE_COMBOS[config['feature_combo']],
         device=device,
     )
-    results = explainer.analyse_batch(test_dataset, num_segments=10, num_samples=500)
+    results = explainer.analyse_batch(test_dataset, num_segments=10, num_samples=1)
+    results_json = to_json_safe(results.asdict())
+    with open(model_path / 'kernel_shap_results.json', 'w') as f:
+        json.dump(results_json, f, indent=2)
     explainer.plot_summary(results, save_path=model_path / 'kernel_shap_summary.png')
+    for i in range(min(10, len(test_dataset))):
+        sample = test_dataset[i]
+        features = torch.tensor(sample['features'], dtype=torch.float32).unsqueeze(0).to(device)
+        length = torch.tensor(sample['length'], dtype=torch.long).unsqueeze(0).to(device)
+        pred_pmf = model(features, length).detach().cpu().numpy()
+        bin_edges = test_dataset.event_time_bins
+        explainer.plot_sample_explanation(
+            sample=sample,
+            bin_edges=test_dataset.event_time_bins,
+            num_segments=10,
+            nsamples='auto',
+            save_path=model_path / 'plots' / f'sample_{i}_explanation.png',
+            )
 
 def main():
     parser = argparse.ArgumentParser(description='Run survival analysis experiments')

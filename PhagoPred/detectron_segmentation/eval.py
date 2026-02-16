@@ -105,9 +105,9 @@ class Evaluator:
             true_masks = mask_funcs.coco_to_masks(coco_file=self.dataset_dir / 'validate' / 'labels.json', im_name=im_name)
 
             if self.eval_mode == "metrics":
-                if 'cluster' in im_name.name:
-                    self._eval_metrics(im_name, im, pred_masks, true_masks)
-                    self.plot()
+                # if 'cluster' in im?_name.name:
+                self._eval_metrics(im_name, im, pred_masks, true_masks)
+                # self.plot()
 
             elif self.eval_mode == "confusion":
                 # true_label = self._mask_to_class(true_masks)
@@ -137,15 +137,15 @@ class Evaluator:
         results = self.prec_recall_curve(combi_true, combi_pred)
         results.to_csv(self.eval_dir / f'{im_name.stem}_all_results.txt', sep='\t')
 
-        # for category in pred_masks.keys():
-        #     view = tools.show_segmentation(im, pred_masks[category], true_masks[category])
-        #     plt.imsave(self.eval_dir / f'{im_name.stem}_{category}_view.png', view)
+        for category in pred_masks.keys():
+            view = tools.show_segmentation(im, pred_masks[category], true_masks[category])
+            plt.imsave(self.eval_dir / f'{im_name.stem}_{category}_view.png', view)
 
-        #     pred_mask_im = Image.fromarray(pred_masks[category].astype(np.int32), mode='I')
-        #     pred_mask_im.save(self.eval_dir / f'{im_name.stem}_{category}_pred_mask.png')
+            pred_mask_im = Image.fromarray(pred_masks[category].astype(np.int32), mode='I')
+            pred_mask_im.save(self.eval_dir / f'{im_name.stem}_{category}_pred_mask.png')
 
-        #     results = self.prec_recall_curve(true_masks[category], pred_masks[category])
-        #     results.to_csv(self.eval_dir / f'{im_name.stem}_{category}_results.txt', sep='\t')
+            results = self.prec_recall_curve(true_masks[category], pred_masks[category])
+            results.to_csv(self.eval_dir / f'{im_name.stem}_{category}_results.txt', sep='\t')
 
     def _mask_to_class(self, mask_dict: dict) -> int:
         """

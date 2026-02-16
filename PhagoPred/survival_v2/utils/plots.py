@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights=None, feature_names=None, save_path=None) -> None:
+def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights=None, feature_names=None, save_path=None, start_frame=0) -> None:
     """
     Plot observed features, attention weights (if available) and predicted (and underlying) PMF.
 
@@ -36,7 +36,8 @@ def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights=None, fe
     time_to_event = to_numpy(sample['time_to_event'])
     cell_idx = sample.get('cell_idx', 'N/A')
     cell_file = sample.get('hdf5_path', 'N/A')
-    length = to_numpy(sample['length'])
+    length = to_numpy(sample.get('length', None))
+    landmark_frame = to_numpy(sample.get('landmark_frame', 0))
     if length is None or (isinstance(length, np.ndarray) and length.size == 0):
         length = len(features)
     elif isinstance(length, np.ndarray):
@@ -72,9 +73,9 @@ def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights=None, fe
         ax_feat = fig.add_subplot(gs[0, 0])
 
     # ===== Features =====
-    feats = features[padding_slice, :] if features.ndim > 1 else features[padding_slice].reshape(-1, 1)
-    for f_idx in range(feats.shape[1]):
-        ax_feat.plot(np.arange(length), feats[:, f_idx], label=(feature_names[f_idx] if feature_names else f"F{f_idx}"), alpha=0.7)
+    features = features[:length, :]
+    for f_idx in range(features.shape[1]):
+        ax_feat.plot(np.arange(start_frame, start_frame+length), features[:, f_idx], label=(feature_names[f_idx] if feature_names else f"F{f_idx}"), alpha=0.7)
 
     ax_feat.set_xlabel("Time / frames")
     ax_feat.set_ylabel("Features")
@@ -86,7 +87,7 @@ def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights=None, fe
         ax_sd = fig.add_subplot(gs[:, 1])  # span both rows
     else:
         ax_sd = fig.add_subplot(gs[0, 1])
-    abs_bin_edges = bin_edges + length
+    abs_bin_edges = bin_edges + landmark_frame
     bin_widths = np.diff(abs_bin_edges)
     bin_widths[-1] = bin_widths[-2]  # make last bin same width for visualization
 
@@ -113,7 +114,7 @@ def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights=None, fe
             label='True PMF',
             )
 
-    abs_event_time = time_to_event + length
+    abs_event_time = time_to_event + landmark_frame
     if event_indicator == 1:
         ax_sd.axvline(abs_event_time, color='red', linestyle='--', label="Event Time")
     else:

@@ -11,6 +11,7 @@ from PhagoPred.prediction.decision_tree import model
 from PhagoPred.utils.tools import fill_missing_cells, repack_hdf5
 from PhagoPred.utils.dataset_creation import epi_background_correction, keep_only_group, truncate_hdf5
 import PhagoPred.display.GUI.main as GUI
+from PhagoPred.tracking import trackpy_2_stage
 
 from PhagoPred.survival_analysis.models import losses
 # from PhagoPred.survival_analysis import train, validate
@@ -28,20 +29,26 @@ if __name__ == '__main__':
         # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5',
         # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5',
         # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_5min_short.h5',
-        Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_10min_short.h5',
+        # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_10min_short.h5',
+        Path('PhagoPred')/'Datasets'/ '06_02.h5',
         ]
     ):
         # keep_only_group(dataset, ['Images'])
         # repack_hdf5(dataset)
-        # # epi_background_correction(dataset=dataset)
+        
+        # epi_background_correction(dataset=dataset)
         # segment.seg_dataset(dataset=dataset)
         # trackpy.run_tracking(dataset=dataset)
+        # trackpy_2_stage.run_tracking(dataset=dataset)
         # extract_features.extract_features(dataset=dataset, phase_features=[features.FirstLastFrame()])
         # fill_missing_cells(dataset=dataset)
         # extract_features.extract_features(dataset=dataset)
-        # extract_features.extract_features(dataset=dataset, phase_features = [features.FirstLastFrame()])
+        
+        
         # clean_features.remove_bad_frames(dataset=dataset)
+        # extract_features.extract_features(dataset=dataset, phase_features = [features.FirstLastFrame()])
         # fill_missing_cells(dataset)
+        
         GUI.run(dataset=dataset)
         # truncate_hdf5(dataset, dataset.parent / f"truncated_{dataset.name}", start_frame = 0, end_frame=300)
         

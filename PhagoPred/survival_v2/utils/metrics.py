@@ -275,6 +275,10 @@ def kl_divergence(p: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
     Returns:
         kl_div: (batch_size,) KL divergence for each sample
     """
+    if isinstance(p, np.ndarray):
+        p = torch.from_numpy(p)
+    if isinstance(q, np.ndarray):
+        q = torch.from_numpy(q)
     p = p + 1e-10  # Avoid log(0)
     q = q + 1e-10
     kl_div = torch.sum(p * torch.log(p / q), dim=1)

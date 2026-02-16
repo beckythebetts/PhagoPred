@@ -28,7 +28,6 @@ class CellDataset(torch.utils.data.Dataset):
                  max_time_to_death: int = np.inf,
                  min_length: int = 1,
                  add_start_frame_feature: bool = False,
-                 normalise: bool = True,
                 #  keep_full_seq_len: bool = False,
                  ):
         """
@@ -56,7 +55,6 @@ class CellDataset(torch.utils.data.Dataset):
         self.max_time_to_death = max_time_to_death
         self.min_length = min_length
         self.oversample_uncensored = None
-        self.normalise = normalise
         # self.keep_full_seq_len = keep_full_seq_len
         # self.underyling_hazard = False # Set to True if the underlying hazard function is stored in the HDF5 files
 
@@ -115,9 +113,6 @@ class CellDataset(torch.utils.data.Dataset):
             start_frame_feature[:, local_idxs] = start_frames / 1000
             
             self._features_cache[file_idx] = np.append(file_cache, start_frame_feature[np.newaxis, :, :], axis=0)
-            
-        # start_frames = self.cell_metadata['Start Frames']
-        # self._features_cache.append(np.array(start_frames).reshape(self._features_cache[-1].shape))
         
     def _preload_all_data(self):
         """Load all cell features into RAM as numpy arrays."""
@@ -127,8 +122,8 @@ class CellDataset(torch.utils.data.Dataset):
             if 'PMFs' in self._get_file(i)['Cells']['Phase'].keys():
                 pmfs_cache = self._get_features_np(i, features=['PMFs'])
                 self._pmfs_cache[i] = pmfs_cache
-        if self.means is not None and self.stds is not None and self.normalise:
-            self.apply_normalisation()
+        # if self.means is not None and self.stds is not None and self.normalise:
+        #     self.apply_normalisation()
 
     def _remove_ivalid_samples(self):
         """Get indices of valid samples in the dataset."""
@@ -260,7 +255,7 @@ class CellDataset(torch.utils.data.Dataset):
 
             # Load only 'Area' to compute start/end frames
             # area_data = self.cell_type.get_features_xr(f, features=['Area'])['Area'].transpose('Cell Index', 'Frame').values[local_cell_idxs]  # shape: (num_cells, num_frames)
-            area_data = self._get_features_np(path_idx, features=['0'])
+            area_data = self._get_features_np(path_idx, features=self.features[0:1])
             area_data = area_data[0]
             area_data = area_data.T[local_cell_idxs]  # shape: (num_cells, num_frames)
 
@@ -377,7 +372,7 @@ class CellDataset(torch.utils.data.Dataset):
         else:
             time_to_event_bin = None
             
-        # Get underlying PMF is known
+        # Get underlying PMF if known
         pmf = None
         binned_pmf = None
         if self._pmfs_cache is not None and self.event_time_bins is not None:
@@ -419,6 +414,8 @@ class CellDataset(torch.utils.data.Dataset):
             'binned_pmf': binned_pmf,
             'mask': ~np.isnan(cell_features),
             'length': cell_features.shape[0],
+            'start_frame': start_frame,
+            'landmark_frame': landmark_frame,
         }
         return item
         
@@ -638,7 +635,6 @@ def collate_fn(batch, dataset: CellDataset = None, device: str = 'cpu', pad_at: 
     batch_dict['time_to_event'] = torch.tensor(batch_dict['time_to_event'], dtype=torch.float32, device=device)
     batch_dict['event_indicator'] = torch.tensor(batch_dict['event_indicator'], dtype=torch.float32, device=device)
     batch_dict['time_to_event_bin'] = torch.tensor(batch_dict['time_to_event_bin'], dtype=torch.int16, device=device)
-    
     # print(torch.unique(batch_dict['time_to_event_bin']))
 
     return batch_dict

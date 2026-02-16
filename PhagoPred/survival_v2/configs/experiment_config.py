@@ -38,9 +38,9 @@ MODELS = {
     },
     'cnn_medium': {
         'type': 'cnn',
-        'num_channels': [64] * 8,
-        'kernel_sizes': [3] * 8,
-        'dilations': [2**n for n in range(8)],
+        'num_channels': [64] * 9,
+        'kernel_sizes': [3] * 9,
+        'dilations': [2**n for n in range(9)], # 9 dilations covers 1000 frames with kernel size 3
         'fc_layers': [64, 32]
     },
     'cnn_large': {
@@ -51,85 +51,38 @@ MODELS = {
         'fc_layers': [128, 64, 32]
     },
 
-    # ========== Classical ML Models ==========
+    # ========== Classical ML Models (scikit-survival) ==========
 
-    # Random Forest variants
-    # 'rf_summary': {
-    #     'type': 'random_forest',
-    #     'n_estimators': 100,
-    #     'max_depth': 10,
-    #     'feature_extraction': 'summary'
-    # },
-    # 'rf_segments': {
-    #     'type': 'random_forest',
-    #     'n_estimators': 100,
-    #     'max_depth': 10,
-    #     'feature_extraction': 'segments',
-    #     'n_segments': 10
-    # },
-    # 'rf_temporal': {
-    #     'type': 'random_forest',
-    #     'n_estimators': 200,
-    #     'max_depth': 15,
-    #     'feature_extraction': 'temporal_full',
-    #     'n_segments': 5,
-    #     'n_lags': 10
-    # },
-
-    # # XGBoost variants
-    # 'xgb_summary': {
-    #     'type': 'xgboost',
-    #     'n_estimators': 100,
-    #     'max_depth': 6,
-    #     'learning_rate': 0.1,
-    #     'feature_extraction': 'summary'
-    # },
-    # 'xgb_temporal': {
-    #     'type': 'xgboost',
-    #     'n_estimators': 200,
-    #     'max_depth': 8,
-    #     'learning_rate': 0.1,
-    #     'feature_extraction': 'temporal_full',
-    #     'n_segments': 5,
-    #     'n_lags': 10
-    # },
-
-    # # LightGBM variants
-    # 'lgbm_summary': {
-    #     'type': 'lightgbm',
-    #     'n_estimators': 100,
-    #     'max_depth': -1,
-    #     'num_leaves': 31,
-    #     'learning_rate': 0.1,
-    #     'feature_extraction': 'summary'
-    # },
-    # 'lgbm_temporal': {
-    #     'type': 'lightgbm',
-    #     'n_estimators': 200,
-    #     'max_depth': -1,
-    #     'num_leaves': 63,
-    #     'learning_rate': 0.1,
-    #     'feature_extraction': 'temporal_full',
-    #     'n_segments': 5,
-    #     'n_lags': 10
-    # },
-
-    # Scikit-survival models (proper survival analysis)
+    # Random Survival Forest
     'rsf': {
         'type': 'random_survival_forest',
         'n_estimators': 100,
         'max_depth': None,
         'window_sizes': [25, 100, 500, 1000],
     },
-    # 'gbsa': {
-    #     'type': 'gradient_boosting_survival',
-    #     'n_estimators': 100,
-    #     'max_depth': 3,
-    #     'learning_rate': 0.1,
-    #     'feature_extraction': 'temporal_full',
-    #     'n_segments': 5,
-    #     'n_lags': 10
-    # },
+
+    # Gradient Boosting Survival Analysis
+    'gbsa': {
+        'type': 'gradient_boosting_survival',
+        'n_estimators': 100,
+        'max_depth': 3,
+        'learning_rate': 0.1,
+        'window_sizes': [100, 500, 1000],
+    },
+
+    # Cox Proportional Hazards
+    'coxph': {
+        'type': 'coxph',
+        'alpha': 0.1,  # L2 regularization to prevent ill-conditioning
+        'ties': 'breslow',
+        'window_sizes': [100, 500, 1000],
+    },
+    'coxph_regularized': {
+        'type': 'coxph',
+        'alpha': 0.1,  # L2 regularization
+        'ties': 'breslow',
+        'window_sizes': [100, 500, 1000],
+    },
 }
 
 # Attention mechanisms
@@ -248,7 +201,7 @@ DATASETS = {
         'features': ['0', '1', '2', '3'],
         'num_bins': 5,
         'min_length': 50,
-        'max_time_to_death': 100
+        'max_time_to_death': 200,
     },
 
     # Single rule variants
@@ -326,7 +279,7 @@ DATASETS = {
         # 'features': ['0', '1', '2', '3'],
         'num_bins': 5,
         'min_length': 50,
-        'max_time_to_death': 100
+        'max_time_to_death': 200,
     },
     'late_entry_extreme_start_feature': {
         'train_paths': ['PhagoPred/Datasets/synthetic_variants/late_entry_extreme_train.h5'],
@@ -386,7 +339,13 @@ DATASETS = {
 }
 
 FEATURE_COMBOS = {
-    'all': ['0', '1', '2', '3'],
+    'all': [
+        'frame_count',
+        'linear_trend',
+        'polynomial_trend',
+        'random_walk',
+        'oscillation',
+        'oscillation + linear',],
     'no_frame_count': ['0', '1', '3'],
 }
 
@@ -607,27 +566,18 @@ EXPERIMENT_SUITES = {
 
     # ========== Classical ML Experiment Suites ==========
 
-    # Quick test for classical models
+    # Quick test for classical survival models
     'classical_quick_test': generate_experiment_grid(
-        models=['rf_summary', 'xgb_summary'],
+        models=['rsf', 'coxph'],
         attentions=['none_mean'],  # Not used but required by config
         losses=['nll_only'],
         datasets=['baseline'],
         trainings=['quick_test']
     ),
 
-    # Feature extraction method comparison
-    'feature_extraction_comparison': generate_experiment_grid(
-        models=['rf_summary', 'rf_segments', 'rf_temporal'],
-        attentions=['none_mean'],
-        losses=['nll_only'],
-        datasets=['baseline'],
-        trainings=['standard']
-    ),
-
     # Classical vs Deep Learning comparison
     'classical_vs_dl': generate_experiment_grid(
-        models=['rf_temporal', 'xgb_temporal', 'lstm_medium', 'cnn_medium'],
+        models=['rsf', 'coxph', 'lstm_medium', 'cnn_medium'],
         attentions=['vector'],
         losses=['soft_target'],
         datasets=['baseline', 'late_entry_50pct'],
@@ -636,16 +586,24 @@ EXPERIMENT_SUITES = {
 
     # Full classical model comparison
     'classical_comparison': generate_experiment_grid(
-        models=['rsf', 'cnn_medium'],
+        models=[
+            'cnn_medium',
+            'rsf', 
+            # 'coxph', 
+            # 'coxph_regularized', 
+            ],
         attentions=['none_last'],
         losses=['soft_target'],
-        datasets=['baseline', 'late_entry_extreme'],
+        datasets=[
+            'baseline', 
+            'late_entry_extreme',
+            ],
         trainings=['standard'],
     ),
 
     # Classical models on different datasets
     'classical_dataset_robustness': generate_experiment_grid(
-        models=['rf_temporal', 'xgb_temporal'],
+        models=['rsf', 'coxph'],
         attentions=['none_mean'],
         losses=['nll_only'],
         datasets=['baseline', 'high_noise', 'late_entry_50pct', 'missing_data_10pct'],

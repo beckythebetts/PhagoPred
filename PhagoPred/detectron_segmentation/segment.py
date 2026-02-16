@@ -154,7 +154,7 @@ def seg_image(cfg_dir: Path,
                 masks[category] = torch.where(instance_mask,
                                 torch.tensor(category_count[category], dtype=torch.int16),
                                 masks[category])
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
 
     return {category: mask.cpu().numpy().astype(np.int16) for category, mask in masks.items()}
 
@@ -172,7 +172,7 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
     train_metadata, cfg = get_model(cfg_dir)
 
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5   # set a custom testing threshold
-    cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST = 0.5
+    cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST = 0.8
     cfg.MODEL.DEVICE = device_str
     predictor = NoResizePredictor(cfg)
 
@@ -221,7 +221,8 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
                 current_max_instances = cells_group[category].shape[1]-1
                 if num_instances > current_max_instances:
                     cells_group[category].resize(num_instances, axis=1)
-            cells_group['Confidence Score'].resize(num_instances, axis=1)
+            if num_instances > cells_group['Confidence Score'].shape[1]-1:
+                cells_group['Confidence Score'].resize(num_instances, axis=1)
             
             instance_idx = 0
             # predicted_masks = detectron_outputs["instances"].pred_masks.cpu().numpy()
@@ -245,14 +246,19 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
                 # if not np.array_equal(filled_mask, instance_mask):
                 #     continue
                 
-                # Filter overlaps, keeping mask with highest confidecne score (masks are already sorted by descending confidence score)
-                overlapping_idxs = torch.unique(mask[instance_mask])
-                overlapping_idxs = overlapping_idxs[overlapping_idxs >= 0]
-                if len(overlapping_idxs)>0:
+                # Filter overlaps, keeping mask with highest confidence score (masks are already sorted by descending confidence score)
+                overlap = instance_mask & (mask >= 0)
+                overlap_fraction = overlap.sum().item() / instance_mask.sum().item()
+                if overlap_fraction > 0.5:
                     continue
-                        
+
+                # Remove overlapping pixels (keep the higher-confidence mask that was placed first)
+                instance_mask = instance_mask & ~overlap
+
+                if instance_mask.sum() == 0:
+                    continue
+
                 # == SAVE MASKS ==
-                # mask = torch.where(instance_mask, instance_idx, mask)
                 mask[instance_mask] = instance_idx
                 cells_group[class_name][frame_idx, instance_idx] = 1
                 cells_group['Confidence Score'][frame_idx, instance_idx] = score.cpu().numpy()

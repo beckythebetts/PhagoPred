@@ -1125,9 +1125,127 @@ def plot_correlations(features='all'):
     plt.show()
 
 
+def sample_phase_images(datasets_dir: Path, output_dir: Path, n_samples: int = 2) -> None:
+    """
+    Recursively find all .h5/.hdf5 files in datasets_dir, pick n_samples random
+    phase frames from each, and save them as .jpeg in output_dir.
+
+    The output filenames encode the source: <h5_stem>_frame<idx>.jpeg
+    Files without an Images/Phase dataset are skipped.
+    """
+    import random
+
+    datasets_dir = Path(datasets_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    h5_files = sorted(
+        list(datasets_dir.rglob('*.h5')) + list(datasets_dir.rglob('*.hdf5'))
+    )
+
+    if not h5_files:
+        print(f"No .h5 or .hdf5 files found in {datasets_dir}")
+        return
+
+    for h5_path in h5_files:
+        try:
+            with h5py.File(h5_path, 'r') as f:
+                if 'Images' not in f or 'Phase' not in f['Images']:
+                    print(f"Skipping {h5_path.name} (no Images/Phase)")
+                    continue
+
+                phase_ds = f['Images']['Phase']
+
+                # Handle both flat dataset (N, H, W) and group-of-frames layouts
+                if isinstance(phase_ds, h5py.Dataset):
+                    num_frames = phase_ds.shape[0]
+                    indices = random.sample(range(num_frames), min(n_samples, num_frames))
+                    for idx in indices:
+                        img = phase_ds[idx]
+                        _save_phase_jpeg(img, output_dir, h5_path, idx)
+                elif isinstance(phase_ds, h5py.Group):
+                    frame_keys = sorted(phase_ds.keys())
+                    chosen = random.sample(frame_keys, min(n_samples, len(frame_keys)))
+                    for key in chosen:
+                        img = phase_ds[key][:]
+                        _save_phase_jpeg(img, output_dir, h5_path, key)
+
+        except Exception as e:
+            print(f"Error processing {h5_path.name}: {e}")
+
+    print(f"Saved sample phase images to {output_dir}")
+
+
+def sample_tiff_images(datasets_dir: Path, output_dir: Path) -> None:
+    """
+    Recursively find all .tif/.tiff files in datasets_dir, pick a single random
+    frame from each, and save it as .jpeg in output_dir.
+
+    Single-page TIFFs save the whole image; multi-page TIFFs (including .ome.tif)
+    pick one random page.
+    """
+    import random
+
+    datasets_dir = Path(datasets_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    tiff_files = sorted(
+        list(datasets_dir.rglob('*.tif'))
+        + list(datasets_dir.rglob('*.tiff'))
+        + list(datasets_dir.rglob('*.ome.tif'))
+    )
+    # deduplicate (*.tif already catches *.ome.tif)
+    tiff_files = sorted(set(tiff_files))
+
+    if not tiff_files:
+        print(f"No .tif or .tiff files found in {datasets_dir}")
+        return
+
+    for tiff_path in tiff_files:
+        try:
+            with tifffile.TiffFile(str(tiff_path)) as tif:
+                num_pages = len(tif.pages)
+                idx = random.randint(0, num_pages - 1)
+                img = tif.pages[idx].asarray()
+
+            rel = tiff_path.relative_to(datasets_dir)
+            name = rel.with_suffix('').as_posix().replace('/', '_')
+            out_path = output_dir / f"{name}_frame{idx}.jpeg"
+
+            # Convert to uint8 if needed
+            if img.dtype != np.uint8:
+                img = convert_to_uint8(img)
+
+            pil_img = Image.fromarray(img)
+            if pil_img.mode not in ('L', 'RGB'):
+                pil_img = pil_img.convert('L')
+            pil_img.save(out_path, format='JPEG')
+
+        except Exception as e:
+            print(f"Error processing {tiff_path.name}: {e}")
+
+    print(f"Saved {len(tiff_files)} sample tiff images to {output_dir}")
+
+
+def _save_phase_jpeg(img: np.ndarray, output_dir: Path, h5_path: Path, frame_id) -> None:
+    """Save a single phase frame as a JPEG."""
+    # Build a unique filename from the relative path of the h5 file
+    rel = h5_path.relative_to(h5_path.parents[1])  # keeps subfolder/filename
+    name = rel.with_suffix('').as_posix().replace('/', '_')
+    out_path = output_dir / f"{name}_frame{frame_id}.jpeg"
+
+    pil_img = Image.fromarray(img)
+    if pil_img.mode != 'L':
+        pil_img = pil_img.convert('L')
+    pil_img.save(out_path, format='JPEG')
+
+
 if __name__ == '__main__':
-    repack_hdf5("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_5min.h5")
-    repack_hdf5("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min.h5")
+    # repack_hdf5("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_5min.h5")
+    # repack_hdf5("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min.h5")
+    # sample_phase_images("/home/ubuntu/PhagoPred/PhagoPred/Datasets", "/home/ubuntu/PhagoPred/PhagoPred/Datasets/sample_phase_images", n_samples=5)
+    sample_tiff_images('/home/ubuntu/thor_server', '/home/ubuntu/PhagoPred/PhagoPred/Datasets/sample_tiff_images')
     # copy_hdf5_groups(Path('PhagoPred') / 'Datasets' / 'ExposureTest' / 'old' / '03_10_2500.h5', 
     #                  Path('PhagoPred')/'Datasets'/'ExposureTest'/ 'old' / '03_10_2500_new.h5',
     #                  ['Images'])

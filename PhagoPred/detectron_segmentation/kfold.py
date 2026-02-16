@@ -162,47 +162,49 @@ class KFold:
 
     def eval(self):
         for file in self.directory.glob('*split_*'):
-            for im_name in (file / 'Fine_Tuning_Data' / 'validate' / 'images').iterdir():
-                im = plt.imread(im_name)
+            evaluator = Evaluator(file / 'Fine_Tuning_Data', file / 'Model', eval_mode='metrics')
+            evaluator.eval()
+            # for im_name in (file / 'Fine_Tuning_Data' / 'validate' / 'images').iterdir():
+            #     im = plt.imread(im_name)
 
-                if im.ndim == 2:
-                    frame_processed = np.stack([im]*3, axis=-1)
-                else:
-                    frame_processed = im
+            #     if im.ndim == 2:
+            #         frame_processed = np.stack([im]*3, axis=-1)
+            #     else:
+            #         frame_processed = im
 
-                # frame_processed = np.stack([np.array(im)]*3, axis=-1)
-                print(frame_processed.shape)
-                pred_masks = seg_image(cfg_dir = file / 'Model', im = frame_processed)
-                true_masks = mask_funcs.coco_to_masks(coco_file = file / 'Fine_Tuning_Data' / 'validate' / 'labels.json', im_name = im_name) 
+            #     # frame_processed = np.stack([np.array(im)]*3, axis=-1)
+            #     print(frame_processed.shape)
+            #     pred_masks = seg_image(cfg_dir = file / 'Model', im = frame_processed)
+            #     true_masks = mask_funcs.coco_to_masks(coco_file = file / 'Fine_Tuning_Data' / 'validate' / 'labels.json', im_name = im_name) 
                 
-                if pred_masks is not None:
-                    combi_pred = mask_funcs.combine_masks(list(pred_masks.values()))
-                else: 
-                    combi_pred = np.zeros(im.shape[:2], dtype=np.uint8)
+            #     if pred_masks is not None:
+            #         combi_pred = mask_funcs.combine_masks(list(pred_masks.values()))
+            #     else: 
+            #         combi_pred = np.zeros(im.shape[:2], dtype=np.uint8)
                 
-                if true_masks is not None:
-                    combi_true = mask_funcs.combine_masks(list(true_masks.values()))
-                else:
-                    combi_true = np.zeros(im.shape[:2], dtype=np.uint8)
+            #     if true_masks is not None:
+            #         combi_true = mask_funcs.combine_masks(list(true_masks.values()))
+            #     else:
+            #         combi_true = np.zeros(im.shape[:2], dtype=np.uint8)
 
-                view_all = tools.show_segmentation(im, combi_pred, combi_true)
-                plt.imsave(file / f'{im_name.stem}_view.png', view_all/255)
+            #     view_all = tools.show_segmentation(im, combi_pred, combi_true)
+            #     plt.imsave(file / f'{im_name.stem}_view.png', view_all/255)
 
-                pred_mask_im = Image.fromarray(combi_pred.astype(np.int32), mode='I')
-                pred_mask_im.save(file / f'{im_name.stem}_pred_mask.png')
+            #     pred_mask_im = Image.fromarray(combi_pred.astype(np.int32), mode='I')
+            #     pred_mask_im.save(file / f'{im_name.stem}_pred_mask.png')
                 
-                results = self.prec_recall_curve(combi_true, combi_pred)
-                results.to_csv(str(file / f'{im_name.stem}_all_results.txt'), sep='\t')
+            #     results = self.prec_recall_curve(combi_true, combi_pred)
+            #     results.to_csv(str(file / f'{im_name.stem}_all_results.txt'), sep='\t')
 
-                for category in pred_masks.keys():
-                    view = tools.show_segmentation(im, pred_masks[category], true_masks[category])
-                    plt.imsave(file / f'{im_name.stem}_{category}_view.png', view)
+            #     for category in pred_masks.keys():
+            #         view = tools.show_segmentation(im, pred_masks[category], true_masks[category])
+            #         plt.imsave(file / f'{im_name.stem}_{category}_view.png', view)
 
-                    pred_mask_im = Image.fromarray(pred_masks[category].astype(np.int32), mode='I')
-                    pred_mask_im.save(file / f'{im_name.stem}_{category}_pred_mask.png')
+            #         pred_mask_im = Image.fromarray(pred_masks[category].astype(np.int32), mode='I')
+            #         pred_mask_im.save(file / f'{im_name.stem}_{category}_pred_mask.png')
 
-                    results = self.prec_recall_curve(true_masks[category], pred_masks[category])
-                    results.to_csv(str(file / f'{im_name.stem}_{category}_results.txt'), sep='\t')
+            #         results = self.prec_recall_curve(true_masks[category], pred_masks[category])
+            #         results.to_csv(str(file / f'{im_name.stem}_{category}_results.txt'), sep='\t')
     
     def fine_tune_eval_clusters(self, plot_title: str):
         """Plot precision recall curves of clusters."""
@@ -593,6 +595,8 @@ def unregister_coco_instances(name):
         MetadataCatalog.pop(name)
 
 def merge_jsons(directory):
+    print(directory)
+    print([f for f in directory.glob('*')])
     all_jsons = [f for f in directory.glob('*.json')]
     json_0 = all_jsons[0]
     for i in range(1, len(all_jsons)):
@@ -674,19 +678,19 @@ def compare_prec_recall_curves(directories: list, save_as: Path, labels: list) -
 
 def main():
     faulthandler.enable()
-    # merge_jsons(Path('PhagoPred')/ 'detectron_segmentation' / 'models' / 'toumai_01_05' / 'labels')
+    merge_jsons(Path('PhagoPred')/ 'detectron_segmentation' / 'models' / '16_02_26' / 'Training_Data' / 'train')
     # compare_prec_recall_curves([
     #     Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_no_fine_tune_16_10',
     #     Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_fine_tune_16_10'
     # ],
     #                            Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'comparison_plot.png',
     #                            ['No Fine Tune', 'Fine Tune'])
-    my_kfold = KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_no_fine_tune_16_10', fine_tune=True)
+    # my_kfold = KFold(Path('PhagoPred')/ 'detectron_segmentation' / 'models' / '27_05_mac_fine_tune_all_12_02_26' / 'kfold_fine_tune', fine_tune=False)
     # my_kfold.split_all()
     # my_kfold.train()
-    # # my_kfold.eval()
-
-    my_kfold.fine_tune_eval('Not Fine Tuned')
+    # my_kfold.eval()
+    # my_kfold.fine_tune_eval_clusters('Fine Tuned Clusters')
+    # my_kfold.fine_tune_eval('Fine Tuned')
     # my_kfold.fine_tune_eval_clusters('Fine Tuned')
     # my_kfold.train()
     # my_kfold.eval()

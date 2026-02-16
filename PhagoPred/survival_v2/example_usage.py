@@ -16,7 +16,7 @@ def train():
         suite_name='classical_comparison',
         output_dir='PhagoPred/survival_v2/experiments/results',
         device='cuda',
-        repeats=3,
+        repeats=1,
     )
 
 def eval():
@@ -26,11 +26,11 @@ def eval():
 
 def interpret():
     interpret_model(
-        Path('/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/attention_comparison_20260127_174046/cnn_medium_none_last_soft_target_late_entry_extreme_standard_all_00')
+        Path('PhagoPred/survival_v2/experiments/results/classical_comparison_20260210_195114/cnn_medium_none_last_soft_target_baseline_standard_all_00')
     )
 if __name__ == '__main__':
-    train()
-    # interpret()
+    # train()
+    interpret()
     # results = run_experiment_suite(
     #     suite_name=
     # )

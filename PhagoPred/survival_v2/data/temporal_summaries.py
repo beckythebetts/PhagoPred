@@ -41,7 +41,8 @@ class TemporalSummary:
         time_to_event = []
         event_indicator = []
         time_to_event_bin = []
-        lengths = []
+        binned_pmfs = []
+        landmark_frames = []
 
         progress_bar = tqdm(total=num_landmarks_per_sample * len(ds), desc="Generating temporal summaries")
         for _ in range(num_landmarks_per_sample):
@@ -55,19 +56,26 @@ class TemporalSummary:
                 time_to_event.append(sample['time_to_event'])
                 event_indicator.append(sample['event_indicator'])
                 time_to_event_bin.append(sample['time_to_event_bin'])
-                lengths.append(sample['length'])
+                landmark_frames.append(sample['landmark_frame'])
+                if 'binned_pmf' in sample:
+                    binned_pmfs.append(sample['binned_pmf'])
                 progress_bar.update(1)
 
         progress_bar.close()
 
-        return {
+        result = {
             'features': np.array(features),
             'raw_features': np.array(raw_features),
             'time_to_event': np.array(time_to_event),
             'event_indicator': np.array(event_indicator),
             'time_to_event_bin': np.array(time_to_event_bin),
-            'lengths': np.array(lengths),
+            'landmark_frames': np.array(landmark_frames),
         }
+
+        if binned_pmfs:
+            result['binned_pmf'] = np.array(binned_pmfs)
+
+        return result
                          
     def get_feature_names(self) -> list[str]:
         if self.feature_names is None:
