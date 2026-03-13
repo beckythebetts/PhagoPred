@@ -100,8 +100,10 @@ class CellType:
         """
         if last_frame is None:
             last_frame = first_frame + 1
-
-        images = h5py_file[self.images][first_frame:last_frame]
+        try:
+            images = h5py_file[self.images][first_frame:last_frame]
+        except KeyError:
+            images = np.zeros((last_frame - first_frame, h5py_file['Images'].attrs['Image size / pixels'][0], h5py_file['Images'].attrs['Image size / pixels'][1]))
 
         if len(images) == 1:
             return images[0]

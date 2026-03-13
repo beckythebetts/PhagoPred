@@ -4,8 +4,13 @@ Supports modular attention mechanisms.
 """
 import torch
 import torch.nn as nn
+
+from PhagoPred.survival_v2.configs.attention import AttentionCfg
+from PhagoPred.utils.logger import get_logger
 from .base import SurvivalModel, build_fc_layers
 from ..attention.mechanisms import get_attention_mechanism
+
+log = get_logger()
 
 
 class CNNSurvival(SurvivalModel):
@@ -15,17 +20,16 @@ class CNNSurvival(SurvivalModel):
     """
 
     def __init__(
-        self,
-        num_features: int,
-        num_bins: int,
-        num_channels: list[int] = [64, 64, 64],
-        kernel_sizes: list[int] = [3, 3, 3],
-        dilations: list[int] = [1, 2, 4],
-        fc_layers: list[int] = [64, 64],
-        attention_type: str = 'vector',
-        attention_config: dict = None,
-        **kwargs
-    ):
+            self,
+            num_features: int,
+            num_bins: int,
+            num_channels: list[int],
+            kernel_sizes: list[int],
+            dilations: list[int],
+            fc_layers: list[int],
+            #  attention_type: str,
+            attention_config: AttentionCfg = None,
+            **kwargs):
         """
         Args:
             num_features: number of input features per timestep
@@ -43,47 +47,47 @@ class CNNSurvival(SurvivalModel):
 
         # Validate conv layer specs
         if not (len(num_channels) == len(kernel_sizes) == len(dilations)):
-            raise ValueError("num_channels, kernel_sizes, and dilations must have same length")
+            raise ValueError(
+                "num_channels, kernel_sizes, and dilations must have same length"
+            )
 
         # Convolutional layers
         self.cn_layers = nn.ModuleList()
         in_channels = num_features
-        for out_channels, kernel_size, dilation in zip(num_channels, kernel_sizes, dilations):
+        for out_channels, kernel_size, dilation in zip(num_channels,
+                                                       kernel_sizes,
+                                                       dilations):
             self.cn_layers.append(
-                nn.Conv1d(
-                    in_channels,
-                    out_channels,
-                    kernel_size,
-                    dilation=dilation,
-                    padding='same'
-                )
-            )
+                nn.Conv1d(in_channels,
+                          out_channels,
+                          kernel_size,
+                          dilation=dilation,
+                          padding='same'))
             in_channels = out_channels
 
         # Attention mechanism
-        if attention_config is None:
-            attention_config = {}
-        attention_config['embed_dim'] = in_channels
-        self.attention = get_attention_mechanism(attention_type, **attention_config)
+        # if attention_config is None:
+        #     attention_config = {}
+        # attention_config['embed_dim'] = in_channels
+        setattr(attention_config, 'embed_dim', in_channels)
+        self.attention = get_attention_mechanism(attention_config)
+        #  **attention_config)
 
         # Survival prediction head
-        self.fc = build_fc_layers(
-            input_size=in_channels,
-            output_size=num_bins,
-            layer_sizes=fc_layers
-        )
+        self.fc = build_fc_layers(input_size=in_channels,
+                                  output_size=num_bins,
+                                  layer_sizes=fc_layers)
 
-        num_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        num_params = sum(p.numel() for p in self.parameters()
+                         if p.requires_grad)
         print(f"CNNSurvival initialized with {num_params:,} parameters")
-        print(f"  Attention type: {attention_type}")
+        log.info(f"CNNSurvival initialized with {num_params:,} parameters")
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        lengths: torch.Tensor,
-        return_attention: bool = False,
-        mask: torch.Tensor = None
-    ):
+    def forward(self,
+                x: torch.Tensor,
+                lengths: torch.Tensor,
+                return_attention: bool = False,
+                mask: torch.Tensor = None):
         """
         Args:
             x: (batch, seq_len, num_features)
@@ -98,7 +102,8 @@ class CNNSurvival(SurvivalModel):
         batch_size, seq_len, num_features = x.shape
 
         # Padding mask for attention
-        padding_mask = torch.arange(seq_len, device=lengths.device).unsqueeze(0)
+        padding_mask = torch.arange(seq_len,
+                                    device=lengths.device).unsqueeze(0)
         padding_mask = padding_mask < lengths.unsqueeze(1)
 
         # Transpose for Conv1d: (batch, features, seq_len)

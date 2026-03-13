@@ -1,5 +1,6 @@
 from typing import Optional, Union
 import sys
+import textwrap
 from itertools import combinations
 
 from pathlib import Path
@@ -22,20 +23,28 @@ def plot_cell_features(cell_idx: int, first_frame: int, last_frame: int, save_as
 
     with h5py.File(SETTINGS.DATASET, 'r') as f:
         if feature_names is None:
-            feature_names = f['Cells']['Phase'].keys()
+            feature_names = list(f['Cells']['Phase'].keys())
 
-        fig, axs = plt.subplots(len(feature_names), sharex=True, figsize=(10, 10))
+        n = len(feature_names)
+        fig, axs = plt.subplots(n, sharex=True, figsize=(10, max(1.8 * n, 4)))
+        if n == 1:
+            axs = [axs]
+
         for i, feature_name in enumerate(feature_names):
             feature_values = f['Cells']['Phase'][feature_name][first_frame:last_frame, cell_idx]
-            axs[i].plot(range(first_frame, last_frame), feature_values)
-            axs[i].set_ylabel(feature_name, rotation=45, labelpad=20)
-            axs[i].grid()
-            axs[i].set_xlim(left=first_frame, right=last_frame-1)
+            axs[i].plot(range(first_frame, last_frame), feature_values, color='k', linewidth=1)
+            wrapped = textwrap.fill(feature_name, width=16)
+            axs[i].set_ylabel(wrapped, rotation=0, ha='right', va='center',
+                              labelpad=6, fontsize=8)
+            axs[i].tick_params(axis='both', labelsize=7)
+            axs[i].grid(alpha=0.4)
+            axs[i].set_xlim(left=first_frame, right=last_frame - 1)
 
-        fig.suptitle(f'Cell {cell_idx}')
-        axs[-1].set(xlabel='Frame')
+        fig.suptitle(f'Cell {cell_idx}', fontsize=11, fontweight='bold')
+        axs[-1].set_xlabel('Frame', fontsize=9)
 
-    plt.savefig(save_as)
+    plt.subplots_adjust(left=0.22, hspace=0.08, top=0.97)
+    plt.savefig(save_as, bbox_inches='tight', dpi=150)
 
     return fig
 
@@ -792,22 +801,27 @@ def main():
         # 'Mode 3',
         # 'Mode 4',
         # 'Speed',
-        # 'Phagocytes within 100 pixels',
-        # 'Phagocytes within 250 pixels',
-        # 'Phagocytes within 500 ',
+        'Alive Phagocytes within 100 pixels',
+        'Alive Phagocytes within 250 pixels',
+        'Alive Phagocytes within 500 pixels',
+        # 'Dead Phagocytes within 100 pixels',
+        # 'Dead Phagocytes within 250 pixels',
+        # 'Dead Phagocytes within 500 pixels',
+        
         # 'X',
         # 'Y',
         # 'CellDeath',
         # 'Total Fluorescence', 
         # 'Fluorescence Distance Mean', 
         # 'Fluorescence Distance Variance'
-        # 'Skeleton Length', 
-        # 'Skeleton Branch Points', 
-        # 'Skeleton End Points', 
-        # 'Skeleton Branch Length Mean', 
-        # 'Skeleton Branch Length Std',
-        # 'Skeleton Branch Length Max',
+        'Skeleton Length', 
+        'Skeleton Branch Points', 
+        'Skeleton End Points', 
+        'Skeleton Branch Length Mean', 
+        'Skeleton Branch Length Std',
+        'Skeleton Branch Length Max',
     ]
+    plot_cell_features(60, 0, 100, Path('temp') / 'cell_features.png', feature_names=feature_names)
     # plot_two_death_frame_hists(
     #     Path('temp') / 'death_frames_fine_tuned.txt',
     #     Path('temp') / 'cell_deaths_24_06.txt',
@@ -831,22 +845,22 @@ def main():
     #     'Speed'
     # ])
    
-    files = [
-        Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5',
-        Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_2500.h5',
-        # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / 'old' / '03_10_2500.h5',
-        Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5',
-        # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000_inner.h5',
-        # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000_outer.h5',
-    ]
-    labels = [
-        '0s exposure', 
-              '2.5s exposure', 
-            #   '2.5s (old data)',
-              '5s exposure',
-            #   'Inner radius',
-            #   'Outer radius'
-              ]
+    # files = [
+    #     Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '07_10_0.h5',
+    #     Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_2500.h5',
+    #     # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / 'old' / '03_10_2500.h5',
+    #     Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5',
+    #     # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000_inner.h5',
+    #     # Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000_outer.h5',
+    # ]
+    # labels = [
+    #     '0s exposure', 
+    #           '2.5s exposure', 
+    #         #   '2.5s (old data)',
+    #           '5s exposure',
+    #         #   'Inner radius',
+    #         #   'Outer radius'
+    #           ]
     # km_plot(files,
     #         labels,
     #         Path('temp') / 'km_curve.png',
@@ -857,11 +871,11 @@ def main():
     #                       labels,
     #                       'Speed',
     #                       Path('temp') / 'speed_plt.png')
-    compare_cell_features_grid(files,
-                               labels,
-                               features=feature_names,
-                               save_as=Path('temp') / 'hists.png',
-                               )
+    # compare_cell_features_grid(files,
+    #                            labels,
+    #                            features=feature_names,
+    #                            save_as=Path('temp') / 'hists.png',
+    #                            )
     # plot_feature_correlations_multi(
     #     Path('temp') / 'corr_plt.png',
     #     files,

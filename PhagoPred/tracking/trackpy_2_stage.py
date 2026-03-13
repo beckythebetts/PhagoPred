@@ -235,7 +235,7 @@ def run_tracking(dataset=SETTINGS.DATASET):
 
     tracker.get_cell_info()
     tracker.track(
-        search_range=SETTINGS.MAXIMUM_DISTANCE_THRESHOLD / 2,
+        search_range=SETTINGS.MAXIMUM_DISTANCE_THRESHOLD / 1.5,
         stage2_search_range=SETTINGS.MAXIMUM_DISTANCE_THRESHOLD,
         memory=0,
         stage2_memory=SETTINGS.FRAME_MEMORY,

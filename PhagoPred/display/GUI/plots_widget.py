@@ -67,11 +67,21 @@ class FeaturePlotsWidget(QWidget):
             pw.setBackground('w')
             pw.showGrid(x=True, y=True)
             pw.setLabel('left', feat)
-            if i != len(feature_names) - 1:
-                pw.getAxis('bottom').setTicks([])  # Hide x-axis ticks
-                pw.getAxis('bottom').setStyle(showValues=False)
-            else:
-                pw.setLabel('bottom', 'Frame')
+
+            # Show feature name as title above the plot instead of y-axis label
+            pw.setTitle(feat, color='k', size='10pt')
+            pw.setLabel('left', '')  # Remove y-axis label
+
+            # Lock Y-axis: zoom/pan only affects X
+            pw.setMouseEnabled(x=True, y=False)
+            pw.enableAutoRange(axis='y')
+
+            # if i != len(feature_names) - 1:
+            #     pw.getAxis('bottom').setTicks([])  # Hide x-axis ticks
+            #     pw.getAxis('bottom').setStyle(showValues=False)
+            # else:
+            pw.setLabel('bottom', 'Frame')
+            pw.setMinimumHeight(200)
             pw.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             plot_layout.addWidget(pw)
             self.plot_widgets[feat] = pw
@@ -93,14 +103,14 @@ class FeaturePlotsWidget(QWidget):
             self.anim.start()
             self.checkbox_scroll.setVisible(False)
             
-            self.toggle_button.setText("⚙️ Show Feature To Plot")
+            self.toggle_button.setText("Show Feature To Plot")
         else:
             self.checkbox_scroll.setVisible(True)
             self.checkbox_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             self.anim.setStartValue(0)
             self.anim.setEndValue(600)  
             self.anim.start()
-            self.toggle_button.setText("⚙️ Hide Feature To Plot")
+            self.toggle_button.setText("Hide Feature To Plot")
 
     # --- Show/hide plots based on checkboxes ---
     def toggle_feature_visibility(self):
@@ -114,3 +124,4 @@ class FeaturePlotsWidget(QWidget):
             y_data = f['Cells']['Phase'][feat][first_frame:last_frame, cell_idx]
             pw.getPlotItem().clear()
             pw.plot(x_data, y_data, pen=pg.mkPen('k'))
+            pw.enableAutoRange(axis='y')

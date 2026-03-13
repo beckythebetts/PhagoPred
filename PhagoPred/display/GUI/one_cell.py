@@ -42,7 +42,8 @@ class CellViewer(QWidget):
         
         # Create plots widget with checkboxes
         self.plots_widget = FeaturePlotsWidget(self.feature_names)
-        self.plots_dock = self.viewer.window.add_dock_widget(self.plots_widget, area='right')
+        self.plots_dock = self.viewer.window.add_dock_widget(self.plots_widget, area='bottom')
+        self.plots_widget.setMinimumHeight(400)
 
         # Start loading images in thread
         self.loader_thread = CellLoaderThread(
@@ -78,7 +79,9 @@ class CellViewer(QWidget):
         labels_layer = self.viewer.add_labels(mask, name=f'Cell {self.cell_idx}', colormap={1: [255, 255, 0, 255]}, translate=(self.first_frame, 0, 0))
         labels_layer.contour=5
 
-        # self.viewer.layers.selection.center()
+        # Centre the view on the cropped cell
+        self.viewer.reset_view()
+
         self.update_feature_plots()
 
         # Add vertical lines to plots

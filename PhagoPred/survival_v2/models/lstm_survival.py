@@ -14,21 +14,18 @@ class LSTMSurvival(SurvivalModel):
     Optionally includes next-timestep feature prediction.
     """
 
-    def __init__(
-        self,
-        num_features: int,
-        num_bins: int,
-        lstm_hidden_size: int = 64,
-        lstm_num_layers: int = 2,
-        lstm_dropout: float = 0.0,
-        predictor_layers: list[int] = [32],
-        fc_layers: list[int] = [64, 64],
-        attention_type: str = 'multihead',
-        attention_config: dict = None,
-        use_predictor: bool = False,
-        use_mask_embedding: bool = False,
-        **kwargs
-    ):
+    def __init__(self,
+                 num_features: int,
+                 num_bins: int,
+                 lstm_hidden_size: int = 64,
+                 lstm_num_layers: int = 2,
+                 lstm_dropout: float = 0.0,
+                 predictor_layers: list[int] = [32],
+                 fc_layers: list[int] = [64, 64],
+                 attention_type: str = 'multihead',
+                 attention_config: dict = None,
+                 use_mask_embedding: bool = False,
+                 **kwargs):
         """
         Args:
             num_features: number of input features per timestep
@@ -46,7 +43,7 @@ class LSTMSurvival(SurvivalModel):
         super().__init__(num_bins)
 
         self.num_features = num_features
-        self.use_predictor = use_predictor
+        self.use_predictor = True if len(predictor_layers) > 0 else False
         self.use_mask_embedding = use_mask_embedding
 
         # Input size
@@ -60,45 +57,40 @@ class LSTMSurvival(SurvivalModel):
             hidden_size=lstm_hidden_size,
             num_layers=lstm_num_layers,
             dropout=lstm_dropout if lstm_num_layers > 1 else 0.0,
-            batch_first=True
-        )
+            batch_first=True)
 
         # Optional: predict next timestep features
-        if use_predictor:
-            self.predictor = build_fc_layers(
-                input_size=lstm_hidden_size,
-                output_size=num_features,
-                layer_sizes=predictor_layers
-            )
+        if self.use_predictor:
+            self.predictor = build_fc_layers(input_size=lstm_hidden_size,
+                                             output_size=num_features,
+                                             layer_sizes=predictor_layers)
 
         # Attention mechanism
         if attention_config is None:
             attention_config = {}
-        attention_config['embed_dim'] = lstm_hidden_size
-        self.attention = get_attention_mechanism(attention_type, **attention_config)
+        # attention_config['embed_dim'] = lstm_hidden_size
+        setattr(attention_config, 'embed_dim', lstm_hidden_size)
+        self.attention = get_attention_mechanism(attention_config)
 
         # Survival prediction head
-        self.fc = build_fc_layers(
-            input_size=lstm_hidden_size * 2,
-            output_size=num_bins,
-            layer_sizes=fc_layers
-        )
+        self.fc = build_fc_layers(input_size=lstm_hidden_size * 2,
+                                  output_size=num_bins,
+                                  layer_sizes=fc_layers)
 
         # Optional mask embedding
         if use_mask_embedding:
             self.mask_embedding = nn.Parameter(torch.zeros(num_features))
 
-        num_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        num_params = sum(p.numel() for p in self.parameters()
+                         if p.requires_grad)
         print(f"LSTMSurvival initialized with {num_params:,} parameters")
         print(f"  Attention type: {attention_type}")
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        lengths: torch.Tensor,
-        return_attention: bool = False,
-        mask: torch.Tensor = None
-    ):
+    def forward(self,
+                x: torch.Tensor,
+                lengths: torch.Tensor,
+                return_attention: bool = False,
+                mask: torch.Tensor = None):
         """
         Args:
             x: (batch, seq_len, num_features)
@@ -118,17 +110,19 @@ class LSTMSurvival(SurvivalModel):
             x = torch.cat([x, mask.float()], dim=-1)
 
         # Padding mask for attention
-        padding_mask = torch.arange(seq_len, device=lengths.device).unsqueeze(0)
+        padding_mask = torch.arange(seq_len,
+                                    device=lengths.device).unsqueeze(0)
         padding_mask = padding_mask < lengths.unsqueeze(1)
 
         # LSTM encoding with packed sequences
-        x_packed = nn.utils.rnn.pack_padded_sequence(
-            x, lengths.cpu(), batch_first=True, enforce_sorted=False
-        )
+        x_packed = nn.utils.rnn.pack_padded_sequence(x,
+                                                     lengths.cpu(),
+                                                     batch_first=True,
+                                                     enforce_sorted=False)
         lstm_out, (h_n, c_n) = self.lstm(x_packed)
-        lstm_out, _ = nn.utils.rnn.pad_packed_sequence(
-            lstm_out, batch_first=True, total_length=seq_len
-        )
+        lstm_out, _ = nn.utils.rnn.pad_packed_sequence(lstm_out,
+                                                       batch_first=True,
+                                                       total_length=seq_len)
 
         # Optional: predict next timestep features
         y_pred = None

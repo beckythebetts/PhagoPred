@@ -1,9 +1,9 @@
-"""
-Attention mechanisms for temporal sequence models.
-All mechanisms handle variable-length sequences via padding masks.
-"""
+from dataclasses import asdict
+
 import torch
 import torch.nn as nn
+
+from PhagoPred.survival_v2.configs.attention import AttentionCfg
 
 
 class AttentionVector(nn.Module):
@@ -13,11 +13,14 @@ class AttentionVector(nn.Module):
 
     Parameters: embed_dim (just one vector)
     """
+
     def __init__(self, embed_dim: int, **kwargs):
         super().__init__()
         self.attention_vector = nn.Parameter(torch.randn(embed_dim))
 
-    def forward(self, x: torch.Tensor, padding_mask: torch.Tensor = None) -> tuple:
+    def forward(self,
+                x: torch.Tensor,
+                padding_mask: torch.Tensor = None) -> tuple:
         """
         Args:
             x: (batch, seq_len, embed_dim)
@@ -48,13 +51,12 @@ class FCAttention(nn.Module):
 
     Parameters: ~embed_dim * hidden_dims
     """
-    def __init__(
-        self,
-        embed_dim: int,
-        hidden_dims: list[int] = [64, 32],
-        dropout: float = 0.0,
-        **kwargs
-    ):
+
+    def __init__(self,
+                 embed_dim: int,
+                 hidden_dims: list[int] = [64, 32],
+                 dropout: float = 0.0,
+                 **kwargs):
         super().__init__()
 
         layers = []
@@ -69,7 +71,9 @@ class FCAttention(nn.Module):
         layers.append(nn.Linear(in_dim, 1))
         self.attention_net = nn.Sequential(*layers)
 
-    def forward(self, x: torch.Tensor, padding_mask: torch.Tensor = None) -> tuple:
+    def forward(self,
+                x: torch.Tensor,
+                padding_mask: torch.Tensor = None) -> tuple:
         """
         Args:
             x: (batch, seq_len, embed_dim)
@@ -100,22 +104,21 @@ class MultiHeadSelfAttention(nn.Module):
 
     Parameters: ~4 * embed_dim^2 (Q, K, V, output projections)
     """
-    def __init__(
-        self,
-        embed_dim: int,
-        num_heads: int = 2,
-        dropout: float = 0.0,
-        **kwargs
-    ):
-        super().__init__()
-        self.attention = nn.MultiheadAttention(
-            embed_dim=embed_dim,
-            num_heads=num_heads,
-            dropout=dropout,
-            batch_first=True
-        )
 
-    def forward(self, x: torch.Tensor, padding_mask: torch.Tensor = None) -> tuple:
+    def __init__(self,
+                 embed_dim: int,
+                 num_heads: int = 2,
+                 dropout: float = 0.0,
+                 **kwargs):
+        super().__init__()
+        self.attention = nn.MultiheadAttention(embed_dim=embed_dim,
+                                               num_heads=num_heads,
+                                               dropout=dropout,
+                                               batch_first=True)
+
+    def forward(self,
+                x: torch.Tensor,
+                padding_mask: torch.Tensor = None) -> tuple:
         """
         Args:
             x: (batch, seq_len, embed_dim)
@@ -130,17 +133,19 @@ class MultiHeadSelfAttention(nn.Module):
 
         # Self-attention
         attn_output, attn_weights = self.attention(
-            x, x, x,
+            x,
+            x,
+            x,
             key_padding_mask=key_padding_mask,
             need_weights=True,
-            average_attn_weights=True
-        )
+            average_attn_weights=True)
 
         # Pool over sequence (mean pooling)
         context = attn_output.mean(dim=1)
 
         # Average attention weights over heads
-        attn_weights = attn_weights.mean(dim=1) if len(attn_weights.shape) == 3 else attn_weights
+        attn_weights = attn_weights.mean(
+            dim=1) if len(attn_weights.shape) == 3 else attn_weights
 
         return context, attn_weights
 
@@ -150,10 +155,13 @@ class MeanPooling(nn.Module):
     No attention - just mean pooling over valid timesteps.
     Baseline with zero parameters.
     """
+
     def __init__(self, embed_dim: int, **kwargs):
         super().__init__()
 
-    def forward(self, x: torch.Tensor, padding_mask: torch.Tensor = None) -> tuple:
+    def forward(self,
+                x: torch.Tensor,
+                padding_mask: torch.Tensor = None) -> tuple:
         """
         Args:
             x: (batch, seq_len, embed_dim)
@@ -165,15 +173,19 @@ class MeanPooling(nn.Module):
         """
         if padding_mask is not None:
             # Masked mean
-            valid_mask = padding_mask.unsqueeze(-1).float()  # (batch, seq_len, 1)
-            context = (x * valid_mask).sum(dim=1) / valid_mask.sum(dim=1).clamp(min=1)
+            valid_mask = padding_mask.unsqueeze(
+                -1).float()  # (batch, seq_len, 1)
+            context = (x * valid_mask).sum(dim=1) / valid_mask.sum(
+                dim=1).clamp(min=1)
 
             # Uniform weights over valid positions
-            weights = valid_mask.squeeze(-1) / valid_mask.sum(dim=1).clamp(min=1)
+            weights = valid_mask.squeeze(-1) / valid_mask.sum(dim=1).clamp(
+                min=1)
         else:
             # Simple mean
             context = x.mean(dim=1)
-            weights = torch.ones(x.shape[0], x.shape[1], device=x.device) / x.shape[1]
+            weights = torch.ones(x.shape[0], x.shape[1],
+                                 device=x.device) / x.shape[1]
 
         return context, weights
 
@@ -183,10 +195,13 @@ class LastPooling(nn.Module):
     No attention - use the last valid timestep.
     Baseline with zero parameters, good for LSTMs.
     """
+
     def __init__(self, embed_dim: int, **kwargs):
         super().__init__()
 
-    def forward(self, x: torch.Tensor, padding_mask: torch.Tensor = None) -> tuple:
+    def forward(self,
+                x: torch.Tensor,
+                padding_mask: torch.Tensor = None) -> tuple:
         """
         Args:
             x: (batch, seq_len, embed_dim)
@@ -203,10 +218,13 @@ class LastPooling(nn.Module):
             lengths = padding_mask.sum(dim=1)  # (batch,)
             last_indices = (lengths - 1).clamp(min=0)
         else:
-            last_indices = torch.full((batch_size,), seq_len - 1, device=x.device)
+            last_indices = torch.full((batch_size, ),
+                                      seq_len - 1,
+                                      device=x.device)
 
         # Gather last timesteps
-        last_indices = last_indices.unsqueeze(1).unsqueeze(2).expand(-1, -1, embed_dim)
+        last_indices = last_indices.unsqueeze(1).unsqueeze(2).expand(
+            -1, -1, embed_dim)
         context = torch.gather(x, 1, last_indices).squeeze(1)
 
         # One-hot weights at last position
@@ -226,21 +244,29 @@ ATTENTION_MECHANISMS = {
 }
 
 
-def get_attention_mechanism(name: str, **kwargs) -> nn.Module:
-    """
-    Factory function to create attention mechanisms.
+def get_attention_mechanism(config: AttentionCfg) -> nn.Module:
+    """Create attention mehcanism modules form config"""
+    name = config.attention_type
+    return ATTENTION_MECHANISMS[name](**asdict(config))
 
-    Args:
-        name: one of 'vector', 'fc', 'multihead', 'mean_pool', 'last_pool'
-        **kwargs: passed to the attention mechanism constructor
 
-    Returns:
-        attention_module: nn.Module
+# def get_attention_mechanism(name: str, **kwargs) -> nn.Module:
+#     """
+#     Factory function to create attention mechanisms.
 
-    Example:
-        >>> attn = get_attention_mechanism('fc', embed_dim=64, hidden_dims=[32, 16])
-    """
-    if name not in ATTENTION_MECHANISMS:
-        raise ValueError(f"Unknown attention mechanism: {name}. Choose from {list(ATTENTION_MECHANISMS.keys())}")
+#     Args:
+#         name: one of 'vector', 'fc', 'multihead', 'mean_pool', 'last_pool'
+#         **kwargs: passed to the attention mechanism constructor
 
-    return ATTENTION_MECHANISMS[name](**kwargs)
+#     Returns:
+#         attention_module: nn.Module
+
+#     Example:
+#         >>> attn = get_attention_mechanism('fc', embed_dim=64, hidden_dims=[32, 16])
+#     """
+#     if name not in ATTENTION_MECHANISMS:
+#         raise ValueError(
+#             f"Unknown attention mechanism: {name}. Choose from {list(ATTENTION_MECHANISMS.keys())}"
+#         )
+
+#     return ATTENTION_MECHANISMS[name](**kwargs)

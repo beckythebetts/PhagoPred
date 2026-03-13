@@ -153,7 +153,7 @@ class RandomSpikeRule(Rule):
             cell.hazards += get_gaussian_curve(cell.T, spike_time, sigma=5) * self.height
 
 class GradientRule(Rule):
-    """Increase hazard when graidient exceeds threshold."""
+    """Increase hazard proportionally to gradient."""
     def __init__(self, feature: str = '0', gradient_threshold: float = 1.0, max_increase: float = 0.5, probability: float = 1.0):
         self.feature = feature
         self.gradient_threshold = gradient_threshold
@@ -163,8 +163,9 @@ class GradientRule(Rule):
     def apply(self, cell: Cell) -> None:
         if np.random.rand() < self.probability:
             feature_gradient = np.diff(cell[self.feature], prepend=cell[self.feature][0])
-            mask = feature_gradient > self.gradient_threshold
-            cell.hazards[mask] += feature_gradient[mask] / np.max(feature_gradient) * self.max_increase
+            cell.hazards += np.abs((feature_gradient / np.max(np.abs(feature_gradient)))) * self.max_increase
+            # mask = feature_gradient > self.gradient_threshold
+            # cell.hazards[mask] += feature_gradient[mask] / np.max(feature_gradient) * self.max_increase
             
 # == Feature modifying rules (with delayed hazard effect) ==
 class VariationRule(Rule):
@@ -269,17 +270,17 @@ def create_synthetic_dataset(
         #     GradualRampRule(feature='1', ramp_height=10.0, delay=400, sigma=5.0),
         # ]
         rules = [
-            ThresholdRule(feature='random_walk', threshold=200, hazard_increase=5e-3, probability=1.0),
-            CumulativeEffectRule(feature='oscillation', threshold=4.0, hazard_increase=5e-7, probability=1.0),
-            InteractionRule(feature1='random_walk', threshold1=5.0, feature2='oscillation', threshold2=2.0, hazard_increase=-4e-2, probability=1.0),
-            RandomSpikeRule(height=1e-3, probability=0.1),
+            ThresholdRule(feature='random_walk', threshold=100, hazard_increase=5e-3, probability=1.0),
+            CumulativeEffectRule(feature='oscillation', threshold=4.0, hazard_increase=1e-5, probability=1.0),
+            InteractionRule(feature1='random_walk', threshold1=5.0, feature2='oscillation', threshold2=2.0, hazard_increase=-1e-2, probability=1.0),
+            RandomSpikeRule(height=4e-2, probability=0.3),
             GradientRule(feature='polynomial_trend', gradient_threshold=0.5, max_increase=5e-3, probability=1.0),
         ]
 
     num_rules = len(rules) if rules else 1
-    for rule in rules:
-        rule.max_strength = 1 / num_rules
-        print(f"Rule {rule.__class__.__name__}: max_strength={rule.max_strength:.3f}")
+    # for rule in rules:
+    #     rule.max_strength = 1 / num_rules
+    #     print(f"Rule {rule.__class__.__name__}: max_strength={rule.max_strength:.3f}")
     
     # Configure start frames (late entry)
     start_frames = np.zeros(num_cells, dtype=int)
@@ -293,7 +294,7 @@ def create_synthetic_dataset(
     else:
         start_frames[:] = np.random.randint(0, 10, size=num_cells)
 
-    end_frames = np.random.randint(num_frames-num_frames//2, num_frames, size=num_cells)
+    end_frames = np.random.randint(num_frames//2, num_frames, size=num_cells)
     
     features = Cell().features.keys()
     
@@ -302,21 +303,22 @@ def create_synthetic_dataset(
     cifs = np.empty((num_frames, num_cells), dtype=np.float32)
     pmfs = np.empty((num_frames, num_cells), dtype=np.float32)
     hazards = np.empty((num_frames, num_cells), dtype=np.float32)
+    hazard_contributions = {rule.__class__.__name__: np.empty((num_frames, num_cells), dtype=np.float32) for rule in rules}
     
     for c in tqdm(range(num_cells), desc='Generating cells'):
         cell = Cell(num_frames, noise_level=noise_level)
         start = start_frames[c]
         end = end_frames[c]
 
+        # rule_contributions = np.zeros((num_rules, cell.T), dtype=np.float32)
         # Apply rules and track per-rule hazard contribution
         for rule in rules:
             hazards_before = cell.hazards.copy()
             rule.apply(cell)
-            delta = cell.hazards - hazards_before
-            rule_name = rule.__class__.__name__
-            if not hasattr(rule, '_hazard_deltas'):
-                rule._hazard_deltas = []
-            rule._hazard_deltas.append(delta.mean())
+            hazard_delta = cell.hazards - hazards_before
+            hazard_contributions[rule.__class__.__name__][:, c] = hazard_delta
+            # rule_contributions[rules.index(rule)] = hazard_delta
+            
 
         cell.hazards = gaussian_filter1d(cell.hazards, sigma=10)
         cell.hazards = np.clip(cell.hazards, a_min=0.0, a_max=1.0)
@@ -357,17 +359,21 @@ def create_synthetic_dataset(
             all_features[name][:, c] = cell[name]
             
     # Print per-rule hazard contribution summary
-    print("\n--- Per-rule mean hazard contribution ---")
-    for rule in rules:
-        deltas = np.array(rule._hazard_deltas)
-        name = rule.__class__.__name__
-        print(f"  {name:30s}  mean={deltas.mean():.2e}  std={deltas.std():.2e}  max={deltas.max():.2e}")
-        del rule._hazard_deltas  # clean up
+    # print("\n--- Per-rule mean hazard contribution ---")
+    # for rule in rules:
+    #     deltas = np.array(rule._hazard_deltas)
+    #     name = rule.__class__.__name__
+    #     print(f"  {name:30s}  mean={deltas.mean():.2e}  std={deltas.std():.2e}  max={deltas.max():.2e}")
+    #     del rule._hazard_deltas  # clean up
 
     with h5py.File(filename, 'w') as f:
         grp = f.create_group('Cells/Phase')
         for name in features:
             grp.create_dataset(name, data=all_features[name], dtype=np.float32)
+        for rule in rules:
+            rule_dataset = grp.create_dataset(f"HazardContribution_{rule.__class__.__name__}", data=hazard_contributions[rule.__class__.__name__], dtype=np.float32)
+            for attr, value in rule.__dict__.items():
+                rule_dataset.attrs[attr] = value
         grp.create_dataset('CellDeath', data=all_deaths[np.newaxis, :], dtype=np.float32)
         grp.create_dataset('CIFs', data=cifs, dtype=np.float32)
         grp.create_dataset('PMFs', data=pmfs, dtype=np.float32)

@@ -8,7 +8,7 @@ from .base import SurvivalModel
 
 # Classical ML models (scikit-survival based)
 from .classical_base import ClassicalSurvivalModel
-from .survival_forest import RandomSurvivalForestModel, GradientBoostingSurvivalModel, CoxPHModel
+from .random_forest import RandomSurvivalForestModel
 
 __all__ = [
     # Deep learning models
@@ -18,6 +18,4 @@ __all__ = [
     # Classical ML models (scikit-survival)
     'ClassicalSurvivalModel',
     'RandomSurvivalForestModel',
-    'GradientBoostingSurvivalModel',
-    'CoxPHModel',
 ]

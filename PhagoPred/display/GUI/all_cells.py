@@ -20,6 +20,7 @@ class AllCellsViewer:
         self.phase_data = None
         self.epi_data = None
         self.seg_data = None
+        self.labels_layer = None
         
         self._load_data()
         # self._fill_missing_segs()
@@ -27,8 +28,8 @@ class AllCellsViewer:
         
         self.status_label = QtWidgets.QLabel(" ")
         self.cell_death_label = QtWidgets.QLabel("")
-        label_dock = self.viewer.window.add_dock_widget(self.status_label, area='bottom')
-        self.viewer.window.add_dock_widget(self.cell_death_label, area='bottom')
+        label_dock = self.viewer.window.add_dock_widget(self.status_label, area='right')
+        self.viewer.window.add_dock_widget(self.cell_death_label, area='right')
         
         self.back_button = QtWidgets.QPushButton("← Back to All Cells")
         self.back_button.setVisible(False)
@@ -82,13 +83,14 @@ class AllCellsViewer:
         # Suppose your dataset is stored at f["images"]
         hdf5_phase = self.hdf5_file['Images']['Phase']
         hdf5_epi = self.hdf5_file['Images']['Epi']
-        hdf5_seg = self.hdf5_file['Segmentations']['Phase']
 
         # Wrap it in a Dask array (each chunk corresponds to HDF5 chunks)
         self.phase_data = da.from_array(hdf5_phase, chunks=hdf5_phase.chunks)
         self.epi_data = da.from_array(hdf5_epi, chunks=hdf5_epi.chunks)
-        
-        self.seg_data = da.from_array(hdf5_seg, chunks=hdf5_seg.chunks)
+
+        if 'Segmentations' in self.hdf5_file and 'Phase' in self.hdf5_file['Segmentations']:
+            hdf5_seg = self.hdf5_file['Segmentations']['Phase']
+            self.seg_data = da.from_array(hdf5_seg, chunks=hdf5_seg.chunks)
     
     def _fill_missing_segs(self):
         first_appearances = self.hdf5_file['Cells']['Phase']['First Frame'][0]
@@ -100,7 +102,8 @@ class AllCellsViewer:
         if "Phase" not in self.viewer.layers:
             self.viewer.add_image(self.phase_data, name='Phase', colormap='gray', opacity=1.0)
             self.viewer.add_image(self.epi_data, name='Epi', colormap='red', blending='additive', opacity=1.0)
-            self.labels_layer = self.viewer.add_labels(self.seg_data + 1, name="Segmentations", opacity=0.3)
+            if self.seg_data is not None:
+                self.labels_layer = self.viewer.add_labels(self.seg_data + 1, name="Segmentations", opacity=0.3)
         else:
             for layer_name in ("Phase", "Epi", "Segmentations"):
                 if layer_name in self.viewer.layers:
@@ -132,21 +135,25 @@ class AllCellsViewer:
     def _connect_mouse_interactions(self):
         """Update status bar with label ID under cursor."""
         def _hover_callback(viewer, event):
+            if self.labels_layer is None:
+                return True
             label_val = self.labels_layer.get_value(event.position)
             if label_val:
                 if label_val > 0:
                     self.status_label.setText(f'Cell index: {label_val-1}')
-                    return True  
+                    return True
             self.status_label.setText('')
             return True
-            
+
         def _click_callback(viewer, event):
+            if self.labels_layer is None:
+                return True
             label_val = self.labels_layer.get_value(event.position)
             if label_val > 0:
                 label_val = label_val - 1
                 self._open_cell_view(label_val)
             return True  # Stop further processing
-        
+
         self.viewer.mouse_move_callbacks.append(_hover_callback)
         self.viewer.mouse_double_click_callbacks.append(_click_callback)
     

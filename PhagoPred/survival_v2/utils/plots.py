@@ -1,8 +1,22 @@
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights=None, feature_names=None, save_path=None, start_frame=0) -> None:
+from PhagoPred.survival_v2.data import BinaryCellSample, SurvivalCellSample
+from PhagoPred.utils.logger import get_logger
+
+log = get_logger()
+
+
+def visualise_survival_prediction(sample: SurvivalCellSample,
+                                  predicted_pmf: np.ndarray,
+                                  bin_edges: np.ndarray,
+                                  attn_weights: np.ndarray = None,
+                                  feature_names: list[str] = None,
+                                  save_path: Path = None,
+                                  start_frame: int = 0) -> None:
     """
     Plot observed features, attention weights (if available) and predicted (and underlying) PMF.
 
@@ -31,20 +45,20 @@ def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights=None, fe
             return np.array(x)
 
     # Convert all inputs to numpy arrays
-    features = to_numpy(sample['features'])
-    true_pmf = to_numpy(sample.get('binned_pmf'))
-    time_to_event = to_numpy(sample['time_to_event'])
-    cell_idx = sample.get('cell_idx', 'N/A')
-    cell_file = sample.get('hdf5_path', 'N/A')
-    length = to_numpy(sample.get('length', None))
-    landmark_frame = to_numpy(sample.get('landmark_frame', 0))
+    features = to_numpy(sample.features)
+    true_pmf = to_numpy(sample.binned_pmf)
+    time_to_event = to_numpy(sample.time_to_event)
+    cell_idx = sample.cell_idx
+    cell_file = sample.hdf5_path
+    length = to_numpy(sample.length)
+    landmark_frame = to_numpy(sample.landmark_frame)
     if length is None or (isinstance(length, np.ndarray) and length.size == 0):
         length = len(features)
     elif isinstance(length, np.ndarray):
         length = int(length.item())
     else:
         length = int(length)
-    event_indicator = to_numpy(sample['event_indicator'])
+    event_indicator = to_numpy(sample.event_indicator)
     if isinstance(event_indicator, np.ndarray):
         event_indicator = event_indicator.item()
 
@@ -56,12 +70,19 @@ def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights=None, fe
     # Adjust layout based on whether we have attention weights
     if attn_weights is not None:
         fig = plt.figure(figsize=(14, 6))
-        gs = fig.add_gridspec(2, 2, width_ratios=[2, 1], height_ratios=[1, 1.2])
+        gs = fig.add_gridspec(2,
+                              2,
+                              width_ratios=[2, 1],
+                              height_ratios=[1, 1.2])
 
         # ====== (1) Attention Values ======
         attn_weights_trimmed = attn_weights[padding_slice]
         ax_att = fig.add_subplot(gs[0, 0])
-        ax_att.scatter(np.arange(length), attn_weights_trimmed, color='k', marker='o', label='Attention Weights')
+        ax_att.scatter(np.arange(length),
+                       attn_weights_trimmed,
+                       color='k',
+                       marker='o',
+                       label='Attention Weights')
         ax_att.set_ylabel("Attention")
 
         # ===== (2) Features =====
@@ -75,7 +96,11 @@ def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights=None, fe
     # ===== Features =====
     features = features[:length, :]
     for f_idx in range(features.shape[1]):
-        ax_feat.plot(np.arange(start_frame, start_frame+length), features[:, f_idx], label=(feature_names[f_idx] if feature_names else f"F{f_idx}"), alpha=0.7)
+        ax_feat.plot(
+            np.arange(start_frame, start_frame + length),
+            features[:, f_idx],
+            label=(feature_names[f_idx] if feature_names else f"F{f_idx}"),
+            alpha=0.7)
 
     ax_feat.set_xlabel("Time / frames")
     ax_feat.set_ylabel("Features")
@@ -89,7 +114,8 @@ def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights=None, fe
         ax_sd = fig.add_subplot(gs[0, 1])
     abs_bin_edges = bin_edges + landmark_frame
     bin_widths = np.diff(abs_bin_edges)
-    bin_widths[-1] = bin_widths[-2]  # make last bin same width for visualization
+    bin_widths[-1] = bin_widths[
+        -2]  # make last bin same width for visualization
 
     ax_sd.bar(
         abs_bin_edges[:-1],
@@ -112,13 +138,19 @@ def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights=None, fe
             edgecolor='k',
             alpha=0.5,
             label='True PMF',
-            )
+        )
 
     abs_event_time = time_to_event + landmark_frame
     if event_indicator == 1:
-        ax_sd.axvline(abs_event_time, color='red', linestyle='--', label="Event Time")
+        ax_sd.axvline(abs_event_time,
+                      color='red',
+                      linestyle='--',
+                      label="Event Time")
     else:
-        ax_sd.axvline(abs_event_time, color='orange', linestyle='--', label="Censoring Time")
+        ax_sd.axvline(abs_event_time,
+                      color='orange',
+                      linestyle='--',
+                      label="Censoring Time")
 
     # ax_sd.set_title(f"Predicted Survival Distribution {cell_idx}, {cell_file}")
     ax_sd.set_xlabel("Time / frames")
@@ -128,7 +160,8 @@ def visualise_prediction(sample, predicted_pmf, bin_edges, attn_weights=None, fe
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.close(fig)
-        
+
+
 def plot_cm(cm, save_path) -> None:
     cm_normalised = cm.astype(float) / cm.sum(axis=1, keepdims=True)
 
@@ -182,7 +215,8 @@ def plot_soft_confusion_matrix(pred_pmfs, true_bins, save_path=None) -> None:
     # Labels
     ax.set_xlabel('Predicted Time Bin', fontsize=12)
     ax.set_ylabel('True Time Bin', fontsize=12)
-    ax.set_title('Soft Confusion Matrix\n(Average Predicted PMF by True Bin)', fontsize=14)
+    ax.set_title('Soft Confusion Matrix\n(Average Predicted PMF by True Bin)',
+                 fontsize=14)
 
     # Set ticks
     ax.set_xticks(np.arange(num_bins))
@@ -194,9 +228,14 @@ def plot_soft_confusion_matrix(pred_pmfs, true_bins, save_path=None) -> None:
     for i in range(num_bins):
         for j in range(num_bins):
             if counts[i] > 0:
-                text = ax.text(j, i, f'{soft_cm[i, j]:.2f}',
-                             ha="center", va="center", color="black" if soft_cm[i, j] < 0.5 else "white",
-                             fontsize=8)
+                text = ax.text(j,
+                               i,
+                               f'{soft_cm[i, j]:.2f}',
+                               ha="center",
+                               va="center",
+                               color="black" if soft_cm[i,
+                                                        j] < 0.5 else "white",
+                               fontsize=8)
 
     plt.tight_layout()
 
@@ -205,7 +244,10 @@ def plot_soft_confusion_matrix(pred_pmfs, true_bins, save_path=None) -> None:
         plt.close(fig)
 
 
-def plot_calibration_curve(pred_pmfs, true_bins, num_bins, save_path=None) -> None:
+def plot_calibration_curve(pred_pmfs,
+                           true_bins,
+                           num_bins,
+                           save_path=None) -> None:
     """
     Calibration curve showing predicted vs empirical probabilities.
     Checks if predicted probabilities match actual frequencies.
@@ -240,12 +282,12 @@ def plot_calibration_curve(pred_pmfs, true_bins, num_bins, save_path=None) -> No
     bin_counts = []
 
     for i in range(num_prob_bins):
-        mask = (pred_probs >= prob_bins[i]) & (pred_probs < prob_bins[i+1])
+        mask = (pred_probs >= prob_bins[i]) & (pred_probs < prob_bins[i + 1])
         if i == num_prob_bins - 1:  # Include right edge
             mask |= (pred_probs == 1.0)
 
         if mask.sum() > 0:
-            bin_centers.append((prob_bins[i] + prob_bins[i+1]) / 2)
+            bin_centers.append((prob_bins[i] + prob_bins[i + 1]) / 2)
             empirical_freqs.append(outcomes[mask].mean())
             bin_counts.append(mask.sum())
 
@@ -256,17 +298,27 @@ def plot_calibration_curve(pred_pmfs, true_bins, num_bins, save_path=None) -> No
     ax.plot([0, 1], [0, 1], 'k--', label='Perfect calibration', linewidth=2)
 
     # Actual calibration
-    ax.scatter(bin_centers, empirical_freqs, s=[c/10 for c in bin_counts],
-              alpha=0.6, color='tab:blue', edgecolors='black', linewidths=1,
-              label='Model calibration')
+    ax.scatter(bin_centers,
+               empirical_freqs,
+               s=[c / 10 for c in bin_counts],
+               alpha=0.6,
+               color='tab:blue',
+               edgecolors='black',
+               linewidths=1,
+               label='Model calibration')
 
     # Connect with line
     if len(bin_centers) > 1:
-        ax.plot(bin_centers, empirical_freqs, 'tab:blue', alpha=0.5, linewidth=1)
+        ax.plot(bin_centers,
+                empirical_freqs,
+                'tab:blue',
+                alpha=0.5,
+                linewidth=1)
 
     ax.set_xlabel('Predicted Probability', fontsize=12)
     ax.set_ylabel('Empirical Frequency', fontsize=12)
-    ax.set_title('Calibration Curve\n(bubble size = number of predictions)', fontsize=14)
+    ax.set_title('Calibration Curve\n(bubble size = number of predictions)',
+                 fontsize=14)
     ax.legend()
     ax.grid(True, alpha=0.3)
     ax.set_xlim(-0.05, 1.05)
@@ -280,7 +332,26 @@ def plot_calibration_curve(pred_pmfs, true_bins, num_bins, save_path=None) -> No
         plt.close(fig)
 
 
-def plot_pmf_comparison_grid(pred_pmfs, true_pmfs, true_bins, bin_edges, num_examples=16, save_path=None) -> None:
+def plot_brier_scores(brier_times, brier_scores, save_path=None) -> None:
+    """Plot Brier scores over time."""
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(brier_times, brier_scores, marker='o', color='tab:blue')
+    ax.set_xlabel('Time', fontsize=12)
+    ax.set_ylabel('Brier Score', fontsize=12)
+    ax.set_title('Brier Score over Time', fontsize=14)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+
+
+def plot_pmf_comparison_grid(pred_pmfs,
+                             true_pmfs,
+                             true_bins,
+                             bin_edges,
+                             num_examples=16,
+                             save_path=None) -> None:
     """
     Grid of example predictions showing predicted vs true PMFs.
 
@@ -306,8 +377,9 @@ def plot_pmf_comparison_grid(pred_pmfs, true_pmfs, true_bins, bin_edges, num_exa
         bin_indices = np.where(bin_mask)[0]
         if len(bin_indices) > 0:
             selected = np.random.choice(bin_indices,
-                                       size=min(examples_per_bin, len(bin_indices)),
-                                       replace=False)
+                                        size=min(examples_per_bin,
+                                                 len(bin_indices)),
+                                        replace=False)
             selected_indices.extend(selected)
 
     selected_indices = selected_indices[:num_examples]
@@ -316,7 +388,7 @@ def plot_pmf_comparison_grid(pred_pmfs, true_pmfs, true_bins, bin_edges, num_exa
     ncols = 4
     nrows = (num_examples + ncols - 1) // ncols
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=(16, 4*nrows))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(16, 4 * nrows))
     axes = axes.flatten() if num_examples > 1 else [axes]
 
     num_bins = pred_pmfs.shape[1]
@@ -326,26 +398,43 @@ def plot_pmf_comparison_grid(pred_pmfs, true_pmfs, true_bins, bin_edges, num_exa
         ax = axes[plot_idx]
 
         # Plot bars
-        ax.bar(bin_edges[:-1], pred_pmfs[sample_idx], width=bin_widths,
-              align='edge', alpha=0.6, color='tab:blue', edgecolor='black',
-              label='Predicted PMF')
+        ax.bar(bin_edges[:-1],
+               pred_pmfs[sample_idx],
+               width=bin_widths,
+               align='edge',
+               alpha=0.6,
+               color='tab:blue',
+               edgecolor='black',
+               label='Predicted PMF')
 
         if true_pmfs is not None:
-            ax.bar(bin_edges[:-1], true_pmfs[sample_idx], width=bin_widths,
-                  align='edge', alpha=0.4, color='tab:red', edgecolor='black',
-                  label='True PMF')
+            ax.bar(bin_edges[:-1],
+                   true_pmfs[sample_idx],
+                   width=bin_widths,
+                   align='edge',
+                   alpha=0.4,
+                   color='tab:red',
+                   edgecolor='black',
+                   label='True PMF')
 
         # True event time
         true_time = bin_edges[true_bins[sample_idx]]
-        ax.axvline(true_time, color='red', linestyle='--', linewidth=2, label='True event')
+        ax.axvline(true_time,
+                   color='red',
+                   linestyle='--',
+                   linewidth=2,
+                   label='True event')
 
         ax.set_xlabel('Time')
         ax.set_ylabel('Probability')
         ax.set_title(f'Sample {sample_idx} (true bin {true_bins[sample_idx]})')
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
-        ax.set_ylim(0, max(pred_pmfs[sample_idx].max(),
-                          true_pmfs[sample_idx].max() if true_pmfs is not None else 0) * 1.1)
+        ax.set_ylim(
+            0,
+            max(pred_pmfs[sample_idx].max(),
+                true_pmfs[sample_idx].max() if true_pmfs is not None else 0) *
+            1.1)
 
     # Hide unused subplots
     for plot_idx in range(len(selected_indices), len(axes)):
@@ -359,7 +448,10 @@ def plot_pmf_comparison_grid(pred_pmfs, true_pmfs, true_bins, bin_edges, num_exa
         plt.close(fig)
 
 
-def plot_spread_analysis(pred_pmfs, true_pmfs, true_bins, save_path=None) -> None:
+def plot_spread_analysis(pred_pmfs,
+                         true_pmfs,
+                         true_bins,
+                         save_path=None) -> None:
     """
     Analyze and visualize the spread (entropy/variance) of predictions.
 
@@ -371,6 +463,7 @@ def plot_spread_analysis(pred_pmfs, true_pmfs, true_bins, save_path=None) -> Non
 
     This answers: "Is the model producing appropriately spread-out distributions?"
     """
+
     def compute_entropy(pmfs):
         """Compute Shannon entropy for each PMF"""
         eps = 1e-8
@@ -397,9 +490,19 @@ def plot_spread_analysis(pred_pmfs, true_pmfs, true_bins, save_path=None) -> Non
 
     # 1. Entropy distribution
     ax1 = fig.add_subplot(gs[0, 0])
-    ax1.hist(pred_entropy, bins=30, alpha=0.6, color='tab:blue', label='Predicted', density=True)
+    ax1.hist(pred_entropy,
+             bins=30,
+             alpha=0.6,
+             color='tab:blue',
+             label='Predicted',
+             density=True)
     if true_pmfs is not None:
-        ax1.hist(true_entropy, bins=30, alpha=0.6, color='tab:red', label='True', density=True)
+        ax1.hist(true_entropy,
+                 bins=30,
+                 alpha=0.6,
+                 color='tab:red',
+                 label='True',
+                 density=True)
     ax1.set_xlabel('Entropy (nats)', fontsize=11)
     ax1.set_ylabel('Density', fontsize=11)
     ax1.set_title('PMF Entropy Distribution', fontsize=12)
@@ -408,9 +511,19 @@ def plot_spread_analysis(pred_pmfs, true_pmfs, true_bins, save_path=None) -> Non
 
     # 2. Standard deviation distribution
     ax2 = fig.add_subplot(gs[0, 1])
-    ax2.hist(pred_std, bins=30, alpha=0.6, color='tab:blue', label='Predicted', density=True)
+    ax2.hist(pred_std,
+             bins=30,
+             alpha=0.6,
+             color='tab:blue',
+             label='Predicted',
+             density=True)
     if true_pmfs is not None:
-        ax2.hist(true_std, bins=30, alpha=0.6, color='tab:red', label='True', density=True)
+        ax2.hist(true_std,
+                 bins=30,
+                 alpha=0.6,
+                 color='tab:red',
+                 label='True',
+                 density=True)
     ax2.set_xlabel('Standard Deviation (bins)', fontsize=11)
     ax2.set_ylabel('Density', fontsize=11)
     ax2.set_title('PMF Spread Distribution', fontsize=12)
@@ -432,9 +545,21 @@ def plot_spread_analysis(pred_pmfs, true_pmfs, true_bins, save_path=None) -> Non
             if true_pmfs is not None:
                 bin_stds_true.append(true_std[mask].mean())
 
-    ax3.plot(bin_means, bin_stds_pred, 'o-', color='tab:blue', label='Predicted', linewidth=2, markersize=8)
+    ax3.plot(bin_means,
+             bin_stds_pred,
+             'o-',
+             color='tab:blue',
+             label='Predicted',
+             linewidth=2,
+             markersize=8)
     if true_pmfs is not None:
-        ax3.plot(bin_means, bin_stds_true, 'o-', color='tab:red', label='True', linewidth=2, markersize=8)
+        ax3.plot(bin_means,
+                 bin_stds_true,
+                 'o-',
+                 color='tab:red',
+                 label='True',
+                 linewidth=2,
+                 markersize=8)
     ax3.set_xlabel('True Time Bin', fontsize=11)
     ax3.set_ylabel('Average Std Dev (bins)', fontsize=11)
     ax3.set_title('Spread vs True Bin', fontsize=12)
@@ -446,7 +571,125 @@ def plot_spread_analysis(pred_pmfs, true_pmfs, true_bins, save_path=None) -> Non
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.close(fig)
-        
+
+
+def plot_roc_curve(fpr, tpr, auc_score, save_path=None) -> None:
+    """Plot ROC curve for binary classification."""
+    fig, ax = plt.subplots(figsize=(7, 7))
+    ax.plot(fpr,
+            tpr,
+            color='tab:blue',
+            linewidth=2,
+            label=f'ROC (AUC = {auc_score:.3f})')
+    ax.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random')
+    ax.set_xlabel('False Positive Rate', fontsize=12)
+    ax.set_ylabel('True Positive Rate', fontsize=12)
+    ax.set_title('ROC Curve', fontsize=14)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim(-0.02, 1.02)
+    ax.set_ylim(-0.02, 1.02)
+    ax.set_aspect('equal')
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+
+
+def plot_binary_cm(cm, labels=('No Event', 'Event'), save_path=None) -> None:
+    """Plot a 2×2 binary confusion matrix."""
+    cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True).clip(min=1)
+    fig, ax = plt.subplots(figsize=(6, 5))
+    sns.heatmap(cm_norm,
+                annot=True,
+                fmt='.2f',
+                cmap='Blues',
+                xticklabels=labels,
+                yticklabels=labels,
+                ax=ax)
+    ax.set_xlabel('Predicted', fontsize=11)
+    ax.set_ylabel('True', fontsize=11)
+    ax.set_title('Confusion Matrix (row-normalised)', fontsize=13)
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+
+
+def visualise_binary_prediction(sample: BinaryCellSample,
+                                pred_prob: float,
+                                feature_names=None,
+                                save_path=None,
+                                start_frame=0) -> None:
+    """
+    Plot observed features and a predicted binary event probability.
+
+    Args:
+        sample: dict with 'features', 'binary_label', 'length'
+        pred_prob: scalar predicted probability of event
+        feature_names: list of feature names
+        save_path: path to save figure
+        start_frame: first frame index for x-axis
+    """
+
+    log.info(
+        f'Visualising binary prediction, predicted_probability {pred_prob}')
+
+    def to_numpy(x):
+        if x is None:
+            return None
+        if hasattr(x, 'cpu'):
+            return x.cpu().numpy()
+        return np.array(x)
+
+    features = to_numpy(sample.features)
+    binary_label = int(sample.event)
+    length = int(sample.length)
+    length = int(length)
+    features = features[:length, :]
+
+    fig, (ax_feat,
+          ax_prob) = plt.subplots(1,
+                                  2,
+                                  figsize=(14, 4),
+                                  gridspec_kw={'width_ratios': [2, 1]})
+
+    # Features
+    for f_idx in range(features.shape[1]):
+        label = feature_names[f_idx] if feature_names else f'F{f_idx}'
+        ax_feat.plot(np.arange(start_frame, start_frame + length),
+                     features[:, f_idx],
+                     label=label,
+                     alpha=0.7)
+    ax_feat.set_xlabel('Time / frames')
+    ax_feat.set_ylabel('Features')
+    ax_feat.legend(fontsize=8, ncol=2)
+    ax_feat.grid(True)
+
+    # Probability bar
+    colors = [
+        'tab:green' if pred_prob < 0.5 else 'tab:red',
+        'tab:red' if pred_prob >= 0.5 else 'tab:green'
+    ]
+    ax_prob.bar([0, 1], [1 - pred_prob, pred_prob],
+                color=colors,
+                edgecolor='k',
+                alpha=0.7)
+    ax_prob.axhline(0.5, color='grey', linestyle='--', linewidth=1)
+    ax_prob.set_xticks([0, 1])
+    ax_prob.set_xticklabels(['No Event', 'Event'])
+    ax_prob.set_ylim(0, 1)
+    ax_prob.set_ylabel('Predicted Probability')
+    true_str = 'Event' if binary_label == 1 else 'No Event'
+    ax_prob.set_title(f'True: {true_str}  |  P(event) = {pred_prob:.2f}')
+    ax_prob.grid(True, axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+
+
 def plot_losses(loss_history, save_path) -> None:
     """
     Plot training and validation losses
@@ -472,14 +715,23 @@ def plot_losses(loss_history, save_path) -> None:
         if lt == 'total':
             continue
         # Check if loss is non-zero in any epoch
-        if any(train_losses[lt][i] > 0 or val_losses[lt][i] > 0 for i in range(len(epochs))):
+        if any(train_losses[lt][i] > 0 or val_losses[lt][i] > 0
+               for i in range(len(epochs))):
             active_loss_types.append(lt)
 
     plt.figure(figsize=(10, 6))
 
     def plot_loss(ax, lt, colour):
-        ax.plot(epochs, train_losses[lt], label=f'{lt.capitalize()} train loss', color=colour, linestyle='-')
-        ax.plot(epochs, val_losses[lt], label=f'{lt.capitalize()} validation', color=colour, linestyle='--')
+        ax.plot(epochs,
+                train_losses[lt],
+                label=f'{lt.capitalize()} train loss',
+                color=colour,
+                linestyle='-')
+        ax.plot(epochs,
+                val_losses[lt],
+                label=f'{lt.capitalize()} validation',
+                color=colour,
+                linestyle='--')
         ax.set_xlabel("Epoch")
         ax.set_ylabel(f"{lt} Loss")
         ax.set_title(f"{lt} Loss over Epochs")
@@ -496,12 +748,8 @@ def plot_losses(loss_history, save_path) -> None:
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.legend()
-    plt.grid=True
+    plt.grid = True
     plt.title("Training and Validation Losses over Epochs")
     if save_path:
         plt.savefig(save_path, dpi=150)
         plt.close()
-    
-    
-    
-    

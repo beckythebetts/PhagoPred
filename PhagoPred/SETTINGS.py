@@ -2,19 +2,20 @@ from pathlib import Path
 import h5py
 
 try:
-# ******* GENERAL *******
+    # ******* GENERAL *******
     # DATASET = Path('PhagoPred')/'Datasets'/'secondwithlight - Copy.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_short_seg_test.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'24_06.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_2500.h5'
-    DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_5min.h5'
+    # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_5min.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_10min.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / 'old' / '03_10_2500.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/ 'Prelims' / '16_09_3.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_500.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/ 'Prelims' / '16_09_1_no_overlaps.h5'
-
+    # DATASET = Path('~/thor_server/24_02/24_02_D.h5').expanduser()
+    DATASET = Path('PhagoPred') / 'Datasets' / '10_02_26_1_short.h5'
     with h5py.File(DATASET, 'r') as f:
         NUM_FRAMES = f['Images'].attrs['Number of frames']
         IMAGE_SIZE = f['Images'].attrs['Image size / pixels']
@@ -30,13 +31,15 @@ except:
 # DATASET = Path('PhagoPred')/'Datasets'/'mac_short_seg.h5'
 # MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'mac_20x'
 
-MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / '16_02_26'
+MASK_RCNN_MODEL = Path(
+    "PhagoPred") / 'detectron_segmentation' / 'models' / '16_02_26'
 CELLPOSE_MODEL = Path("PhagoPred") / 'cellpose_segmentation' / 'Models' / 'ash'
 UNET_MODEL = Path("PhagoPred") / 'unet_segmentation' / 'models' / '20x_flir_8'
 TRAINING_DATA = Path("PhagoPred") / 'segmentation' / 'models' / '20x_flir_8'
 CLASSES = {'phase': 'Amoeba', 'epi': 'Yeast'}
 REMOVE_EDGE_CELLS = True
-UMAP_MODEL = Path('PhagoPred') / 'feature_extraction' / 'morphology' / 'UMAP_model.pickle'
+UMAP_MODEL = Path(
+    'PhagoPred') / 'feature_extraction' / 'morphology' / 'UMAP_model.pickle'
 
 # MODEL_IMAGE_SIZE = [5472, 3648]
 
@@ -45,13 +48,12 @@ THRESHOLD = 250
 
 # ******* TRACKING *******
 MAXIMUM_DISTANCE_THRESHOLD = 60
-FRAME_MEMORY = 5
+FRAME_MEMORY = 3
 CLEAN_TRACKS = True
-MINIMUM_TRACK_LENGTH = 25
+MINIMUM_TRACK_LENGTH = 5
 
-
-VIEW_TRACKS = True # Save labelled tracked images
-NUM_FRAMES_TO_VIEW = 50 # Set as None to view all (slow)
+VIEW_TRACKS = True  # Save labelled tracked images
+NUM_FRAMES_TO_VIEW = 50  # Set as None to view all (slow)
 
 # ******* FEATURE EXTRACTION *******
 NUM_TRAINING_FRAMES = 50
@@ -59,14 +61,12 @@ NUM_CONTOUR_POINTS = 50
 PCA_COMPONENTS = 10
 KMEANS_CLUSTERS = 12
 
-
 BATCH_SIZE = 5
 PLOT_FEATURES = False
 TRACKS_PLOT = True
 SHOW_EATING = True
 NUM_FRAMES_EATEN_THRESHOLD = 10
 MINIMUM_PIXELS_PER_PATHOGEN = 10
-
 
 # ******* MASK R-CNN MODEL TRAINING DIRECTORY STRUCTURE *******
 # - 'Models'

@@ -6,15 +6,13 @@ import torch.nn as nn
 from abc import ABC, abstractmethod
 
 
-def build_fc_layers(
-    input_size: int,
-    output_size: int,
-    layer_sizes: list[int] = [],
-    dropout: float = 0.0,
-    activation = nn.ReLU,
-    batch_norm: bool = False,
-    final_layer_activation: bool = False
-) -> nn.Sequential:
+def build_fc_layers(input_size: int,
+                    output_size: int,
+                    layer_sizes: list[int] = [],
+                    dropout: float = 0.0,
+                    activation=nn.ReLU,
+                    batch_norm: bool = False,
+                    final_layer_activation: bool = False) -> nn.Sequential:
     """
     Build fully-connected layers with optional batch norm and dropout.
     """
@@ -48,13 +46,11 @@ class SurvivalModel(nn.Module, ABC):
         self.num_bins = num_bins
 
     @abstractmethod
-    def forward(
-        self,
-        x: torch.Tensor,
-        lengths: torch.Tensor,
-        return_attention: bool = False,
-        mask: torch.Tensor = None
-    ):
+    def forward(self,
+                x: torch.Tensor,
+                lengths: torch.Tensor,
+                return_attention: bool = False,
+                mask: torch.Tensor = None):
         """
         Forward pass.
 
@@ -72,6 +68,8 @@ class SurvivalModel(nn.Module, ABC):
 
     def predict_pmf(self, outputs: torch.Tensor) -> torch.Tensor:
         """Convert raw outputs to probability mass function."""
+        assert outputs.shape[
+            1] == self.num_bins, "Output shape does not match num_bins"
         return torch.nn.functional.softmax(outputs, dim=1)
 
     def predict_cif(self, outputs: torch.Tensor) -> torch.Tensor:
@@ -94,3 +92,11 @@ class SurvivalModel(nn.Module, ABC):
         pmf = self.predict_pmf(outputs)
         time_bins = torch.arange(self.num_bins, device=pmf.device).float()
         return (pmf * time_bins).sum(dim=1)
+
+    def predict_binary(self, outputs: torch.Tensor) -> torch.Tensor:
+        """Predict binary outcome (event within time horizon) from raw outputs.
+        Sigmoid applied
+        """
+        assert self.num_bins == 1, "Binary prediction only valid for num_bins=1"
+        binary_prediction = torch.nn.functional.sigmoid(outputs)
+        return binary_prediction

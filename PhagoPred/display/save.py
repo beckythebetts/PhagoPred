@@ -8,6 +8,7 @@ from pathlib import Path
 import os
 from PIL import Image
 import pycocotools
+from tqdm import tqdm
 
 
 from PhagoPred import SETTINGS
@@ -45,13 +46,13 @@ def save_tracked_images(dir, first_frame=0, last_frame=50):
     # LUT[0] = torch.tensor([0, 0, 0]).to(device)
     rgb_phase = np.stack((phase_data, phase_data, phase_data), axis=-1)
     # tracked = np.zeros(rgb_phase.shape)
-    for i, (phase_image, segmentation) in enumerate(
-            zip(rgb_phase, segmentation_data)):
+    for i, (phase_image, segmentation) in tqdm(enumerate(
+            zip(rgb_phase, segmentation_data))):
         segmentation = torch.tensor(segmentation).to(device)
         phase_image = torch.tensor(phase_image, dtype=torch.uint8).to(device)
-        sys.stdout.write(
-            f'\rFrame {i + 1}')
-        sys.stdout.flush()
+        # sys.stdout.write(
+        #     f'\rFrame {i + 1}')
+        # sys.stdout.flush()
         outlines = mask_funcs.mask_outlines(segmentation, thickness=3).type(torch.int64)
         colour_outlines = (LUT[outlines]).type(torch.uint8)
         outlined_phase_image =  (torch.where(outlines.unsqueeze(-1).expand_as(colour_outlines)>0, colour_outlines, phase_image))
@@ -61,7 +62,7 @@ def save_tracked_images(dir, first_frame=0, last_frame=50):
 
 
 
-def save_cell_images(dir, cell_idx, first_frame=0, last_frame=10, frame_size=150, as_gif=False):
+def save_cell_images(dir, cell_idx, first_frame=0, last_frame=10, frame_size=300, as_gif=False):
     """For a specified cell index, save {frame_size} x {frame_size} pixel images centred on the cell centre for the specified frames.
     Cell will be outlined in yellow, with fluorescence overlayed in red.
     """
@@ -74,20 +75,22 @@ def save_cell_images(dir, cell_idx, first_frame=0, last_frame=10, frame_size=150
         x_centres, y_centres = f['Cells']['Phase']['X'][first_frame:last_frame, cell_idx], f['Cells']['Phase']['Y'][first_frame:last_frame, cell_idx]
         x_centres, y_centres = tools.fill_nans(x_centres), tools.fill_nans(y_centres)
 
-        for idx, frame in enumerate(range(first_frame, last_frame)):
+        for idx, frame in tqdm(enumerate(range(first_frame, last_frame)), total=last_frame-first_frame):
             ymin, ymax, xmin, xmax = mask_funcs.get_crop_indices((y_centres[idx], x_centres[idx]), frame_size, SETTINGS.IMAGE_SIZE)
             phase_data[idx] = np.array(f['Images']['Phase'][frame])[xmin:xmax, ymin:ymax]
-            epi_data[idx] = (f['Images']['Epi'][frame][xmin:xmax, ymin:ymax])
+            # epi_data[idx] = (f['Images']['Epi'][frame][xmin:xmax, ymin:ymax])
             mask[idx] = f['Segmentations']['Phase'][frame][xmin:xmax, ymin:ymax]
             cell_mask = (mask == cell_idx)
 
     if not cell_mask.any():
         raise Exception(f'Cell of index {cell_idx} not found')
     
-    epi_data = tools.threshold_image(epi_data)
+    # epi_data = tools.threshold_image(epi_data)
     cell_outline = mask_funcs.mask_outline(torch.tensor(cell_mask).byte().to(device), thickness=2).cpu().numpy()
-
+    epi_data = np.zeros_like(phase_data)
     merged_im = tools.overlay_red_on_gray(phase_data, epi_data, normalize=False)
+    # merged_im = cell_outline[..., np.newaxis]
+    # merged_im = np.concatenate([merged_im, merged_im, merged_im], axis=-1)
     merged_im[...,0][cell_outline] = 255
     merged_im[..., 1][cell_outline] = 255
 
@@ -104,8 +107,8 @@ def save_cell_images(dir, cell_idx, first_frame=0, last_frame=10, frame_size=150
 #     with h5py.File(SETTINGS.DATASET, 'r') as f
 
 def main():
-    save_tracked_images(Path('temp/view'), 3000, 3100)
-    save_cell_images(Path('temp'), 0, 1, 1000, as_gif=True)
+    # save_tracked_images(Path('temp/view'), 0, 50)
+    save_cell_images(Path('temp'), 60, 0, 100, as_gif=True)
     # save_cell_images(Path(r'C:\Users\php23rjb\Downloads\temp') / 'test_track', cell_idx=347, first_frame=0, last_frame=50)
     # save_masks(Path('secondwithlight_masks'), 0, SETTINGS.NUM_FRAMES)
 if __name__ == '__main__':

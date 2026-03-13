@@ -4,12 +4,12 @@ Provides common interface for sklearn-style models.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Union
 import numpy as np
 import torch
 import pickle
 
-from PhagoPred.survival_v2.data import TemporalSummary, CellDataset
+from PhagoPred.survival_v2.data import TemporalSummary, CellDataset, BinaryTemporalSummaryDataset, SurvivalTemopralSummaryDataset
 
 
 class ClassicalSurvivalModel(ABC):
@@ -24,13 +24,11 @@ class ClassicalSurvivalModel(ABC):
         - _predict_proba(X): Predict PMF over time bins
     """
 
-    def __init__(
-        self,
-        num_bins: int,
-        window_sizes: List[int] = None,
-        feature_names: List[str] = None,
-        **kwargs
-    ):
+    def __init__(self,
+                 num_bins: int,
+                 window_sizes: List[int] = None,
+                 feature_names: List[str] = None,
+                 **kwargs):
         """
         Initialize the classical survival model.
 
@@ -43,57 +41,70 @@ class ClassicalSurvivalModel(ABC):
             **kwargs: Additional arguments passed to subclass
         """
         self.num_bins = num_bins
+
+        self.binary = True if num_bins == 1 else False
         self.window_sizes = window_sizes
         self.input_feature_names = feature_names
 
         self.temporal_summariser = TemporalSummary(
-            window_sizes=self.window_sizes
-        )
+            window_sizes=self.window_sizes)
 
         self._is_fitted = False
         self.model = None
-        
+
         self.test_data = None
-    
-    def get_temporal_summary(self, dataset: CellDataset) -> Dict:
-         return self.temporal_summariser.convert_ds(dataset)
 
+    def get_temporal_summary(
+        self, dataset: CellDataset
+    ) -> Union[BinaryTemporalSummaryDataset, SurvivalTemopralSummaryDataset]:
+        """Get tempororal summary veriosn of dataset."""
+        return self.temporal_summariser.convert_ds(dataset)
 
-    def fit(self, dataset: Union[CellDataset, torch.utils.data.DataLoader], device: str='cpu') -> Dict:
+    def fit(self,
+            dataset: Union[CellDataset, torch.utils.data.DataLoader],
+            device: str = 'cpu') -> Dict:
         """Fit model from CellDataset"""
         if isinstance(dataset, torch.utils.data.DataLoader):
             dataset = dataset.dataset
-        temporal_summary_features = self.get_temporal_summary(dataset)
-        return self._fit_model(temporal_summary_features)
-    
+        temporal_summary_dataset = self.get_temporal_summary(dataset)
+        return self._fit_model(temporal_summary_dataset)
+
     @abstractmethod
-    def _fit_model(self, train_data: dict) -> Dict:
+    def _fit_model(
+        self, dataset: Union[BinaryTemporalSummaryDataset,
+                             SurvivalTemopralSummaryDataset]
+    ) -> Dict:
         pass
-    
-    # def setTestData(self, dataset: Union[CellDataset, torch.utils.data.DataLoader]):
-    #     """Set test data for model, if needed for prediction."""
-    #     if isinstance(dataset, torch.utils.data.DataLoader):
-    #         dataset = dataset.dataset
-    #     self.test_data = self.get_temporal_summary(dataset)
-        
-    def predict_pmfs(self, dataset: dict) -> np.ndarray:
-        """Predict ouput pmf from model
+
+    def predict(
+        self, dataset: Union[BinaryTemporalSummaryDataset,
+                             SurvivalTemopralSummaryDataset]
+    ) -> np.ndarray:
+        """Predict ouput pmf/event probabilities from model
         
         Return:
-            pmf [samples, output_bins]
+            pmfs [samples, output_bins] (if survival model)
+            probabilities [samples] (if binary model)
         """
-        return self._predict_pmfs(dataset['features'])
-    
+        predictions = self._predict(dataset.temporal_summary_features)
+        if self.binary:
+            predictions = predictions[:, 0]
+        return predictions
+
     @abstractmethod
-    def _predict_pmfs(self, input_features: np.ndarray) -> np.ndarray:
+    def _predict(self, input_features: np.ndarray) -> np.ndarray:
         pass
-    
+
+    # @abstractmethod
+    # def _predict_binary(self, input_features: np.ndarray) -> np.ndarray:
+    #     pass
+
     # def predict_cif(self, dataset: Union[CellDataset, dict, np.ndarray]) -> np.ndarray:
     #     return np.cumsum(self.predict_pmfs(dataset), axis=-1)
-    
+
     # def predict_survival(self, dataset: Union[CellDataset, dict, np.ndarray]) -> np.ndarray:
     #     return 1.0 - self.predict_cif(dataset)
-    
+
     # def predict_expected_survival_time(self, dataset: Union[CellDataset, dict, np.ndarray]) -> np.ndarray:
     #     pmf = self.predict_pmfs(dataset)
     #     bins = np.arange(self.num_bins)
@@ -105,7 +116,7 @@ class ClassicalSurvivalModel(ABC):
 
     def save(self, path: str) -> None:
         """Save the model to disk."""
-        
+
         with open(path, 'wb') as f:
             pickle.dump(self, f)
 
@@ -114,27 +125,3 @@ class ClassicalSurvivalModel(ABC):
         """Load a model from disk."""
         with open(path, 'rb') as f:
             return pickle.load(f)
-
-    def __call__(
-        self,
-        x: Union[np.ndarray, torch.Tensor],
-        lengths: Union[np.ndarray, torch.Tensor],
-        return_attention: bool = False,
-        mask: Optional[Union[np.ndarray, torch.Tensor]] = None
-    ) -> Union[np.ndarray, Tuple[np.ndarray, None]]:
-        """
-        Make model callable like PyTorch models.
-
-        Args:
-            x: Sequences of shape (batch, seq_len, num_features)
-            lengths: Valid lengths for each sequence (batch,)
-            return_attention: If True, return (pmf, None) - attention not supported
-            mask: Unused, kept for API compatibility
-
-        Returns:
-            PMF predictions, or (PMF, None) if return_attention=True
-        """
-        pmf = self.predict_pmfs(x, lengths)
-        if return_attention:
-            return pmf, None
-        return pmf

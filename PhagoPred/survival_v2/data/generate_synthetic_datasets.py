@@ -24,6 +24,14 @@ dataset_configs = {
         'seed': 42,
     },
 
+    # 'baseline_large': {
+    #     'num_cells': 20000,
+    #     'num_frames': 1000,
+    #     'noise_level': 0.01,
+    #     'late_entry_prob': 0.0,
+    #     'feature_mask_prob': 0.0,
+    #     'seed': 42,
+    # },
     # # Single rule variants
     # 'single_rule_variation': {
     #     'num_cells': 2000,
@@ -136,7 +144,7 @@ def generate_all_datasets(train_val_split=0.7):
         
         # if train_file.exists():
         #     print(f"Dataset already exists: {train_file}, skipping.")
-        #     return
+        #     continue
             
         print(f"\nCreating training set: {train_file}")
         train_config = config.copy()

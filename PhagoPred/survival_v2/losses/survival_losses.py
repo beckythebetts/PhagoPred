@@ -1,8 +1,8 @@
-"""
-Survival analysis loss functions.
-All losses work with PMF (probability mass function) over discrete time bins.
-"""
 import torch
+
+from PhagoPred.utils.logger import get_logger
+
+log = get_logger()
 
 
 def negative_log_likelihood(
@@ -21,7 +21,7 @@ def negative_log_likelihood(
     Returns:
         tuple: (total_loss, censored_loss, uncensored_loss)
     """
-    batch_size, num_bins = pmf.shape
+    # batch_size, num_bins = pmf.shape
     cif = torch.cumsum(pmf, dim=1)
     eps = 1e-6
 
@@ -30,6 +30,7 @@ def negative_log_likelihood(
 
     # Uncensored events
     uncensored_mask = e == 1
+    # log.info(f'Uncensored Mask: {e.size()}')
     if uncensored_mask.any():
         unc_pmf = pmf[uncensored_mask]
         unc_t = t[uncensored_mask]
@@ -48,7 +49,8 @@ def negative_log_likelihood(
 
         # Survival probability at censoring time (CIF at t-1)
         cens_t = torch.clamp(cens_t - 1, min=0)
-        cens_cif_t = cens_cif[torch.arange(cens_cif.size(0), device=pmf.device), cens_t]
+        cens_cif_t = cens_cif[
+            torch.arange(cens_cif.size(0), device=pmf.device), cens_t]
         survival = 1.0 - cens_cif_t
         survival = torch.clamp(survival, min=eps, max=1.0)
 
@@ -61,12 +63,10 @@ def negative_log_likelihood(
     return total_loss, censored_loss, uncensored_loss
 
 
-def ranking_loss_concordance(
-    pmf: torch.Tensor,
-    t: torch.Tensor,
-    e: torch.Tensor,
-    sigma: float = 0.2
-) -> torch.Tensor:
+def ranking_loss_concordance(pmf: torch.Tensor,
+                             t: torch.Tensor,
+                             e: torch.Tensor,
+                             sigma: float = 0.2) -> torch.Tensor:
     """
     Concordance-based ranking loss using median survival time.
     For pairs (i,j) where t_i < t_j and i is uncensored:
@@ -101,12 +101,10 @@ def ranking_loss_concordance(
     return (comparable * violation).sum() / (comparable.sum() + 1e-8)
 
 
-def ranking_loss_cif(
-    pmf: torch.Tensor,
-    t: torch.Tensor,
-    e: torch.Tensor,
-    sigma: float = 0.2
-) -> torch.Tensor:
+def ranking_loss_cif(pmf: torch.Tensor,
+                     t: torch.Tensor,
+                     e: torch.Tensor,
+                     sigma: float = 0.2) -> torch.Tensor:
     """
     Original DeepHit-style ranking loss using CIF comparison.
     WARNING: May push mass to final bins in single-cause problems.
@@ -146,11 +144,10 @@ def ranking_loss_cif(
 
 
 def soft_target_nll(
-    pmf: torch.Tensor,
-    t: torch.Tensor,
-    e: torch.Tensor,
-    sigma: float = 0.8
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        pmf: torch.Tensor,
+        t: torch.Tensor,
+        e: torch.Tensor,
+        sigma: float = 0.8) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Soft target negative log-likelihood that penalizes by distance from true bin.
     Uses Gaussian-weighted targets centered at the true bin to encourage spread
@@ -197,7 +194,7 @@ def soft_target_nll(
     t_expanded = t.unsqueeze(1).float()  # (batch, 1)
 
     # Gaussian weights
-    soft_targets = torch.exp(-0.5 * ((bins - t_expanded) / sigma) ** 2)
+    soft_targets = torch.exp(-0.5 * ((bins - t_expanded) / sigma)**2)
     soft_targets = soft_targets / soft_targets.sum(dim=1, keepdim=True)
 
     # Uncensored events: cross-entropy with soft targets
@@ -207,7 +204,8 @@ def soft_target_nll(
         unc_targets = soft_targets[uncensored_mask]
 
         # Cross-entropy: -sum(target * log(pred))
-        uncensored_loss = -(unc_targets * torch.log(unc_pmf.clamp(min=eps))).sum(dim=1)
+        uncensored_loss = -(unc_targets *
+                            torch.log(unc_pmf.clamp(min=eps))).sum(dim=1)
         uncensored_loss = uncensored_loss.mean()
     else:
         uncensored_loss = torch.tensor(0.0, device=pmf.device)
@@ -221,7 +219,8 @@ def soft_target_nll(
 
         # Survival probability at censoring time (CIF at t-1)
         cens_t = torch.clamp(cens_t - 1, min=0)
-        cens_cif_t = cens_cif[torch.arange(cens_cif.size(0), device=pmf.device), cens_t]
+        cens_cif_t = cens_cif[
+            torch.arange(cens_cif.size(0), device=pmf.device), cens_t]
         survival = 1.0 - cens_cif_t
         survival = torch.clamp(survival, min=eps, max=1.0)
 
@@ -233,11 +232,9 @@ def soft_target_nll(
     return total_loss, censored_loss, uncensored_loss
 
 
-def prediction_loss(
-    y_pred: torch.Tensor,
-    y_true: torch.Tensor,
-    mask: torch.Tensor = None
-) -> torch.Tensor:
+def prediction_loss(y_pred: torch.Tensor,
+                    y_true: torch.Tensor,
+                    mask: torch.Tensor = None) -> torch.Tensor:
     """
     MSE loss for next-timestep feature prediction (LSTM predictor).
 
@@ -257,7 +254,9 @@ def prediction_loss(
     y_true_shift = y_true[:, 1:, :]
     mask_shift = mask[:, 1:, :]
 
-    mse = torch.nn.functional.mse_loss(y_pred_shift, y_true_shift, reduction='none')
+    mse = torch.nn.functional.mse_loss(y_pred_shift,
+                                       y_true_shift,
+                                       reduction='none')
     masked_loss = mse * mask_shift
 
     return masked_loss.sum() / (mask_shift.sum() + 1e-8)
@@ -328,75 +327,3 @@ LOSS_CONFIGS = {
         'prediction': 0.5
     }
 }
-
-
-def compute_loss(
-    pmf: torch.Tensor,
-    t: torch.Tensor,
-    e: torch.Tensor,
-    y_pred: torch.Tensor = None,
-    y_true: torch.Tensor = None,
-    mask: torch.Tensor = None,
-    loss_config: dict = None
-) -> dict:
-    """
-    Compute combined loss based on configuration.
-
-    Args:
-        pmf: (batch_size, num_bins) - predicted PMF
-        t: (batch_size,) - event/censoring times
-        e: (batch_size,) - event indicators
-        y_pred: predicted features (for prediction loss)
-        y_true: true features (for prediction loss)
-        mask: validity mask
-        loss_config: dict with weights for each loss component
-                     - nll_type: 'standard' or 'soft_target' (default: 'standard')
-                     - soft_target_sigma: spread parameter for soft targets (default: 0.8)
-
-    Returns:
-        dict with 'total', 'nll', 'ranking', 'prediction', 'censored', 'uncensored'
-    """
-    if loss_config is None:
-        loss_config = LOSS_CONFIGS['nll_only']
-
-    # NLL (standard or soft target)
-    nll_type = loss_config.get('nll_type', 'standard')
-    if nll_type == 'soft_target':
-        sigma = loss_config.get('soft_target_sigma', 0.8)
-        nll, censored, uncensored = soft_target_nll(pmf, t, e, sigma=sigma)
-    else:
-        nll, censored, uncensored = negative_log_likelihood(pmf, t, e)
-
-    # Ranking
-    if loss_config.get('ranking', 0.0) > 0:
-        ranking_type = loss_config.get('ranking_type', 'concordance')
-        if ranking_type == 'concordance':
-            ranking = ranking_loss_concordance(pmf, t, e)
-        elif ranking_type == 'cif':
-            ranking = ranking_loss_cif(pmf, t, e)
-        else:
-            ranking = torch.tensor(0.0, device=pmf.device)
-    else:
-        ranking = torch.tensor(0.0, device=pmf.device)
-
-    # Prediction
-    if loss_config.get('prediction', 0.0) > 0 and y_pred is not None and y_true is not None:
-        pred = prediction_loss(y_pred, y_true, mask)
-    else:
-        pred = torch.tensor(0.0, device=pmf.device)
-
-    # Total
-    total = (
-        loss_config.get('nll', 1.0) * nll +
-        loss_config.get('ranking', 0.0) * ranking +
-        loss_config.get('prediction', 0.0) * pred
-    )
-
-    return {
-        'total': total,
-        'nll': nll,
-        'ranking': ranking,
-        'prediction': pred,
-        'censored': censored,
-        'uncensored': uncensored
-    }
