@@ -8,18 +8,30 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from PhagoPred.survival_v2.experiments.run_experiments import run_experiment_suite
+from PhagoPred.survival_v2.experiments.run_experiments import run_experiment_suite, evaluate_suite
 from PhagoPred.survival_v2.interpret import SurvivalSHAP, create_background_from_dataset
 from PhagoPred.survival_v2.utils.dataset_analysis import analyse_suite_datasets, plot_suite_event_distributions, plot_suite_absolute_distributions
 
 
 def train():
-    results = run_experiment_suite(
-        suite_name='Quick Survival Test',
+    # run_experiment_suite(
+    #     suite_name='SurvivalTest',
+    #     output_dir='PhagoPred/survival_v2/experiments/results',
+    #     device='cuda',
+    #     repeats=5,
+    # )
+    run_experiment_suite(
+        suite_name='BinaryTest',
         output_dir='PhagoPred/survival_v2/experiments/results',
         device='cuda',
-        repeats=1,
+        repeats=5,
     )
+    # # results = run_experiment_suite(
+    #     suite_name='Quick Binary Test',
+    #     output_dir='PhagoPred/survival_v2/experiments/results',
+    #     device='cuda',
+    #     repeats=2,
+    # )
 
 
 # def eval():
@@ -36,8 +48,9 @@ def train():
 
 
 def view_dataset_distributions():
+    """Plot event time distributions"""
     path = Path(
-        '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/classical_comparison_20260217_105014'
+        '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Quick Survival Test_16032026_151947'
     )
     results = analyse_suite_datasets(path)
     plot_suite_event_distributions(path, results)
@@ -46,6 +59,11 @@ def view_dataset_distributions():
 
 if __name__ == '__main__':
     train()
+
+    # evaluate_suite(
+    #     Path(
+    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/BinaryTest_24032026_144422'
+    #     ))
     # interpret()
     # results = run_experiment_suite(
     #     suite_name=

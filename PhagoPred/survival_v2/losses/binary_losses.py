@@ -4,7 +4,8 @@ import torch
 def binary_cross_entropy_loss(predictions: torch.Tensor,
                               targets: torch.Tensor) -> torch.Tensor:
     """Binary cross-entropy loss for binary survival prediction."""
-    assert predictions.shape == targets.shape
+    assert predictions.shape == targets.shape, f'{predictions.shape}, {targets.shape}'
+
     return torch.nn.functional.binary_cross_entropy_with_logits(
         predictions, targets.float())
 

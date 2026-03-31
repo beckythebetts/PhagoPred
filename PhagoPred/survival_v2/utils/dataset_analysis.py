@@ -365,7 +365,6 @@ def _expected_time(pmf: np.ndarray) -> float:
 
 def plot_rule_expected_time_shift(
     h5_path: Path,
-    smooth_sigma: float = 10.0,
     save: bool = True,
 ):
     """
@@ -378,8 +377,6 @@ def plot_rule_expected_time_shift(
 
     Args:
         h5_path: Path to the synthetic HDF5 dataset.
-        smooth_sigma: Gaussian smoothing sigma applied to hazards (must match
-                      the value used during generation, default 10).
         save: If True, save the figure next to the HDF5 file.
     """
     h5_path = Path(h5_path)
@@ -405,7 +402,8 @@ def plot_rule_expected_time_shift(
     # Expected time with all rules
     E_with = np.empty(N)
     for c in range(N):
-        h = gaussian_filter1d(raw_total[:, c], sigma=smooth_sigma)
+        # h = gaussian_filter1d(raw_total[:, c], sigma=smooth_sigma)
+        h = raw_total[:, c]
         h = np.clip(h, 0.0, 1.0)
         E_with[c] = _expected_time(_pmf_from_hazards(h))
 
@@ -415,7 +413,8 @@ def plot_rule_expected_time_shift(
         raw_without = raw_total - contrib
         E_without = np.empty(N)
         for c in range(N):
-            h = gaussian_filter1d(raw_without[:, c], sigma=smooth_sigma)
+            # h = gaussian_filter1d(raw_without[:, c], sigma=smooth_sigma)
+            h = raw_without[:, c]
             h = np.clip(h, 0.0, 1.0)
             E_without[c] = _expected_time(_pmf_from_hazards(h))
         shifts[
@@ -464,5 +463,12 @@ def plot_rule_expected_time_shift(
 if __name__ == '__main__':
 
     # For rule contribution analysis on synthetic data:
-    h5_path = Path('/home/ubuntu/PhagoPred/PhagoPred/Datasets/synthetic.h5')
-    plot_rule_expected_time_shift(h5_path)
+    h5_path_t = Path(
+        '/home/ubuntu/PhagoPred/PhagoPred/Datasets/synthetic_variants/baseline_train.h5'
+    )
+    h5_path_v = Path(
+        '/home/ubuntu/PhagoPred/PhagoPred/Datasets/synthetic_variants/baseline_val.h5'
+    )
+
+    plot_rule_expected_time_shift(h5_path_t)
+    plot_rule_expected_time_shift(h5_path_v)

@@ -28,11 +28,13 @@ log = get_logger()
 @dataclass
 class BinaryResults:
     """Data class to hold evaluation results for binary survival prediction."""
-    roc_auc: float
-    mse: float
+    ROC_AUC: float  # pylint: disable=invalid-name
+    MSE: float  # pylint: disable=invalid-name
     n_samples: int
     n_events: int
     cm: np.ndarray
+    fpr: np.ndarray | list[float]
+    tpr: np.ndarray | list[float]
 
 
 def evaluate_binary_model(model,
@@ -78,15 +80,22 @@ def evaluate_binary_model(model,
             "Model must be an instance of SurvivalModel or ClassicalSurvivalModel."
         )
 
-    roc_auc, fpr, tpr = reciever_operator_characteristic(predictions, labels)
+    roc_auc, fpr, tpr, thresholds = reciever_operator_characteristic(
+        predictions, labels)
     mse = mean_squared_error(predictions, labels)
-    cm = confusion_matrix(labels, predictions > 0.5, labels=[0, 1])
 
-    results = BinaryResults(roc_auc=roc_auc,
-                            mse=mse,
+    optimal_threshold = thresholds[np.argmax(tpr - fpr)]
+    cm = confusion_matrix(labels,
+                          predictions > optimal_threshold,
+                          labels=[0, 1])
+
+    results = BinaryResults(ROC_AUC=roc_auc,
+                            MSE=mse,
                             n_samples=len(labels),
                             n_events=np.sum(labels),
-                            cm=cm)
+                            cm=cm,
+                            fpr=fpr,
+                            tpr=tpr)
 
     plot_roc_curve(fpr,
                    tpr,
@@ -149,9 +158,9 @@ def _get_deep_predictions(
                     single_sample = BinaryCellSample(**single_sample_dict)
                     visualise_binary_prediction(
                         single_sample,
-                        binary_preds[i],
+                        binary_preds[i][0],
                         feature_names,
-                        save_dir / f"prediction_{visualised}.png",
+                        save_dir / 'plots' / f"prediction_{visualised}.png",
                     )
                     visualised += 1
 

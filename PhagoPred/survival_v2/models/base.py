@@ -1,14 +1,16 @@
-"""
-Base class for survival analysis models.
-"""
+from abc import ABC, abstractmethod
+
 import torch
 import torch.nn as nn
-from abc import ABC, abstractmethod
+
+from PhagoPred.utils import get_logger
+
+log = get_logger()
 
 
 def build_fc_layers(input_size: int,
                     output_size: int,
-                    layer_sizes: list[int] = [],
+                    layer_sizes: list[int],
                     dropout: float = 0.0,
                     activation=nn.ReLU,
                     batch_norm: bool = False,
@@ -66,11 +68,20 @@ class SurvivalModel(nn.Module, ABC):
         """
         pass
 
+    # def predict_pmf(self, outputs: torch.Tensor) -> torch.Tensor:
+    #     """Convert raw outputs to probability mass function."""
+    #     assert outputs.shape[
+    #         1] == self.num_bins, "Output shape does not match num_bins"
+    #     return torch.nn.functional.softmax(outputs, dim=1)
     def predict_pmf(self, outputs: torch.Tensor) -> torch.Tensor:
-        """Convert raw outputs to probability mass function."""
-        assert outputs.shape[
-            1] == self.num_bins, "Output shape does not match num_bins"
-        return torch.nn.functional.softmax(outputs, dim=1)
+        """Compute hazard for each time bin, then cacluate pmf from hazards"""
+        h = torch.sigmoid(outputs)  # hazard rates (batch, num_bins)
+        log_s = torch.log1p(-h).cumsum(dim=1)  # log S(t) = Σ log(1-h)
+        # S(t-1): prepend log S(-1)=0, drop last
+        log_s_prev = torch.cat(
+            [torch.zeros(h.shape[0], 1, device=h.device), log_s[:, :-1]],
+            dim=1)
+        return h * torch.exp(log_s_prev)  # PMF(t) = h(t) · S(t-1)
 
     def predict_cif(self, outputs: torch.Tensor) -> torch.Tensor:
         """Convert raw outputs to cumulative incidence function."""
@@ -98,5 +109,6 @@ class SurvivalModel(nn.Module, ABC):
         Sigmoid applied
         """
         assert self.num_bins == 1, "Binary prediction only valid for num_bins=1"
+        # log.info(f'Raw binary outputs {outputs}')
         binary_prediction = torch.nn.functional.sigmoid(outputs)
         return binary_prediction

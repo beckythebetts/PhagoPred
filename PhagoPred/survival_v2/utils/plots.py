@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,13 +11,15 @@ from PhagoPred.utils.logger import get_logger
 log = get_logger()
 
 
-def visualise_survival_prediction(sample: SurvivalCellSample,
-                                  predicted_pmf: np.ndarray,
-                                  bin_edges: np.ndarray,
-                                  attn_weights: np.ndarray = None,
-                                  feature_names: list[str] = None,
-                                  save_path: Path = None,
-                                  start_frame: int = 0) -> None:
+def visualise_survival_prediction(
+    sample: SurvivalCellSample,
+    predicted_pmf: np.ndarray,
+    bin_edges: np.ndarray,
+    attn_weights: np.ndarray = None,
+    feature_names: list[str] = None,
+    save_path: Path = None,
+    padded: Literal['start', 'end', 'none'] = 'none',
+) -> None:
     """
     Plot observed features, attention weights (if available) and predicted (and underlying) PMF.
 
@@ -46,21 +49,27 @@ def visualise_survival_prediction(sample: SurvivalCellSample,
 
     # Convert all inputs to numpy arrays
     features = to_numpy(sample.features)
+    mask = to_numpy(sample.mask)
     true_pmf = to_numpy(sample.binned_pmf)
     time_to_event = to_numpy(sample.time_to_event)
     cell_idx = sample.cell_idx
     cell_file = sample.hdf5_path
-    length = to_numpy(sample.length)
-    landmark_frame = to_numpy(sample.landmark_frame)
-    if length is None or (isinstance(length, np.ndarray) and length.size == 0):
-        length = len(features)
-    elif isinstance(length, np.ndarray):
-        length = int(length.item())
+    length = int(sample.length)
+    landmark_frame = int(sample.landmark_frame)
+    start_frame = int(sample.start_frame)
+    event_indicator = int(sample.event_indicator)
+
+    if padded == 'none':
+        _slice = slice(start_frame, landmark_frame + 1)
+    elif padded == 'start':
+        _slice = slice(-length, None)
     else:
-        length = int(length)
-    event_indicator = to_numpy(sample.event_indicator)
-    if isinstance(event_indicator, np.ndarray):
-        event_indicator = event_indicator.item()
+        _slice = slice(None, length)
+
+    features = features[_slice]
+    mask = mask[_slice].astype(bool)
+    features[~mask] = np.nan
+    # log.info(f'MASK\n{mask}')
 
     attn_weights = to_numpy(attn_weights)
     predicted_pmf = to_numpy(predicted_pmf)
@@ -76,6 +85,7 @@ def visualise_survival_prediction(sample: SurvivalCellSample,
                               height_ratios=[1, 1.2])
 
         # ====== (1) Attention Values ======
+
         attn_weights_trimmed = attn_weights[padding_slice]
         ax_att = fig.add_subplot(gs[0, 0])
         ax_att.scatter(np.arange(length),
@@ -97,7 +107,7 @@ def visualise_survival_prediction(sample: SurvivalCellSample,
     features = features[:length, :]
     for f_idx in range(features.shape[1]):
         ax_feat.plot(
-            np.arange(start_frame, start_frame + length),
+            np.arange(start_frame, landmark_frame + 1),
             features[:, f_idx],
             label=(feature_names[f_idx] if feature_names else f"F{f_idx}"),
             alpha=0.7)
@@ -114,8 +124,8 @@ def visualise_survival_prediction(sample: SurvivalCellSample,
         ax_sd = fig.add_subplot(gs[0, 1])
     abs_bin_edges = bin_edges + landmark_frame
     bin_widths = np.diff(abs_bin_edges)
-    bin_widths[-1] = bin_widths[
-        -2]  # make last bin same width for visualization
+    # bin_widths[-1] = bin_widths[
+    #     -2]  # make last bin same width for visualization
 
     ax_sd.bar(
         abs_bin_edges[:-1],
@@ -346,106 +356,106 @@ def plot_brier_scores(brier_times, brier_scores, save_path=None) -> None:
         plt.close(fig)
 
 
-def plot_pmf_comparison_grid(pred_pmfs,
-                             true_pmfs,
-                             true_bins,
-                             bin_edges,
-                             num_examples=16,
-                             save_path=None) -> None:
-    """
-    Grid of example predictions showing predicted vs true PMFs.
+# def plot_pmf_comparison_grid(pred_pmfs,
+#                              true_pmfs,
+#                              true_bins,
+#                              bin_edges,
+#                              num_examples=16,
+#                              save_path=None) -> None:
+#     """
+#     Grid of example predictions showing predicted vs true PMFs.
 
-    Args:
-        pred_pmfs: (n_samples, num_bins) - predicted PMFs
-        true_pmfs: (n_samples, num_bins) - true PMFs (can be None)
-        true_bins: (n_samples,) - true time bins (for vertical line)
-        bin_edges: bin edge positions
-        num_examples: number of examples to show
-        save_path: Path to save figure
+#     Args:
+#         pred_pmfs: (n_samples, num_bins) - predicted PMFs
+#         true_pmfs: (n_samples, num_bins) - true PMFs (can be None)
+#         true_bins: (n_samples,) - true time bins (for vertical line)
+#         bin_edges: bin edge positions
+#         num_examples: number of examples to show
+#         save_path: Path to save figure
 
-    This answers: "What do individual predictions look like compared to truth?"
-    """
-    num_examples = min(num_examples, len(pred_pmfs))
+#     This answers: "What do individual predictions look like compared to truth?"
+#     """
+#     num_examples = min(num_examples, len(pred_pmfs))
 
-    # Select diverse examples (spread across true bins)
-    unique_bins = np.unique(true_bins)
-    examples_per_bin = max(1, num_examples // len(unique_bins))
+#     # Select diverse examples (spread across true bins)
+#     unique_bins = np.unique(true_bins)
+#     examples_per_bin = max(1, num_examples // len(unique_bins))
 
-    selected_indices = []
-    for bin_idx in unique_bins:
-        bin_mask = true_bins == bin_idx
-        bin_indices = np.where(bin_mask)[0]
-        if len(bin_indices) > 0:
-            selected = np.random.choice(bin_indices,
-                                        size=min(examples_per_bin,
-                                                 len(bin_indices)),
-                                        replace=False)
-            selected_indices.extend(selected)
+#     selected_indices = []
+#     for bin_idx in unique_bins:
+#         bin_mask = true_bins == bin_idx
+#         bin_indices = np.where(bin_mask)[0]
+#         if len(bin_indices) > 0:
+#             selected = np.random.choice(bin_indices,
+#                                         size=min(examples_per_bin,
+#                                                  len(bin_indices)),
+#                                         replace=False)
+#             selected_indices.extend(selected)
 
-    selected_indices = selected_indices[:num_examples]
+#     selected_indices = selected_indices[:num_examples]
 
-    # Create grid
-    ncols = 4
-    nrows = (num_examples + ncols - 1) // ncols
+#     # Create grid
+#     ncols = 4
+#     nrows = (num_examples + ncols - 1) // ncols
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=(16, 4 * nrows))
-    axes = axes.flatten() if num_examples > 1 else [axes]
+#     fig, axes = plt.subplots(nrows, ncols, figsize=(16, 4 * nrows))
+#     axes = axes.flatten() if num_examples > 1 else [axes]
 
-    num_bins = pred_pmfs.shape[1]
-    bin_widths = np.diff(bin_edges)
+#     num_bins = pred_pmfs.shape[1]
+#     bin_widths = np.diff(bin_edges)
 
-    for plot_idx, sample_idx in enumerate(selected_indices):
-        ax = axes[plot_idx]
+#     for plot_idx, sample_idx in enumerate(selected_indices):
+#         ax = axes[plot_idx]
 
-        # Plot bars
-        ax.bar(bin_edges[:-1],
-               pred_pmfs[sample_idx],
-               width=bin_widths,
-               align='edge',
-               alpha=0.6,
-               color='tab:blue',
-               edgecolor='black',
-               label='Predicted PMF')
+#         # Plot bars
+#         ax.bar(bin_edges[:-1],
+#                pred_pmfs[sample_idx],
+#                width=bin_widths,
+#                align='edge',
+#                alpha=0.6,
+#                color='tab:blue',
+#                edgecolor='black',
+#                label='Predicted PMF')
 
-        if true_pmfs is not None:
-            ax.bar(bin_edges[:-1],
-                   true_pmfs[sample_idx],
-                   width=bin_widths,
-                   align='edge',
-                   alpha=0.4,
-                   color='tab:red',
-                   edgecolor='black',
-                   label='True PMF')
+#         if true_pmfs is not None:
+#             ax.bar(bin_edges[:-1],
+#                    true_pmfs[sample_idx],
+#                    width=bin_widths,
+#                    align='edge',
+#                    alpha=0.4,
+#                    color='tab:red',
+#                    edgecolor='black',
+#                    label='True PMF')
 
-        # True event time
-        true_time = bin_edges[true_bins[sample_idx]]
-        ax.axvline(true_time,
-                   color='red',
-                   linestyle='--',
-                   linewidth=2,
-                   label='True event')
+#         # True event time
+#         true_time = bin_edges[true_bins[sample_idx]]
+#         ax.axvline(true_time,
+#                    color='red',
+#                    linestyle='--',
+#                    linewidth=2,
+#                    label='True event')
 
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Probability')
-        ax.set_title(f'Sample {sample_idx} (true bin {true_bins[sample_idx]})')
-        ax.legend(fontsize=8)
-        ax.grid(True, alpha=0.3)
-        ax.set_ylim(
-            0,
-            max(pred_pmfs[sample_idx].max(),
-                true_pmfs[sample_idx].max() if true_pmfs is not None else 0) *
-            1.1)
+#         ax.set_xlabel('Time')
+#         ax.set_ylabel('Probability')
+#         ax.set_title(f'Sample {sample_idx} (true bin {true_bins[sample_idx]})')
+#         ax.legend(fontsize=8)
+#         ax.grid(True, alpha=0.3)
+#         ax.set_ylim(
+#             0,
+#             max(pred_pmfs[sample_idx].max(),
+#                 true_pmfs[sample_idx].max() if true_pmfs is not None else 0) *
+#             1.1)
 
-    # Hide unused subplots
-    for plot_idx in range(len(selected_indices), len(axes)):
-        axes[plot_idx].axis('off')
+#     # Hide unused subplots
+#     for plot_idx in range(len(selected_indices), len(axes)):
+#         axes[plot_idx].axis('off')
 
-    plt.suptitle('Predicted vs True PMF Distributions', fontsize=16, y=1.00)
-    plt.tight_layout()
+#     plt.suptitle('Predicted vs True PMF Distributions', fontsize=16, y=1.00)
+#     plt.tight_layout()
 
-    if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        plt.close(fig)
+#     if save_path:
+#         plt.savefig(save_path, dpi=150, bbox_inches='tight')
+#         plt.close(fig)
 
 
 def plot_spread_analysis(pred_pmfs,
@@ -652,7 +662,7 @@ def visualise_binary_prediction(sample: BinaryCellSample,
           ax_prob) = plt.subplots(1,
                                   2,
                                   figsize=(14, 4),
-                                  gridspec_kw={'width_ratios': [2, 1]})
+                                  gridspec_kw={'width_ratios': [4, 1]})
 
     # Features
     for f_idx in range(features.shape[1]):
@@ -667,21 +677,33 @@ def visualise_binary_prediction(sample: BinaryCellSample,
     ax_feat.grid(True)
 
     # Probability bar
-    colors = [
-        'tab:green' if pred_prob < 0.5 else 'tab:red',
-        'tab:red' if pred_prob >= 0.5 else 'tab:green'
-    ]
-    ax_prob.bar([0, 1], [1 - pred_prob, pred_prob],
-                color=colors,
+    ax_prob.bar([0], [pred_prob],
+                color='blue',
                 edgecolor='k',
-                alpha=0.7)
-    ax_prob.axhline(0.5, color='grey', linestyle='--', linewidth=1)
-    ax_prob.set_xticks([0, 1])
-    ax_prob.set_xticklabels(['No Event', 'Event'])
+                label='Predicted Probability')
+    if sample.event_probability is not None:
+        ax_prob.axhline(sample.event_probability,
+                        color='red',
+                        linestyle='--',
+                        linewidth=1,
+                        label='True probability')
+
+    # colors = [
+    #     'tab:green' if pred_prob < 0.5 else 'tab:red',
+    #     'tab:red' if pred_prob >= 0.5 else 'tab:green'
+    # ]
+    # ax_prob.bar([0, 1], [1 - pred_prob, pred_prob],
+    #             color=colors,
+    #             edgecolor='k',
+    #             alpha=0.7)
+    # ax_prob.axhline(0.5, color='grey', linestyle='--', linewidth=1)
+    # ax_prob.set_xticks([0, 1])
+    # ax_prob.set_xticklabels(['No Event', 'Event'])
     ax_prob.set_ylim(0, 1)
-    ax_prob.set_ylabel('Predicted Probability')
+    ax_prob.set_ylabel('Event Probability')
     true_str = 'Event' if binary_label == 1 else 'No Event'
-    ax_prob.set_title(f'True: {true_str}  |  P(event) = {pred_prob:.2f}')
+    ax_prob.set_title(
+        f'True: {true_str}  |  Predicted P(event) = {pred_prob:.2f}')
     ax_prob.grid(True, axis='y', alpha=0.3)
 
     plt.tight_layout()

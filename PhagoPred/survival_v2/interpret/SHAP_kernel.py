@@ -1,16 +1,3 @@
-"""
-Perturbation-based SHAP for survival models using KernelExplainer.
-
-This module provides SHAP analysis that works with any pooling mechanism,
-including LastPooling where gradient-based methods show importance only at
-the final timestep. It computes temporal and feature importance separately
-by reducing the input to 1D masks.
-
-Key advantages over gradient-based SHAP:
-- Works with any architecture (no gradient flow requirements)
-- Directly measures prediction change when inputs are masked
-- Can handle temporal and feature importance independently
-"""
 from abc import abstractmethod
 from dataclasses import dataclass, asdict
 
@@ -30,25 +17,30 @@ from PhagoPred.survival_v2.data.dataset import CellDataset, collate_fn
 class KernelSHAPResults:
     """Container for kernel SHAP analysis results."""
     # Temporal analysis
-    temporal_shap_values: Optional[np.ndarray] = None  # (num_samples, num_segments)
-    temporal_importance: Optional[np.ndarray] = None   # (num_segments,)
-    segment_boundaries: Optional[np.ndarray] = None    # (num_segments + 1,)
+    temporal_shap_values: Optional[
+        np.ndarray] = None  # (num_samples, num_segments)
+    temporal_importance: Optional[np.ndarray] = None  # (num_segments,)
+    segment_boundaries: Optional[np.ndarray] = None  # (num_segments + 1,)
     temporal_baseline: Optional[float] = None
 
     # Feature analysis
-    feature_shap_values: Optional[np.ndarray] = None   # (num_samples, num_features)
-    feature_importance: Optional[np.ndarray] = None    # (num_features,)
+    feature_shap_values: Optional[
+        np.ndarray] = None  # (num_samples, num_features)
+    feature_importance: Optional[np.ndarray] = None  # (num_features,)
     feature_names: Optional[list[str]] = None
     feature_baseline: Optional[float] = None
 
     # Temporal-feature analysis (if implemented)
-    temporal_feature_shap_values: Optional[np.ndarray] = None  # (num_samples, num_segments, num_features)
-    temporal_feature_importance: Optional[np.ndarray] = None   # (num_segments, num_features)
+    temporal_feature_shap_values: Optional[
+        np.ndarray] = None  # (num_samples, num_segments, num_features)
+    temporal_feature_importance: Optional[
+        np.ndarray] = None  # (num_segments, num_features)
     temporal_feature_baseline: Optional[float] = None
-    
+
     def asdict(self):
         return asdict(self)
-    
+
+
 class MaskWrapperBase:
     """Base class for mask wrappers used in Kernel SHAP analysis.
     Allows modesl to be called with different masks applied.
@@ -62,6 +54,7 @@ class MaskWrapperBase:
         mask_value: Value to use when masking (e.g., 0.0 or mean value)
         device: Computation device
     """
+
     def __init__(
         self,
         model: SurvivalModel,
@@ -80,7 +73,7 @@ class MaskWrapperBase:
         self.output_type = output_type
         self.target_bin = target_bin
         self.mask_value = mask_value
-        
+
     def __call__(self, masks: np.ndarray) -> np.ndarray:
         """Apply masks and return model predictions."""
         outputs = []
@@ -88,7 +81,9 @@ class MaskWrapperBase:
         for mask in masks:
             masked_input = self._apply_mask(mask)
             with torch.no_grad():
-                pred = self.model(masked_input, self.lengths, return_attention=False)
+                pred = self.model(masked_input,
+                                  self.lengths,
+                                  return_attention=False)
                 if isinstance(pred, tuple):
                     pred = pred[0]
 
@@ -98,12 +93,12 @@ class MaskWrapperBase:
 
         # Return shape (N, 1) - KernelExplainer requires 2D output
         return np.array(outputs).reshape(-1, 1)
-    
+
     @abstractmethod
     def _apply_mask(self, mask: np.ndarray) -> torch.Tensor:
         """Apply the given mask to the base input and return the masked input."""
         pass
-    
+
     def _extract_output(self, logits: torch.Tensor) -> torch.Tensor:
         """Extract the appropriate scalar output from model logits."""
         if self.output_type == "expected_time":
@@ -120,7 +115,8 @@ class MaskWrapperBase:
             return pmf.max(dim=1).values  # Max probability
         else:
             raise ValueError(f"Unknown output_type: {self.output_type}")
-        
+
+
 class TemporalMaskWrapper(MaskWrapperBase):
     """
     Wrapper for computing importance of temporal segments.
@@ -135,7 +131,10 @@ class TemporalMaskWrapper(MaskWrapperBase):
         self.T = self.base_input.shape[1]
         # self.T = int(self.lengths[0].item())
 
-        self.segment_boundaries = np.linspace(0, self.T, num_segments + 1, dtype=int)
+        self.segment_boundaries = np.linspace(0,
+                                              self.T,
+                                              num_segments + 1,
+                                              dtype=int)
 
     def _apply_mask(self, mask: np.ndarray) -> torch.Tensor:
         full_mask = np.zeros(self.T)
@@ -144,12 +143,15 @@ class TemporalMaskWrapper(MaskWrapperBase):
             end = self.segment_boundaries[i + 1]
             full_mask[start:end] = m
 
-        mask_tensor = torch.tensor(full_mask, device=self.device, dtype=torch.float32)
+        mask_tensor = torch.tensor(full_mask,
+                                   device=self.device,
+                                   dtype=torch.float32)
         masked_input = self.base_input.clone()
 
         masked_input = masked_input * mask_tensor.view(1, -1, 1) + \
                         self.mask_value * (1 - mask_tensor.view(1, -1, 1))
         return masked_input
+
 
 class FeatureMaskWrapper(MaskWrapperBase):
     """
@@ -159,7 +161,7 @@ class FeatureMaskWrapper(MaskWrapperBase):
     """
 
     def __init__(self, *args, **kwargs):
-        
+
         super().__init__(*args, **kwargs)
         self.F = self.base_input.shape[2]
 
@@ -168,7 +170,9 @@ class FeatureMaskWrapper(MaskWrapperBase):
         Args:
             mask: np.ndarray of shape (num_features,) with values in {0, 1}
         """
-        mask_tensor = torch.tensor(mask, device=self.device, dtype=torch.float32)
+        mask_tensor = torch.tensor(mask,
+                                   device=self.device,
+                                   dtype=torch.float32)
         masked_input = self.base_input.clone()
 
         # Blend between mask_value and original based on mask
@@ -176,7 +180,9 @@ class FeatureMaskWrapper(MaskWrapperBase):
                         self.mask_value * (1 - mask_tensor.view(1, 1, -1))
         return masked_input
 
+
 class TemporalFeatureMaskWrapper(MaskWrapperBase):
+
     def __init__(self, *args, num_segments: int = 50, **kwargs):
         super().__init__(*args, **kwargs)
         self.num_segments = num_segments
@@ -184,7 +190,10 @@ class TemporalFeatureMaskWrapper(MaskWrapperBase):
         # self.T = int(self.lengths[0].item())
         self.F = self.base_input.shape[2]
 
-        self.segment_boundaries = np.linspace(0, self.T, num_segments + 1, dtype=int)
+        self.segment_boundaries = np.linspace(0,
+                                              self.T,
+                                              num_segments + 1,
+                                              dtype=int)
 
     def _apply_mask(self, mask: np.ndarray) -> torch.Tensor:
         """Apply a 2D mask of shape (num_segments, num_features) to the input.
@@ -197,11 +206,15 @@ class TemporalFeatureMaskWrapper(MaskWrapperBase):
         for i, m in enumerate(mask):
             start = self.segment_boundaries[i]
             end = self.segment_boundaries[i + 1]
-            full_mask[start:end, :] = m 
-        mask_tensor = torch.tensor(full_mask, device=self.device, dtype=torch.float32)
-        masked_input = self.base_input.clone()  
-        masked_input = masked_input * mask_tensor + self.mask_value * (1 - mask_tensor)
+            full_mask[start:end, :] = m
+        mask_tensor = torch.tensor(full_mask,
+                                   device=self.device,
+                                   dtype=torch.float32)
+        masked_input = self.base_input.clone()
+        masked_input = masked_input * mask_tensor + self.mask_value * (
+            1 - mask_tensor)
         return masked_input
+
 
 class KernelSHAP:
     """
@@ -231,7 +244,8 @@ class KernelSHAP:
             device: Computation device
         """
         if shap is None:
-            raise ImportError("shap package not installed. Install with: pip install shap")
+            raise ImportError(
+                "shap package not installed. Install with: pip install shap")
 
         self.model = model
         self.device = device
@@ -250,8 +264,9 @@ class KernelSHAP:
         target_bin: Optional[int] = None,
         mask_value: float = 0.0,
         show_progress: bool = True,
-        importance_type: Literal["temporal", "feature", "temporal_feature"] = "temporal",
-        ) -> tuple[np.ndarray, np.ndarray, float]:
+        importance_type: Literal["temporal", "feature",
+                                 "temporal_feature"] = "temporal",
+    ) -> tuple[np.ndarray, np.ndarray, float]:
         """Compute SHAP values for either temporal segments, features, or both.
         Args:
             x: Input tensor (1, T, F) - single sample
@@ -273,7 +288,7 @@ class KernelSHAP:
             lengths = torch.tensor([lengths])
         elif lengths.dim() == 0:
             lengths = lengths.unsqueeze(0)
-    
+
         kwargs = dict(
             model=self.model,
             base_input=x,
@@ -291,15 +306,18 @@ class KernelSHAP:
             background = np.zeros((1, num_segments))
             wrapper = TemporalMaskWrapper(**kwargs, num_segments=num_segments)
         elif importance_type == "temporal_feature":
-            background = np.zeros((1, num_segments*x.shape[2]))
-            wrapper = TemporalFeatureMaskWrapper(**kwargs, num_segments=num_segments)
-            
+            background = np.zeros((1, num_segments * x.shape[2]))
+            wrapper = TemporalFeatureMaskWrapper(**kwargs,
+                                                 num_segments=num_segments)
+
         explainer = shap.KernelExplainer(wrapper, background)
 
         test_input = np.ones_like(background)
 
         # l1_reg = False if importance_type == "temporal_feature" else "num_features(10)"
-        shap_values = explainer.shap_values(test_input, nsamples="auto", silent=not show_progress)
+        shap_values = explainer.shap_values(test_input,
+                                            nsamples="auto",
+                                            silent=not show_progress)
 
         if isinstance(shap_values, list):
             shap_values = shap_values[0]
@@ -308,7 +326,10 @@ class KernelSHAP:
         if isinstance(baseline, np.ndarray):
             baseline = baseline[0]
 
-        return shap_values.squeeze(), baseline, wrapper.segment_boundaries if importance_type in ["temporal", "temporal_feature"] else None
+        return shap_values.squeeze(
+        ), baseline, wrapper.segment_boundaries if importance_type in [
+            "temporal", "temporal_feature"
+        ] else None
 
     def analyse(
         self,
@@ -354,9 +375,8 @@ class KernelSHAP:
             if show_progress:
                 print("Computing temporal importance...")
             temporal_shap, temporal_baseline, boundaries = self.compute_importance(
-                x, lengths, num_segments, nsamples_temporal,
-                output_type, target_bin, mask_value, show_progress, 'temporal'
-            )
+                x, lengths, num_segments, nsamples_temporal, output_type,
+                target_bin, mask_value, show_progress, 'temporal')
             results.temporal_shap_values = temporal_shap.reshape(1, -1)
             results.temporal_importance = np.abs(temporal_shap)
             results.segment_boundaries = boundaries
@@ -366,9 +386,8 @@ class KernelSHAP:
             if show_progress:
                 print("Computing feature importance...")
             feature_shap, feature_baseline, _ = self.compute_importance(
-                x, lengths, num_segments, nsamples_feature,
-                output_type, target_bin, mask_value, show_progress, 'feature'
-            )
+                x, lengths, num_segments, nsamples_feature, output_type,
+                target_bin, mask_value, show_progress, 'feature')
             results.feature_shap_values = feature_shap.reshape(1, -1)
             results.feature_importance = np.abs(feature_shap)
             results.feature_baseline = feature_baseline
@@ -384,13 +403,16 @@ class KernelSHAP:
                 nsamples_temporal_feature = 2 * num_segments * num_features + 2048
             temporal_feature_shap, temporal_feature_baseline, boundaries = self.compute_importance(
                 x, lengths, num_segments, nsamples_temporal_feature,
-                output_type, target_bin, mask_value, show_progress, 'temporal_feature'
-            )
-            temporal_feature_shap_2d = temporal_feature_shap.reshape(num_segments, -1)
-            results.temporal_feature_shap_values = temporal_feature_shap_2d.reshape(1, num_segments, -1)
-            results.temporal_feature_importance = np.abs(temporal_feature_shap_2d)
+                output_type, target_bin, mask_value, show_progress,
+                'temporal_feature')
+            temporal_feature_shap_2d = temporal_feature_shap.reshape(
+                num_segments, -1)
+            results.temporal_feature_shap_values = temporal_feature_shap_2d.reshape(
+                1, num_segments, -1)
+            results.temporal_feature_importance = np.abs(
+                temporal_feature_shap_2d)
             results.temporal_feature_baseline = temporal_feature_baseline
-        
+
         return results
 
     def analyse_batch(
@@ -433,7 +455,8 @@ class KernelSHAP:
                 dataset,
                 batch_size=num_samples,
                 shuffle=True,
-                collate_fn=lambda batch: collate_fn(batch, dataset, max_seq_len=max_len),
+                collate_fn=lambda batch: collate_fn(
+                    batch, dataset, max_seq_len=max_len),
             )
             batch = next(iter(dataloader))
             x_batch = batch['features']
@@ -448,12 +471,14 @@ class KernelSHAP:
         all_temporal_feature = []
         segment_boundaries = None
 
-        for i in tqdm(range(min(num_samples, len(x_batch))), desc="Analysing samples"):
-            x_i = x_batch[i:i+1]
-            l_i = lengths_batch[i:i+1]
+        for i in tqdm(range(min(num_samples, len(x_batch))),
+                      desc="Analysing samples"):
+            x_i = x_batch[i:i + 1]
+            l_i = lengths_batch[i:i + 1]
 
             result = self.analyse(
-                x_i, l_i,
+                x_i,
+                l_i,
                 num_segments=num_segments,
                 nsamples_temporal=nsamples_temporal,
                 nsamples_feature=nsamples_feature,
@@ -467,7 +492,8 @@ class KernelSHAP:
             all_temporal.append(result.temporal_shap_values)
             all_feature.append(result.feature_shap_values)
             if result.temporal_feature_shap_values is not None:
-                all_temporal_feature.append(result.temporal_feature_shap_values)
+                all_temporal_feature.append(
+                    result.temporal_feature_shap_values)
             segment_boundaries = result.segment_boundaries
 
         # Aggregate
@@ -510,8 +536,12 @@ class KernelSHAP:
         centers = (boundaries[:-1] + boundaries[1:]) / 2
         widths = np.diff(boundaries)
 
-        ax.bar(centers, importance, width=widths * 0.9,
-               color='steelblue', edgecolor='navy', alpha=0.7)
+        ax.bar(centers,
+               importance,
+               width=widths * 0.9,
+               color='steelblue',
+               edgecolor='navy',
+               alpha=0.7)
 
         ax.set_xlabel("Time (frames)")
         ax.set_ylabel("Mean |SHAP value|")
@@ -534,7 +564,9 @@ class KernelSHAP:
         fig, ax = plt.subplots(figsize=figsize)
 
         importance = results.feature_importance
-        names = results.feature_names or [f"Feature_{i}" for i in range(len(importance))]
+        names = results.feature_names or [
+            f"Feature_{i}" for i in range(len(importance))
+        ]
 
         sorted_idx = np.argsort(importance)[::-1]
         sorted_importance = importance[sorted_idx]
@@ -564,7 +596,9 @@ class KernelSHAP:
         fig, ax = plt.subplots(figsize=figsize)
 
         importance = results.temporal_feature_importance
-        feature_names = results.feature_names or [f"Feature_{i}" for i in range(importance.shape[1])]
+        feature_names = results.feature_names or [
+            f"Feature_{i}" for i in range(importance.shape[1])
+        ]
         segment_labels = [f"Seg {i}" for i in range(importance.shape[0])]
 
         im = ax.imshow(importance.T, aspect='auto', cmap='viridis')
@@ -580,7 +614,7 @@ class KernelSHAP:
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
         return fig
-    
+
     def plot_summary(
         self,
         results: KernelSHAPResults,
@@ -604,8 +638,12 @@ class KernelSHAP:
             centers = (boundaries[:-1] + boundaries[1:]) / 2
             widths = np.diff(boundaries)
 
-            ax_temp.bar(centers, importance, width=widths * 0.9,
-                   color='coral', edgecolor='darkred', alpha=0.7)
+            ax_temp.bar(centers,
+                        importance,
+                        width=widths * 0.9,
+                        color='coral',
+                        edgecolor='darkred',
+                        alpha=0.7)
             ax_temp.set_xlabel("Time (frames)")
             ax_temp.set_ylabel("Mean |SHAP value|")
             ax_temp.set_title("Temporal Importance")
@@ -614,22 +652,28 @@ class KernelSHAP:
         # Feature importance
         if results.feature_importance is not None:
             importance = results.feature_importance
-            names = results.feature_names or [f"F{i}" for i in range(len(importance))]
+            names = results.feature_names or [
+                f"F{i}" for i in range(len(importance))
+            ]
 
             sorted_idx = np.argsort(importance)[::-1]
             sorted_importance = importance[sorted_idx]
             sorted_names = [names[i] for i in sorted_idx]
 
-            ax_feat.barh(range(len(importance)), sorted_importance[::-1], color='steelblue')
+            ax_feat.barh(range(len(importance)),
+                         sorted_importance[::-1],
+                         color='steelblue')
             ax_feat.set_yticks(range(len(importance)))
             ax_feat.set_yticklabels(sorted_names[::-1])
             ax_feat.set_xlabel("Mean |SHAP value|")
             ax_feat.set_title("Feature Importance")
             ax_feat.grid(axis='x', alpha=0.3)
-        
+
         if results.temporal_feature_importance is not None:
             importance = results.temporal_feature_importance
-            feature_names = results.feature_names or [f"Feature_{i}" for i in range(importance.shape[1])]
+            feature_names = results.feature_names or [
+                f"Feature_{i}" for i in range(importance.shape[1])
+            ]
             segment_labels = [f"Seg {i}" for i in range(importance.shape[0])]
 
             im = ax_both.imshow(importance.T, aspect='auto', cmap='viridis')
@@ -641,7 +685,9 @@ class KernelSHAP:
             ax_both.set_title("Temporal-Feature Importance")
             fig.colorbar(im, ax=ax_both, label="Mean |SHAP value|")
 
-        plt.suptitle("Kernel SHAP Analysis (Perturbation-Based)", fontsize=12, fontweight='bold')
+        plt.suptitle("Kernel SHAP Analysis (Perturbation-Based)",
+                     fontsize=12,
+                     fontweight='bold')
         plt.tight_layout()
 
         if save_path:
@@ -665,8 +711,12 @@ class KernelSHAP:
             centers = (boundaries[:-1] + boundaries[1:]) / 2
 
             colors = ['coral' if v > 0 else 'steelblue' for v in shap_vals]
-            ax1.bar(centers, shap_vals, width=np.diff(boundaries) * 0.9,
-                   color=colors, edgecolor='black', alpha=0.7)
+            ax1.bar(centers,
+                    shap_vals,
+                    width=np.diff(boundaries) * 0.9,
+                    color=colors,
+                    edgecolor='black',
+                    alpha=0.7)
             ax1.axhline(0, color='black', linewidth=0.5)
             ax1.set_xlabel("Time (frames)")
             ax1.set_ylabel("SHAP value")
@@ -676,7 +726,9 @@ class KernelSHAP:
         # Feature SHAP values
         if results.feature_shap_values is not None:
             shap_vals = results.feature_shap_values[sample_idx]
-            names = results.feature_names or [f"F{i}" for i in range(len(shap_vals))]
+            names = results.feature_names or [
+                f"F{i}" for i in range(len(shap_vals))
+            ]
 
             colors = ['coral' if v > 0 else 'steelblue' for v in shap_vals]
             ax2.barh(range(len(shap_vals)), shap_vals, color=colors, alpha=0.7)
@@ -732,6 +784,7 @@ class KernelSHAP:
             start_frame: x-axis offset for feature time series
             save_path: path to save figure, or None
         """
+
         # Helper function to convert to numpy if needed
         def to_numpy(x):
             if x is None:
@@ -750,7 +803,8 @@ class KernelSHAP:
         length = to_numpy(sample.get('length', None))
         landmark_frame = to_numpy(sample.get('landmark_frame', 0))
         start_frame = to_numpy(sample.get('start_frame', 0))
-        if length is None or (isinstance(length, np.ndarray) and length.size == 0):
+        if length is None or (isinstance(length, np.ndarray)
+                              and length.size == 0):
             length = len(features)
         elif isinstance(length, np.ndarray):
             length = int(length.item())
@@ -764,21 +818,24 @@ class KernelSHAP:
             f"F{i}" for i in range(features.shape[1])
         ]
 
-        x = torch.tensor(features, dtype=torch.float32).unsqueeze(0)  # (1, T, F)
+        x = torch.tensor(features,
+                         dtype=torch.float32).unsqueeze(0)  # (1, T, F)
         lengths = torch.tensor([length])
 
         with torch.no_grad():
             logits = self.model(x.to(self.device), lengths.to(self.device))
             if isinstance(logits, tuple):
                 logits = logits[0]
-            predicted_pmf = self.model.predict_pmf(logits).cpu().numpy().squeeze()
+            predicted_pmf = self.model.predict_pmf(
+                logits).cpu().numpy().squeeze()
 
         num_features = x.shape[2]
         if nsamples is None:
             nsamples = 2 * num_segments * num_features + 2048
 
         shap_vals, baseline, boundaries = self.compute_importance(
-            x, lengths,
+            x,
+            lengths,
             num_segments=num_segments,
             nsamples=nsamples,
             output_type=output_type,
@@ -791,7 +848,10 @@ class KernelSHAP:
 
         # --- layout (identical to visualise_prediction with attention) ----
         fig = plt.figure(figsize=(14, 6))
-        gs = fig.add_gridspec(2, 2, width_ratios=[2, 1], height_ratios=[1, 1.2])
+        gs = fig.add_gridspec(2,
+                              2,
+                              width_ratios=[2, 1],
+                              height_ratios=[1, 1.2])
 
         # ====== (1) SHAP temporal-feature heatmap (replaces attention) =====
         ax_shap = fig.add_subplot(gs[0, 0])
@@ -800,25 +860,35 @@ class KernelSHAP:
         abs_boundaries = boundaries + start_frame
         vmax = np.abs(shap_2d).max()
         im = ax_shap.imshow(
-            shap_2d.T,                       # (F, S) — features on y-axis
+            shap_2d.T,  # (F, S) — features on y-axis
             aspect='auto',
             cmap='RdBu_r',
-            vmin=-vmax, vmax=vmax,
-            extent=[abs_boundaries[0], abs_boundaries[-1],
-                    len(names) - 0.5, -0.5],
+            vmin=-vmax,
+            vmax=vmax,
+            extent=[
+                abs_boundaries[0], abs_boundaries[-1],
+                len(names) - 0.5, -0.5
+            ],
         )
         ax_shap.set_yticks(range(len(names)))
         ax_shap.set_yticklabels(names, fontsize=8)
         ax_shap.set_ylabel("Feature")
         ax_shap.set_title("SHAP Temporal-Feature Importance")
-        fig.colorbar(im, ax=ax_shap, label="SHAP value", fraction=0.046, pad=0.04)
+        fig.colorbar(im,
+                     ax=ax_shap,
+                     label="SHAP value",
+                     fraction=0.046,
+                     pad=0.04)
 
         # ===== (2) Features =====
         ax_feat = fig.add_subplot(gs[1, 0])
 
         features = features[:length, :]
         for f_idx in range(features.shape[1]):
-            ax_feat.plot(np.arange(start_frame, start_frame+length), features[:, f_idx] / max(features[:, f_idx]), label=(names[f_idx]), alpha=0.7)
+            ax_feat.plot(np.arange(start_frame, start_frame + length),
+                         features[:, f_idx] / max(features[:, f_idx]),
+                         label=(names[f_idx]),
+                         alpha=0.7)
 
         ax_feat.set_xlabel("Time / frames")
         ax_feat.set_ylabel("Features")
@@ -830,7 +900,8 @@ class KernelSHAP:
         bin_edges = to_numpy(bin_edges)
         abs_bin_edges = bin_edges + landmark_frame
         bin_widths = np.diff(abs_bin_edges)
-        bin_widths[-1] = bin_widths[-2]  # make last bin same width for visualization
+        bin_widths[-1] = bin_widths[
+            -2]  # make last bin same width for visualization
 
         ax_sd.bar(
             abs_bin_edges[:-1],
@@ -853,13 +924,19 @@ class KernelSHAP:
                 edgecolor='k',
                 alpha=0.5,
                 label='True PMF',
-                )
+            )
 
         abs_event_time = time_to_event + landmark_frame
         if event_indicator == 1:
-            ax_sd.axvline(abs_event_time, color='red', linestyle='--', label="Event Time")
+            ax_sd.axvline(abs_event_time,
+                          color='red',
+                          linestyle='--',
+                          label="Event Time")
         else:
-            ax_sd.axvline(abs_event_time, color='orange', linestyle='--', label="Censoring Time")
+            ax_sd.axvline(abs_event_time,
+                          color='orange',
+                          linestyle='--',
+                          label="Censoring Time")
 
         ax_sd.set_xlabel("Time / frames")
         ax_sd.set_ylabel("Probability")
@@ -872,6 +949,7 @@ class KernelSHAP:
 
 
 # ==================== Convenience Functions ====================
+
 
 def quick_temporal_importance(
     model: SurvivalModel,
@@ -889,8 +967,7 @@ def quick_temporal_importance(
     """
     explainer = KernelSHAP(model, device=device)
     shap_vals, boundaries, _ = explainer.compute_temporal_importance(
-        x, lengths, num_segments, nsamples
-    )
+        x, lengths, num_segments, nsamples)
     return np.abs(shap_vals), boundaries
 
 

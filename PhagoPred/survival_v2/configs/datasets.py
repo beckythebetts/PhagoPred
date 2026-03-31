@@ -10,15 +10,17 @@ class DatasetCfg:
     val_paths: list[Union[Path, str]]
     min_length: int
     num_bins: int
+    name: str = ''
 
-    normalisation_means: list[float] = None
-    normalisation_stds: list[float] = None
+    normalisation_means: list[float] = field(default=None, compare=False)
+    normalisation_stds: list[float] = field(default=None, compare=False)
 
 
 @dataclass
 class SurvivalDatasetCfg(DatasetCfg):
     """Config to hold survival dataset information"""
     max_time_to_death: int = 0
+    name: str = ''
 
 
 @dataclass
@@ -26,6 +28,7 @@ class BinaryDatasetCfg(DatasetCfg):
     """Config to hold binary dataset information"""
     prediction_horizon: int = 0
     num_bins: int = field(default=1, init=False)
+    name: str = ''
 
 
 DATASETS = {
@@ -36,8 +39,9 @@ DATASETS = {
         ],
         val_paths=['PhagoPred/Datasets/synthetic_variants/baseline_val.h5'],
         min_length=50,
-        max_time_to_death=200,
+        max_time_to_death=1000,
         num_bins=5,
+        name='Baseline',
     ),
     'Binary Baseline':
     BinaryDatasetCfg(
@@ -47,6 +51,28 @@ DATASETS = {
         val_paths=['PhagoPred/Datasets/synthetic_variants/baseline_val.h5'],
         min_length=50,
         prediction_horizon=200,
+        name='Baseline',
+    ),
+    'Survival Challenging':
+    SurvivalDatasetCfg(
+        train_paths=[
+            'PhagoPred/Datasets/synthetic_variants/challenging_train.h5'
+        ],
+        val_paths=['PhagoPred/Datasets/synthetic_variants/challenging_val.h5'],
+        min_length=50,
+        max_time_to_death=1000,
+        num_bins=5,
+        name='Challenging',
+    ),
+    'Binary Challenging':
+    BinaryDatasetCfg(
+        train_paths=[
+            'PhagoPred/Datasets/synthetic_variants/challenging_train.h5'
+        ],
+        val_paths=['PhagoPred/Datasets/synthetic_variants/challenging_val.h5'],
+        min_length=50,
+        prediction_horizon=200,
+        name='Challenging',
     )
 }
 FEATURE_COMBOS = {

@@ -4,8 +4,13 @@ Supports modular attention mechanisms.
 """
 import torch
 import torch.nn as nn
+
+from PhagoPred.utils.logger import get_logger
+from PhagoPred.survival_v2.configs.attention import AttentionCfg
 from .base import SurvivalModel, build_fc_layers
 from ..attention.mechanisms import get_attention_mechanism
+
+log = get_logger()
 
 
 class LSTMSurvival(SurvivalModel):
@@ -22,8 +27,7 @@ class LSTMSurvival(SurvivalModel):
                  lstm_dropout: float = 0.0,
                  predictor_layers: list[int] = [32],
                  fc_layers: list[int] = [64, 64],
-                 attention_type: str = 'multihead',
-                 attention_config: dict = None,
+                 attention_config: AttentionCfg = None,
                  use_mask_embedding: bool = False,
                  **kwargs):
         """
@@ -66,8 +70,8 @@ class LSTMSurvival(SurvivalModel):
                                              layer_sizes=predictor_layers)
 
         # Attention mechanism
-        if attention_config is None:
-            attention_config = {}
+        # if attention_config is None:
+        #     attention_config = {}
         # attention_config['embed_dim'] = lstm_hidden_size
         setattr(attention_config, 'embed_dim', lstm_hidden_size)
         self.attention = get_attention_mechanism(attention_config)
@@ -83,8 +87,12 @@ class LSTMSurvival(SurvivalModel):
 
         num_params = sum(p.numel() for p in self.parameters()
                          if p.requires_grad)
-        print(f"LSTMSurvival initialized with {num_params:,} parameters")
-        print(f"  Attention type: {attention_type}")
+        print(
+            f"LSTM initialised with {num_params:,} parameters\n\tAttention type: {attention_config.attention_type}"
+        )
+        log.info(
+            f"LSTMS initialised with {num_params:,} parameters\n\tAttention type: {attention_config.attention_type}"
+        )
 
     def forward(self,
                 x: torch.Tensor,

@@ -30,28 +30,13 @@ from PhagoPred.survival_v2.data import (
 from PhagoPred.survival_v2.utils.plots import plot_losses
 from PhagoPred.utils.logger import get_logger
 from PhagoPred.utils.tools import highlight_str
-from .plot_experiments import (
+from .plots.plot_experiments import (
     plot_experiment_results,
-    plot_confusion_matrices,
-    plot_experiment_losses,
+    # plot_confusion_matrices,
+    # plot_experiment_losses,
 )
 
 log = get_logger()
-
-# def to_json_safe(obj):
-#     """Ensure dict can be saved as .json"""
-#     if isinstance(obj, dict):
-#         return {k: to_json_safe(v) for k, v in obj.items()}
-#     elif isinstance(obj, list):
-#         return [to_json_safe(v) for v in obj]
-#     elif isinstance(obj, tuple):
-#         return [to_json_safe(v) for v in obj]
-#     elif isinstance(obj, np.generic):
-#         return obj.item()  # converts np.float32 → float
-#     elif isinstance(obj, np.ndarray):
-#         return obj.tolist()
-#     else:
-#         return obj
 
 
 def build_model(model_config: ModelCfg,
@@ -212,7 +197,7 @@ def run_single_experiment(
     with (exp_dir / 'config.json').open('w') as f:
         json.dump(asdict(experiment_config), f, indent=2)
 
-    print("Building datasets...")
+    print(f"Building datasets {experiment_config.dataset.name}...")
     log.info(
         f'Building train/validatin datasets: \n\t{asdict(experiment_config.dataset)}'
     )
@@ -222,11 +207,22 @@ def run_single_experiment(
         is_classical=experiment_config.model.is_classical)
 
     if isinstance(train_dataset, BinaryCellDataset):
+
         pos_weight = train_dataset.get_pos_weight()
-        setattr(experiment_config.loss.pos_weight, pos_weight)
+        setattr(experiment_config.loss, 'pos_weight', pos_weight)
         log.info(f"Computed pos_weight: {pos_weight:.2f}")
 
-    print("Building model...")
+    else:
+        train_dataset: SurvivalCellDataset
+
+        bins = train_dataset.event_time_bins
+        log.info(f"Event time bins: {bins}")
+
+        bin_weights = train_dataset.get_bin_weights()
+        setattr(experiment_config.loss, 'bin_weights', bin_weights)
+        log.info(f"Computed bin weights: {bin_weights}")
+
+    print(f"Building model {experiment_config.model.name}...")
     num_features = len(experiment_config.feature_combo)
     num_bins = experiment_config.dataset.num_bins
     log.info(
@@ -303,8 +299,13 @@ def run_experiment_suite(
         result = run_single_experiment(exp_config, output_dir, device)
         results.append(result)
 
-    plot_experiment_results(output_dir, plot_type='box')
-    plot_confusion_matrices(output_dir)
-    plot_experiment_losses(output_dir)
-
+    plot_experiment_results(output_dir)
+    # plot_confusion_matrices(output_dir)
+    # plot_experiment_losses(output_di
     return results
+
+
+def evaluate_suite(experiment_dir: Path) -> None:
+    plot_experiment_results(experiment_dir)
+    # plot_confusion_matrices(experiment_dir)
+    # plot_experiment_losses(experiment_dir)

@@ -8,7 +8,6 @@ from typing import Generic, TypeVar, Literal
 import torch
 import h5py
 import numpy as np
-from tqdm import tqdm
 
 from PhagoPred.utils.logger import get_logger
 
@@ -183,7 +182,7 @@ class CellDataset(torch.utils.data.Dataset, ABC):
             reversed_mask = not_nan_mask[:, ::-1]
             last = area_data.shape[1] - 1 - reversed_mask.argmax(axis=1)
 
-            self.cell_metadata.start_frames += list(start + 1)
+            self.cell_metadata.start_frames += list(start)
             self.cell_metadata.end_frames += list(last)
 
         for idx in range(len(self)):
@@ -206,11 +205,12 @@ class CellDataset(torch.utils.data.Dataset, ABC):
 
     def apply_normalisation(self):
         """Normalise features in the cache using stored means and stds."""
+        safe_stds = np.where(self.stds < 1e-8, 1.0, self.stds)
         for file_idx, _ in enumerate(self.hdf5_paths):
             self._features_cache[file_idx] = (
                 self._features_cache[file_idx] -
                 self.means[:, np.newaxis,
-                           np.newaxis]) / self.stds[:, np.newaxis, np.newaxis]
+                           np.newaxis]) / safe_stds[:, np.newaxis, np.newaxis]
 
     def get_normalisation_stats(self):
         """Get or compute normalisation stats."""
@@ -241,11 +241,11 @@ class CellDataset(torch.utils.data.Dataset, ABC):
 
         landmark_frame = np.random.choice(valid_landmark_fames)
 
-        if self.model_type == 'deep':
-            features = features[:,
-                                int(landmark_frame - start_frame):
-                                int(last_frame + 1
-                                    )]  # For deep models, crop to known frames
+        # if self.model_type == 'deep':
+        #     features = features[:,
+        #                         int(landmark_frame - start_frame):
+        #                         int(last_frame + 1
+        #                             )]  # For deep models, crop to known frames
         features = features.T  # shape: (num_frames, num_features)
 
         return features, landmark_frame, event_indicator, cell_metadata
@@ -257,16 +257,20 @@ def collate_fn(batch: list[CellSample],
     """Collate function to pad sequences in batch to same length"""
     batch_dict = {}
 
-    max_seq_len = int(max([getattr(s, 'length') for s in batch]))
+    # max_seq_len = int(max([getattr(s, 'length') for s in batch]))
+    max_seq_len = int(max([s.length for s in batch]))
     for f in fields(batch[0]):
         values = [getattr(s, f.name) for s in batch]
 
         if f.name == 'features':
-            batch_dict[f.name] = _pad_values(values, pad_at, max_seq_len,
-                                             device).to(torch.float32)
+
+            batch_dict[f.name] = _crop_and_pad(values, batch, pad_at,
+                                               max_seq_len,
+                                               device).to(torch.float32)
         elif f.name == 'mask':
-            batch_dict[f.name] = _pad_values(values, pad_at, max_seq_len,
-                                             device).to(torch.int8)
+            batch_dict[f.name] = _crop_and_pad(values, batch, pad_at,
+                                               max_seq_len,
+                                               device).to(torch.int8)
         elif f.name in [
                 'time_to_event_bin',
                 'event',
@@ -287,9 +291,10 @@ def collate_fn(batch: list[CellSample],
     return batch_dict
 
 
-def _pad_values(values: list[np.ndarray], pad_at: Literal['start', 'end'],
-                max_seq_len: int, device: str) -> torch.Tensor:
-    """Pad all features in batch with zeros to same length"""
+def _crop_and_pad(values: list[np.ndarray], samples_list: list[CellSample],
+                  pad_at: Literal['start', 'end'], max_seq_len: int,
+                  device: str) -> torch.Tensor:
+    """Crop all features to (start_frame: landmark_framse) then pad all features in batch with zeros to same length"""
     # log.info(f'Padding dataset values, shape: {values[0].shape}')
     has_features_dim = values[0].ndim > 1
     if has_features_dim:
@@ -300,12 +305,24 @@ def _pad_values(values: list[np.ndarray], pad_at: Literal['start', 'end'],
                                     device=device)
     else:
         values_padded = torch.zeros(len(values), max_seq_len, device=device)
-    for idx, sample in enumerate(values):
-        sample_len = sample.shape[0]
+        # values = values[
+        #     np.newaxis:,
+        # ]
+        # num_features = 1
+    # if has_features_dim:
+
+    # else:
+    #     values_padded = torch.zeros(len(values), max_seq_len, device=device)
+    for idx, (sample_values, sample) in enumerate(zip(values, samples_list)):
+        sample_values = sample_values[sample.
+                                      start_frame:sample.landmark_frame + 1]
+        sample_len = sample_values.shape[0]
         if pad_at == 'start':
-            values_padded[idx, -sample_len:] = torch.tensor(sample,
+            values_padded[idx, -sample_len:] = torch.tensor(sample_values,
                                                             device=device)
         elif pad_at == 'end':
-            values_padded[idx, :sample_len] = torch.tensor(sample,
+            values_padded[idx, :sample_len] = torch.tensor(sample_values,
                                                            device=device)
+    # if not has_features_dim:
+    #     values_padded = values_padded[0]
     return values_padded

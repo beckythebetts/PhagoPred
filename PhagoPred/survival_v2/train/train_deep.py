@@ -9,6 +9,7 @@ from tqdm import tqdm
 from PhagoPred.survival_v2.models import SurvivalModel
 from PhagoPred.survival_v2.losses import compute_loss
 from PhagoPred.survival_v2.data.dataset import CellSample
+from PhagoPred.survival_v2.data.survival_dataset import SurvivalCellBatch
 from PhagoPred.survival_v2.configs.losses import LossCfg
 from PhagoPred.utils.logger import get_logger
 

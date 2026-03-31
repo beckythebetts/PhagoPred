@@ -5,10 +5,53 @@ from PhagoPred.utils.logger import get_logger
 log = get_logger()
 
 
+def hazard_nll(logits, t, e, bin_weights=None):
+    h = torch.sigmoid(logits)
+    eps = 1e-8
+    log_h = torch.log(h.clamp(min=eps))
+    log_1mh = torch.log((1 - h).clamp(min=eps))
+    log_s = log_1mh.cumsum(dim=1)  # log S(t)
+    t = t.long()
+    num_bins = logits.shape[1]
+
+    # Uncensored: log PMF(t) = log h(t) + log S(t-1)
+    unc_mask = e == 1
+    if unc_mask.any():
+        idx = torch.arange(unc_mask.sum(), device=logits.device)
+        unc_t = t[unc_mask]
+        log_ht = log_h[unc_mask][idx, unc_t]
+        log_s_prev = torch.where(
+            unc_t > 0, log_s[unc_mask][idx, (unc_t - 1).clamp(min=0)],
+            torch.zeros(unc_mask.sum(), device=logits.device))
+        nll = -(log_ht + log_s_prev)
+        if bin_weights is not None:
+            w = torch.tensor(bin_weights,
+                             dtype=torch.float32,
+                             device=logits.device)[unc_t]
+            uncensored_loss = (nll * w).sum() / w.sum()
+        else:
+            uncensored_loss = nll.mean()
+    else:
+        uncensored_loss = torch.tensor(0.0, device=logits.device)
+
+    # Censored: log S(t), capped at last bin
+    cens_mask = e == 0
+    if cens_mask.any():
+        cens_t = t[cens_mask].clamp(max=num_bins - 1)
+        idx = torch.arange(cens_mask.sum(), device=logits.device)
+        log_st = log_s[cens_mask][idx, cens_t]
+        censored_loss = -log_st.mean()
+    else:
+        censored_loss = torch.tensor(0.0, device=logits.device)
+
+    return uncensored_loss + censored_loss, censored_loss, uncensored_loss
+
+
 def negative_log_likelihood(
     pmf: torch.Tensor,
     t: torch.Tensor,
     e: torch.Tensor,
+    bin_weights: torch.Tensor = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Negative log-likelihood for discrete-time survival with censoring.
@@ -21,6 +64,8 @@ def negative_log_likelihood(
     Returns:
         tuple: (total_loss, censored_loss, uncensored_loss)
     """
+    if bin_weights is None:
+        bin_weights = torch.tensor([])
     # batch_size, num_bins = pmf.shape
     cif = torch.cumsum(pmf, dim=1)
     eps = 1e-6
@@ -34,10 +79,15 @@ def negative_log_likelihood(
     if uncensored_mask.any():
         unc_pmf = pmf[uncensored_mask]
         unc_t = t[uncensored_mask]
-
-        # Probability of event at true time
         o_t = unc_pmf[torch.arange(unc_pmf.size(0), device=pmf.device), unc_t]
-        uncensored_loss = torch.mean(-torch.log(o_t.clamp(min=eps, max=1.0)))
+        nll = -torch.log(o_t.clamp(min=eps, max=1.0))
+        if len(bin_weights) == 0:
+            uncensored_loss = torch.mean(nll)
+        else:
+            w = bin_weights[unc_t]
+            uncensored_loss = (nll * w).sum() / w.sum()
+
+        # uncensored_loss = torch.mean(uncens)
     else:
         uncensored_loss = torch.tensor(0.0, device=pmf.device)
 
@@ -262,68 +312,68 @@ def prediction_loss(y_pred: torch.Tensor,
     return masked_loss.sum() / (mask_shift.sum() + 1e-8)
 
 
-# Loss combination presets
-LOSS_CONFIGS = {
-    'nll_only': {
-        'nll': 1.0,
-        'nll_type': 'standard',
-        'ranking': 0.0,
-        'prediction': 0.0
-    },
-    'soft_target': {
-        'nll': 1.0,
-        'nll_type': 'soft_target',
-        'soft_target_sigma': 0.8,
-        'ranking': 0.0,
-        'prediction': 0.0
-    },
-    'soft_target_tight': {
-        'nll': 1.0,
-        'nll_type': 'soft_target',
-        'soft_target_sigma': 0.5,
-        'ranking': 0.0,
-        'prediction': 0.0
-    },
-    'soft_target_wide': {
-        'nll': 1.0,
-        'nll_type': 'soft_target',
-        'soft_target_sigma': 1.0,
-        'ranking': 0.0,
-        'prediction': 0.0
-    },
-    'nll_ranking_concordance': {
-        'nll': 1.0,
-        'nll_type': 'standard',
-        'ranking': 0.1,
-        'ranking_type': 'concordance',
-        'prediction': 0.0
-    },
-    'soft_target_ranking': {
-        'nll': 1.0,
-        'nll_type': 'soft_target',
-        'soft_target_sigma': 0.8,
-        'ranking': 0.05,
-        'ranking_type': 'concordance',
-        'prediction': 0.0
-    },
-    'nll_ranking_cif': {
-        'nll': 1.0,
-        'nll_type': 'standard',
-        'ranking': 0.1,
-        'ranking_type': 'cif',
-        'prediction': 0.0
-    },
-    'nll_prediction': {
-        'nll': 1.0,
-        'nll_type': 'standard',
-        'ranking': 0.0,
-        'prediction': 0.5
-    },
-    'full': {
-        'nll': 1.0,
-        'nll_type': 'standard',
-        'ranking': 0.1,
-        'ranking_type': 'concordance',
-        'prediction': 0.5
-    }
-}
+# # Loss combination presets
+# LOSS_CONFIGS = {
+#     'nll_only': {
+#         'nll': 1.0,
+#         'nll_type': 'standard',
+#         'ranking': 0.0,
+#         'prediction': 0.0
+#     },
+#     'soft_target': {
+#         'nll': 1.0,
+#         'nll_type': 'soft_target',
+#         'soft_target_sigma': 0.8,
+#         'ranking': 0.0,
+#         'prediction': 0.0
+#     },
+#     'soft_target_tight': {
+#         'nll': 1.0,
+#         'nll_type': 'soft_target',
+#         'soft_target_sigma': 0.5,
+#         'ranking': 0.0,
+#         'prediction': 0.0
+#     },
+#     'soft_target_wide': {
+#         'nll': 1.0,
+#         'nll_type': 'soft_target',
+#         'soft_target_sigma': 1.0,
+#         'ranking': 0.0,
+#         'prediction': 0.0
+#     },
+#     'nll_ranking_concordance': {
+#         'nll': 1.0,
+#         'nll_type': 'standard',
+#         'ranking': 0.1,
+#         'ranking_type': 'concordance',
+#         'prediction': 0.0
+#     },
+#     'soft_target_ranking': {
+#         'nll': 1.0,
+#         'nll_type': 'soft_target',
+#         'soft_target_sigma': 0.8,
+#         'ranking': 0.05,
+#         'ranking_type': 'concordance',
+#         'prediction': 0.0
+#     },
+#     'nll_ranking_cif': {
+#         'nll': 1.0,
+#         'nll_type': 'standard',
+#         'ranking': 0.1,
+#         'ranking_type': 'cif',
+#         'prediction': 0.0
+#     },
+#     'nll_prediction': {
+#         'nll': 1.0,
+#         'nll_type': 'standard',
+#         'ranking': 0.0,
+#         'prediction': 0.5
+#     },
+#     'full': {
+#         'nll': 1.0,
+#         'nll_type': 'standard',
+#         'ranking': 0.1,
+#         'ranking_type': 'concordance',
+#         'prediction': 0.5
+#     }
+# }

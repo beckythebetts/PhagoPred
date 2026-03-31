@@ -25,12 +25,16 @@ from .metrics import (
 @dataclass
 class SurvivalResults:
     """Data class to hold evaluation results for survival prediction."""
-    c_index: float
-    brier_score: float
+    C_Index: float
+    Brier_Score: float
+    c_index_per_bin: np.ndarray
     n_samples: int
     n_events: int
     n_censored: int
-    cm: np.ndarray
+    cm_expected: np.ndarray
+    cm_argmax: np.ndarray
+    brier_times: np.ndarray
+    brier_scores: np.ndarray
 
 
 def evaluate_survival_model(model,
@@ -66,25 +70,46 @@ def evaluate_survival_model(model,
             "Model must be an instance of SurvivalModel or ClassicalSurvivalModel."
         )
 
-    c_index = concordance_index(predictions, times, events,
-                                dataset.event_time_bins)
+    c_indexs = concordance_index(predictions, times, events,
+                                 dataset.event_time_bins)
     ibs, brier_times, brier_scores = integrated_brier_score(
         predictions, times, events, dataset.event_time_bins)
 
-    expected_times = (predictions * np.arange(model.num_bins)).sum(axis=1)
-    cm = confusion_matrix(binned_times, expected_times.round().astype(int))
+    # expected_times = (predictions * np.arange(model.num_bins)).sum(axis=1)
+    # Only plot uncensored samples in CMs
 
-    plot_cm(cm, save_dir / "plots" / "confusion_matrix.png")
+    pmf_sum = predictions.sum(axis=1, keepdims=True).clip(min=1e-8)
+    expected_times = (predictions / pmf_sum *
+                      np.arange(model.num_bins)).sum(axis=1)
+    argmax_times = np.argmax(predictions, axis=1)
+
+    binned_times = binned_times[events == 1]
+    expected_times = expected_times[events == 1]
+    argmax_times = argmax_times[events == 1]
+
+    cm_expected = confusion_matrix(binned_times,
+                                   expected_times.round().astype(int))
+    cm_argmax = confusion_matrix(binned_times,
+                                 argmax_times.round().astype(int))
+
+    plot_cm(cm_expected,
+            save_dir / "plots" / "confusion_matrix_expected_times.png")
+    plot_cm(cm_argmax,
+            save_dir / "plots" / "confusion_matrix_argmax_times.png")
     plot_brier_scores(brier_times, brier_scores,
                       save_dir / "plots" / "brier_scores.png")
 
     results = SurvivalResults(
-        c_index=c_index,
-        brier_score=ibs,
+        C_Index=c_indexs[-1],
+        Brier_Score=ibs,
+        c_index_per_bin=c_indexs,
         n_samples=len(times),
         n_events=events.sum(),
         n_censored=(1 - events).sum(),
-        cm=cm,
+        cm_expected=cm_expected,
+        cm_argmax=cm_argmax,
+        brier_times=brier_times,
+        brier_scores=brier_scores,
     )
 
     results_dict = to_json_safe(asdict(results))
@@ -151,6 +176,7 @@ def _get_deep_predictions(
                         bin_edges,
                         feature_names=feature_names,
                         save_path=save_dir / f"prediction_{visualised}.png",
+                        padded='end',
                     )
                     visualised += 1
 
@@ -184,6 +210,7 @@ def _get_classical_predictions(model: ClassicalSurvivalModel,
                 bin_edges=dataset.event_time_bins,
                 feature_names=feature_names,
                 save_path=save_dir / f"prediction_{visualised}.png",
+                padded='none',
             )
             visualised += 1
 

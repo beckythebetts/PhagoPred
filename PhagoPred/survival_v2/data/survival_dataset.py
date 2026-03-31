@@ -78,12 +78,25 @@ class SurvivalCellDataset(CellDataset):
         times = np.array(times)
         bins = np.quantile(times, np.linspace(0, 1,
                                               self.num_bins + 1)).astype(int)
-        bins[-1] = bins[-1] * 1e5
+        # bins[-1] = bins[-1] * 1e5
+        bins[-1] = self.max_time_to_death + 1
         self.event_time_bins = bins
 
     def get_bins(self) -> np.ndarray:
         """Return eveent time bins."""
         return self.event_time_bins
+
+    def get_bin_weights(self, num_samples: int = 1000) -> list:
+        """Inverse frequency of bins (for uncensored samles only), for weighting NLL loss."""
+        counts = np.zeros(self.num_bins)
+        for _ in range(num_samples):
+            idx = np.random.randint(len(self))
+            sample = self[idx]
+            if sample.event_indicator == 1:
+                counts[sample.time_to_event_bin] += 1
+        counts = np.where(counts == 0, 1, counts)
+        weights = counts.sum() / (self.num_bins * counts)
+        return weights.tolist()
 
     def _get_valid_landmarks(self, idx: int) -> list:
         """Allowed landmark frames for cell {idx}.
@@ -116,7 +129,9 @@ class SurvivalCellDataset(CellDataset):
         features, landmark_frame, event_indicator, cell_metadata = super(
         ).__getitem__(idx)
 
-        time_to_event = cell_metadata.end_frames - landmark_frame
+        last_frame = cell_metadata.end_frames if np.isnan(
+            cell_metadata.death_frames) else cell_metadata.death_frames
+        time_to_event = last_frame - landmark_frame
 
         time_to_event_bin = None
         if self.event_time_bins is not None:
@@ -126,10 +141,13 @@ class SurvivalCellDataset(CellDataset):
 
         pmf, binned_pmf = self._get_item_pmf(cell_metadata, landmark_frame)
 
+        nan_mask = np.isnan(features).any(axis=1)
+        features = np.where(np.isnan(features), 0.0, features)
+
         return SurvivalCellSample(
             features=features,
-            mask=~np.isnan(features).any(axis=1),
-            length=features.shape[0],
+            mask=~nan_mask,
+            length=landmark_frame - cell_metadata.start_frames + 1,
             cell_idx=cell_metadata.local_cell_idxs,
             hdf5_path=self.hdf5_paths[cell_metadata.file_idxs],
             start_frame=cell_metadata.start_frames,
@@ -172,9 +190,6 @@ class SurvivalCellDataset(CellDataset):
 
             binned_pmf = np.round(binned_pmf, decimals=4)
             binned_pmf = np.clip(binned_pmf, a_min=0.0, a_max=1.0)
-            binned_pmf[-1] = np.clip(1 - binned_pmf[:-1].sum(),
-                                     a_min=0.0,
-                                     a_max=1.0)
 
             s = binned_pmf.sum()
             if s > 0:

@@ -82,19 +82,25 @@ class BinaryCellDataset(CellDataset):
         """Get a single sample as BinaryCellSample dataclass."""
         features, landmark_frame, event_indicator, cell_metadata = super(
         ).__getitem__(idx)
-        time_to_event = cell_metadata.end_frames - landmark_frame
+        last_frame = cell_metadata.end_frames if np.isnan(
+            cell_metadata.death_frames) else cell_metadata.death_frames
+        time_to_event = last_frame - landmark_frame
+
         event = int(time_to_event <= self.prediction_horizon
                     and event_indicator == 1)
-        features[
-            landmark_frame:] = np.nan  # remove features after landmark frame
+        # features[
+        #     landmark_frame:] = np.nan  # remove features after landmark frame
 
         event_probability = self._get_item_event_probability(
             cell_metadata, landmark_frame)
 
+        nan_mask = np.isnan(features).any(axis=1)
+        features = np.where(np.isnan(features), 0.0, features)
+
         return BinaryCellSample(
             features=features,
-            mask=~np.isnan(features).any(axis=1),
-            length=features.shape[0],
+            mask=~nan_mask,
+            length=landmark_frame - cell_metadata.start_frames + 1,
             cell_idx=cell_metadata.local_cell_idxs,
             hdf5_path=self.hdf5_paths[cell_metadata.file_idxs],
             start_frame=cell_metadata.start_frames,

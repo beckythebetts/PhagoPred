@@ -11,6 +11,7 @@ class TrainingCfg:
     step_size: int
     gamma: float
     scheduler: Literal[None, 'step'] = None
+    name: str = ''
 
 
 TRAINING = {
@@ -20,21 +21,24 @@ TRAINING = {
                 lr=1e-3,
                 scheduler='step',
                 step_size=10,
-                gamma=0.9),
+                gamma=0.9,
+                name='Quick'),
     'Standard':
-    TrainingCfg(num_epochs=150,
+    TrainingCfg(num_epochs=50,
                 batch_size=256,
                 lr=1e-3,
                 scheduler='step',
                 step_size=10,
-                gamma=0.9),
+                gamma=0.9,
+                name='Standard'),
     'Long':
     TrainingCfg(num_epochs=300,
                 batch_size=256,
                 lr=1e-3,
                 scheduler='step',
                 step_size=10,
-                gamma=0.9),
+                gamma=0.9,
+                name='Long'),
 }
 
 # TRAINING = {

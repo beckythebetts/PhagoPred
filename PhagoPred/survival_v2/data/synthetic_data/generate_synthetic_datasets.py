@@ -2,11 +2,10 @@
 Generate multiple synthetic datasets with different configurations.
 """
 from pathlib import Path
-from PhagoPred.survival_v2.data.synthetic_data import (
-    create_synthetic_dataset,
-    VariationRule,
-    GradualRampRule
-)
+# from PhagoPred.survival_v2.data.synthetic_data import (
+# create_synthetic_dataset,
+# VariationRule,
+# GradualRampRule, )
 
 # Output directory
 output_dir = Path('PhagoPred/Datasets/synthetic_variants')
@@ -141,11 +140,6 @@ def generate_all_datasets(train_val_split=0.7):
 
         # Training set
         train_file = output_dir / f'{name}_train.h5'
-        
-        # if train_file.exists():
-        #     print(f"Dataset already exists: {train_file}, skipping.")
-        #     continue
-            
         print(f"\nCreating training set: {train_file}")
         train_config = config.copy()
         train_config['num_cells'] = int(config['num_cells'] * train_val_split)
@@ -156,8 +150,10 @@ def generate_all_datasets(train_val_split=0.7):
 
         print(f"\nCreating validation set: {val_file}")
         val_config = config.copy()
-        val_config['num_cells'] = int(config['num_cells'] * (1 - train_val_split))
-        val_config['seed'] = config.get('seed', 42) + 1000 if config.get('seed') is not None else None
+        val_config['num_cells'] = int(config['num_cells'] *
+                                      (1 - train_val_split))
+        val_config['seed'] = config.get(
+            'seed', 42) + 1000 if config.get('seed') is not None else None
         create_synthetic_dataset(filename=val_file, **val_config)
 
     print(f"\n{'='*80}")

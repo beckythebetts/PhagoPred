@@ -9,10 +9,11 @@ from PhagoPred.survival_v2.data import (
     SurvivalCellBatch,
 )
 from PhagoPred.survival_v2.configs.losses import LossCfg, SurvivalLossCfg, BinaryLossCfg
-
+from PhagoPred.utils.logger import get_logger
 from .survival_losses import (
     soft_target_nll,
     negative_log_likelihood,
+    hazard_nll,
     prediction_loss,
     ranking_loss_concordance,
     ranking_loss_cif,
@@ -24,6 +25,8 @@ from .binary_losses import (
     binary_focal_loss,
 )
 
+log = get_logger()
+
 
 def compute_binary_loss(
     predicted_event_prob: torch.Tensor,
@@ -34,16 +37,20 @@ def compute_binary_loss(
     if loss_config is None:
         raise ValueError("loss_config must be provided")
     if loss_config.loss_type == 'bce':  # default: 'bce'
+        # log.info(
+        #     f'Caculating BCE\n{predicted_event_prob}\n{torch.unique(true_event)}'
+        # )
         loss = binary_cross_entropy_loss(predicted_event_prob, true_event)
+        # log.info(f'Calculated loss \n{loss}')
         return {'total': loss, 'BCE': loss}
     if loss_config.loss_type == 'weighted_bce':
-        pos_weight = loss_config.get('pos_weight', 1.0)
+        pos_weight = loss_config.pos_weight
         loss = weighted_binary_cross_entropy_loss(predicted_event_prob,
                                                   true_event, pos_weight)
         return {'total': loss, 'Weighted BCE': loss}
     if loss_config.loss_type == 'binary_focal':
-        alpha = loss_config.get('binary_focal_alpha', 0.25)
-        gamma = loss_config.get('binary_focal_gamma', 2.0)
+        alpha = loss_config.focal_alpha
+        gamma = loss_config.focal_gamma
         loss = binary_focal_loss(predicted_event_prob, true_event, alpha,
                                  gamma)
         return {'total': loss, 'Focal': loss}
@@ -52,7 +59,7 @@ def compute_binary_loss(
 
 
 def compute_survival_loss(
-    pmf: torch.Tensor,
+    outputs: torch.Tensor,
     t: torch.Tensor,
     e: torch.Tensor,
     loss_config: SurvivalLossCfg,
@@ -77,32 +84,36 @@ def compute_survival_loss(
     Returns:
         dict with 'total', 'nll', 'ranking', 'prediction', 'censored', 'uncensored'
     """
-
+    bin_weights = loss_config.bin_weights
+    if bin_weights is not None:
+        bin_weights = torch.tensor(loss_config.bin_weights,
+                                   dtype=torch.float32,
+                                   device=outputs.device)
     # NLL (standard or soft target)
     nll_type = loss_config.nll_type
     if nll_type == 'soft_target':
         sigma = loss_config.soft_target_sigma
-        nll, censored, uncensored = soft_target_nll(pmf, t, e, sigma=sigma)
+        nll, censored, uncensored = soft_target_nll(outputs, t, e, sigma=sigma)
     else:
-        nll, censored, uncensored = negative_log_likelihood(pmf, t, e)
+        nll, censored, uncensored = hazard_nll(outputs, t, e, bin_weights)
 
     # Ranking
     if loss_config.ranking > 0.0:
         ranking_type = loss_config.ranking_type
         if ranking_type == 'concordance':
-            ranking = ranking_loss_concordance(pmf, t, e)
+            ranking = ranking_loss_concordance(outputs, t, e)
         elif ranking_type == 'cif':
-            ranking = ranking_loss_cif(pmf, t, e)
+            ranking = ranking_loss_cif(outputs, t, e)
         else:
-            ranking = torch.tensor(0.0, device=pmf.device)
+            ranking = torch.tensor(0.0, device=outputs.device)
     else:
-        ranking = torch.tensor(0.0, device=pmf.device)
+        ranking = torch.tensor(0.0, device=outputs.device)
 
     # Prediction
     if loss_config.prediction > 0.0 and y_pred is not None and y_true is not None:
         pred = prediction_loss(y_pred, y_true, mask)
     else:
-        pred = torch.tensor(0.0, device=pmf.device)
+        pred = torch.tensor(0.0, device=outputs.device)
 
     # Total
     total = (loss_config.nll * nll + loss_config.ranking * ranking +
@@ -125,12 +136,13 @@ def compute_loss(outputs: torch.Tensor,
     """Return either binary or survival loss depeniding on batch type."""
     if isinstance(batch, BinaryCell):
         loss_dict = compute_binary_loss(
-            outputs,
+            outputs[:, 0],
             batch.event,
             loss_cfg,
         )
 
     elif isinstance(batch, SurvivalCell):
+        # pmf = torch.nn.functional.softmax(outputs, dim=-1)
         loss_dict = compute_survival_loss(
             outputs,
             batch.time_to_event_bin,

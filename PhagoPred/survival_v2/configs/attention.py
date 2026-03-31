@@ -16,16 +16,17 @@ class AttentionCfg:
     hidden_dims: list = field(default_factory=list)  # for FC only
     num_heads: int = 0  # For multihead only
     dropout: float = 0  # for multihead only
-    embed_dim: int = 0  #
+    embed_dim: int = field(default=0, compare=False)  #
+    name: str = ''
 
 
 ATTENTION = {
-    'Mean Pooling': AttentionCfg('mean_pool'),
-    'Last': AttentionCfg('last_pool'),
-    'Vector': AttentionCfg('vector'),
-    'FC Small': AttentionCfg('fc', hidden_dims=[32]),
-    'FC Medium': AttentionCfg('fc', hidden_dims=[64, 32]),
-    'Multihead': AttentionCfg('multihead', num_heads=2, dropout=0.1),
+    'Mean Pooling': AttentionCfg('mean_pool', name='Mean Pooling'),
+    'Last': AttentionCfg('last_pool', name='Last'),
+    'Vector': AttentionCfg('vector', name='Vector'),
+    'FC Small': AttentionCfg('fc', hidden_dims=[32], name='FC Small'),
+    'FC Medium': AttentionCfg('fc', hidden_dims=[64, 32], name='FC Medium'),
+    'Multihead': AttentionCfg('multihead', num_heads=2, dropout=0.1, name='Multihead'),
 }
 # ATTENTION = {
 #     'none_mean': {

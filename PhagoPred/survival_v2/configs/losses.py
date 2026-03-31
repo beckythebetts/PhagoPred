@@ -1,10 +1,11 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 
+@dataclass
 class LossCfg:
     """Abstract class for loss function configuration"""
-    pass  # pylint: disable=W0107
+    is_binary: bool = field(default=False, init=False)
 
 
 @dataclass
@@ -16,6 +17,8 @@ class SurvivalLossCfg(LossCfg):
     ranking: float = 0.0
     ranking_type: Literal['concordance', 'cif'] = 'concordance'
     prediction: float = 0.0
+    name: str = ''
+    bin_weights: list = field(default=None, compare=False)
 
 
 @dataclass
@@ -24,20 +27,23 @@ class BinaryLossCfg(LossCfg):
     loss_type: Literal['bce', 'weighted_bce', 'focal']
     focal_alpha: float = 0.0
     focal_gamma: float = 0.0
-    pos_weight: float = 0.0
+    pos_weight: float = field(default=0.0, compare=False)
+    is_binary: bool = field(default=True, init=False)
+    name: str = ''
 
 
 LOSSES = {
     'NLL':
-    SurvivalLossCfg(nll=1.0, nll_type='standard'),
+    SurvivalLossCfg(nll=1.0, nll_type='standard', name='NLL'),
     'Soft Target NLL':
-    SurvivalLossCfg(nll=1.0, nll_type='soft_target'),
+    SurvivalLossCfg(nll=1.0, nll_type='soft_target', name='Soft Target NLL'),
     'NLL + Ranking':
     SurvivalLossCfg(
         nll=1.0,
         nll_type='standard',
         ranking=1.0,
         ranking_type='concordance',
+        name='NLL + Ranking',
     ),
     'Soft NLL + Ranking':
     SurvivalLossCfg(
@@ -45,15 +51,22 @@ LOSSES = {
         nll_type='soft_target',
         ranking=1.0,
         ranking_type='concordance',
+        name='Soft NLL + Ranking',
     ),
     'NLL + Ranking + Prediction':
-    SurvivalLossCfg(nll=1.0, ranking=1.0, prediction=0.3),
+    SurvivalLossCfg(nll=1.0,
+                    ranking=1.0,
+                    prediction=0.3,
+                    name='NLL + Ranking + Prediction'),
     'BCE':
-    BinaryLossCfg('bce'),
+    BinaryLossCfg('bce', name='BCE'),
     'Weighted BCE':
-    BinaryLossCfg('weighted_bce'),
+    BinaryLossCfg('weighted_bce', name='Weighted BCE'),
     'Focal Loss':
-    BinaryLossCfg('focal', focal_alpha=0.25, focal_gamma=2.0),
+    BinaryLossCfg('focal',
+                  focal_alpha=0.25,
+                  focal_gamma=2.0,
+                  name='Focal Loss'),
 }
 # LOSSES = {
 #     'nll_only': {

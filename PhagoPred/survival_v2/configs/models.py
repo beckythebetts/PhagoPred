@@ -1,10 +1,12 @@
 from dataclasses import dataclass, field
+from typing import Literal
 
 
 @dataclass
 class ModelCfg:
     """Abstract base class for model configs"""
     is_classical: bool = field(default=False, init=False)
+    model_type: Literal['CNN', 'LSTM', 'RSF'] = field(default='', init=False)
 
 
 @dataclass
@@ -15,6 +17,9 @@ class LSTMCfg(ModelCfg):
     dropout: float
     fc_layers: list
     predictor_layers: list
+    model_type: Literal['CNN', 'LSTM', 'RSF'] = field(default='LSTM',
+                                                      init=False)
+    name: str = ''
 
 
 @dataclass
@@ -24,6 +29,9 @@ class CNNCfg(ModelCfg):
     kernel_sizes: list
     dilations: list
     fc_layers: list
+    model_type: Literal['CNN', 'LSTM', 'RSF'] = field(default='CNN',
+                                                      init=False)
+    name: str = ''
 
 
 @dataclass
@@ -33,6 +41,9 @@ class RSFCfg(ModelCfg):
     max_depth: int
     window_sizes: list
     is_classical: bool = field(default=True, init=False)
+    model_type: Literal['CNN', 'LSTM', 'RSF'] = field(default='RSF',
+                                                      init=False)
+    name: str = ''
 
 
 MODELS = {
@@ -43,17 +54,20 @@ MODELS = {
         dropout=0.2,
         fc_layers=[32],
         predictor_layers=[],
+        name='LSTM Medium',
     ),
     'CNN Medium':
     CNNCfg(num_channels=[64] * 9,
            kernel_sizes=[3] * 9,
            dilations=[2**n for n in range(9)],
-           fc_layers=[64, 32]),
+           fc_layers=[64, 32],
+           name='CNN Medium'),
     'Random Forest':
     RSFCfg(
         n_estimators=100,
         max_depth=3,
         window_sizes=[25, 100, 500, 1000],
+        name='Random Forest',
     ),
 }
 

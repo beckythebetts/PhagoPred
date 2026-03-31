@@ -80,8 +80,12 @@ class CNNSurvival(SurvivalModel):
 
         num_params = sum(p.numel() for p in self.parameters()
                          if p.requires_grad)
-        print(f"CNNSurvival initialized with {num_params:,} parameters")
-        log.info(f"CNNSurvival initialized with {num_params:,} parameters")
+        print(
+            f"CNN initialised with {num_params:,} parameters\n\tAttention type: {attention_config.attention_type}"
+        )
+        log.info(
+            f"CNN initialised with {num_params:,} parameters\n\tAttention type: {attention_config.attention_type}"
+        )
 
     def forward(self,
                 x: torch.Tensor,
@@ -99,6 +103,7 @@ class CNNSurvival(SurvivalModel):
             outputs: (batch, num_bins) - survival logits
             attn_weights: (batch, seq_len) - attention weights (if return_attention)
         """
+        # log.info(f'Calling forward with \n{x}')
         batch_size, seq_len, num_features = x.shape
 
         # Padding mask for attention
