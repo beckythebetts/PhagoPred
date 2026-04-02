@@ -22,13 +22,12 @@ from .rule import (
 )
 # from .rule.timing import FixedDelay, VariableDelay, Instantaneous
 
-
 @dataclass
 class Feature:
     """Time varying feature"""
     name: str
 
-    base_func: base_funcs.BaseFunc = field(default_factory=base_funcs.Constant)
+    base_func: base_funcs.BaseFunc = field(default_factory=base_funcs.Constant) # Base function MUST be constant for staionarity condition!!!
     pre_noise: noise_funcs.Noise = field(default=noise_funcs.GaussianNoise(1))
     post_noise: noise_funcs.Noise = field(default=noise_funcs.NoNoise())
 
