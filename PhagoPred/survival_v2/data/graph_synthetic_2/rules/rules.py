@@ -9,6 +9,7 @@ from .collapse import Collapse
 from .timing import Timing, Fixed
 from .shape import Shape
 from .magnitude import Magnitude
+from .structural_forms import StructuralForm
 
 
 @dataclass
@@ -69,7 +70,7 @@ class AccumulatorRule:
     collapse: Collapse
     magnitude: Magnitude
     combination: Combination = Add()
-    timing: Timing = Fixed(delay=1)
+    timing: Timing = Fixed(delay=0)
 
     @property
     def max_history(self) -> int:
@@ -122,4 +123,40 @@ class DecayingAccumulatorRule(AccumulatorRule):
             signals[self.target][t] += carry + self.magnitude(driver)
         else:
             signals[self.target][t] += carry * self.decay_rate
+        return signals
+
+
+@dataclass
+class SEMRule:
+    """Structural Equation Model rule for fixed-lag, window=1, delta effects.
+
+    Implements: target[t] += structural_form({parent: parent[t - lag]})
+
+    The causal lag is explicit and exact — no off-by-one ambiguity.
+    Parents are always read at t - lag (a single past value, window=1).
+    The increment is added as a delta at t.
+
+    Args:
+        inputs:           list of parent feature names.
+        target:           name of the target feature.
+        structural_form:  StructuralForm instance (defines Axis 1 × Axis 2).
+        lag:              causal delay in timesteps (must be >= 1).
+    """
+    inputs: list[str]
+    target: str
+    structural_form: StructuralForm
+    lag: int = 1
+
+    def __post_init__(self):
+        if self.lag < 1:
+            raise ValueError(f"lag must be >= 1, got {self.lag}")
+
+    def apply_step(self, signals: dict[str, np.ndarray], t: int) -> dict:
+        if t < self.lag:
+            return signals
+        parent_values = {
+            name: signals[name][t - self.lag]
+            for name in self.inputs
+        }
+        signals[self.target][t] += self.structural_form(parent_values)
         return signals

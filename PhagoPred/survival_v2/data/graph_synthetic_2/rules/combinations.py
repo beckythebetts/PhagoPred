@@ -13,6 +13,8 @@ class Combination(ABC):
     """
 
     def __call__(self, signals: list[np.ndarray]) -> np.ndarray:
+        min_signal_length = min(len(sig) for sig in signals)
+        signals = [sig[:min_signal_length] for sig in signals]
         return self._compute(signals)
 
     @abstractmethod

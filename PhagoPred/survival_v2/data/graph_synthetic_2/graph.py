@@ -16,7 +16,7 @@ from tqdm import tqdm
 import graphviz
 
 from . import noise_funcs, base_funcs
-from .rules.rules import Rule, Input, AccumulatorRule, DecayingAccumulatorRule
+from .rules.rules import Rule, Input, AccumulatorRule, DecayingAccumulatorRule, SEMRule
 from .rules import (
     collapse,
     combinations,
@@ -24,6 +24,8 @@ from .rules import (
     shape,
     timing,
     transforms,
+    structural_forms,
+    component_funcs,
 )
 
 
@@ -35,12 +37,15 @@ class Feature:
     base_func: base_funcs.BaseFunc = field(
         default_factory=base_funcs.Constant
     )  # Base function MUST be constant for staionarity condition!!!
+    # inital_value: noise_funcs.Noise = field(
+    #     default=noise_funcs.GaussianNoise(20))
     pre_noise: noise_funcs.Noise = field(default=noise_funcs.GaussianNoise(1))
     post_noise: noise_funcs.Noise = field(default=noise_funcs.NoNoise())
 
     def generate_signal(self, time_steps: int) -> np.ndarray:
         """Generate base signal for node, with base_func and pre_noise"""
         signal = self.base_func.generate(time_steps).astype(float)
+        # signal[0] += self.inital_value.sample(1).astype(float)[0]
         signal += self.pre_noise.sample(time_steps).astype(float)
         return signal
 
@@ -77,10 +82,14 @@ class CausalGraph:
                 G.add_node(str(feature), info=Node(feature, time))
 
         for rule in self.rules:
-            for inp in rule.inputs:
-                G.add_edge(inp.feature, rule.target, rule=rule)
-                if isinstance(rule, AccumulatorRule):
-                    G.add_edge(rule.target, rule.target, rule=rule)
+            if isinstance(rule, SEMRule):
+                for feat in rule.inputs:
+                    G.add_edge(feat, rule.target, rule=rule)
+            else:
+                for inp in rule.inputs:
+                    G.add_edge(inp.feature, rule.target, rule=rule)
+                    if isinstance(rule, AccumulatorRule):
+                        G.add_edge(rule.target, rule.target, rule=rule)
 
         return G
 
@@ -98,7 +107,7 @@ class CausalGraph:
         for feature in self.features:
             signal = signals[feature.name]
             signal += feature.post_noise.sample(self.time_steps).astype(float)
-            signals[str(feature)] = signal
+            signals[feature.name] = signal
 
         return signals
 
@@ -113,6 +122,8 @@ class CausalGraph:
         plt.savefig(save_path)
 
     def _get_rule_delay(self, rule) -> int:
+        if isinstance(rule, SEMRule):
+            return rule.lag
         if isinstance(rule, AccumulatorRule):
             return 1
         t = rule.timing
@@ -123,14 +134,16 @@ class CausalGraph:
         return 0
 
     def _rule_edge_label(self, rule) -> str:
+        if isinstance(rule, SEMRule):
+            return f'Δ={rule.lag}'
         if isinstance(rule, DecayingAccumulatorRule):
             return f'AR(1) decay={rule.decay_rate}'
         if isinstance(rule, AccumulatorRule):
             return 'AR(1)'
         t = rule.timing
         if isinstance(t, timing.Variable):
-            return f'Δ~N({t.mean},{t.sigma:.0f})'
-        return f'Δ={t.delay}'
+            return f'Δ~N({t.mean + 1},{t.sigma:.0f})'
+        return f'Δ={t.delay + 1}'
 
     def plot_feature_graph(self, save_path: Path) -> None:
         """Feature-level summary graph.
@@ -147,10 +160,16 @@ class CausalGraph:
         edges: dict[tuple[str, str], list[str]] = {}
         for rule in self.rules:
             label = self._rule_edge_label(rule)
-            if isinstance(rule, AccumulatorRule):
-                edges.setdefault((rule.target, rule.target), []).append(label)
-            for inp in rule.inputs:
-                edges.setdefault((inp.feature, rule.target), []).append(label)
+            if isinstance(rule, SEMRule):
+                for feat in rule.inputs:
+                    edges.setdefault((feat, rule.target), []).append(label)
+            else:
+                if isinstance(rule, AccumulatorRule):
+                    edges.setdefault((rule.target, rule.target),
+                                     []).append(label)
+                for inp in rule.inputs:
+                    edges.setdefault((inp.feature, rule.target),
+                                     []).append(label)
 
         # --- graphviz (static) ---
         g = graphviz.Digraph(engine='dot')
@@ -206,15 +225,22 @@ class CausalGraph:
             # if isinstance(t_obj, Instantaneous):
             #     return 0, False, "Delay = 0"
             if isinstance(t_obj, timing.Fixed):
-                return t_obj.delay, False, f"Delay = {t_obj.delay}"
+                return t_obj.delay, False, f"Delay = {t_obj.delay + 1}"
             if isinstance(t_obj, timing.Variable):
-                return t_obj.mean, True, f"delay = {t_obj.mean}±{t_obj.sigma:.0f}"
+                return t_obj.mean, True, f"delay = {t_obj.mean + 1}±{t_obj.sigma:.0f}"
             else:
                 raise ValueError(f"Unknown timing type: {type(t_obj)}")
 
-        delays = [delay_info(r.timing)[0] for r in self.rules]
-        max_delay = max(delays)
-        nonzero = [d for d in delays if d != 0]
+        delays = [
+            r.lag if isinstance(r, SEMRule) else delay_info(r.timing)[0]
+            for r in self.rules
+        ]
+        true_delays = [
+            d if isinstance(r, SEMRule) else d + 1
+            for r, d in zip(self.rules, delays)
+        ]
+        max_delay = max(true_delays) * 2
+        nonzero = [d for d in true_delays if d != 0]
         time_step = reduce(gcd, nonzero) if nonzero else 1
         n_cols = max_delay // time_step + 1
 
@@ -254,10 +280,18 @@ class CausalGraph:
         cmap = plt.get_cmap('Set1')
         legend_handles = []
         for i, rule in enumerate(all_rules):
-            delay, is_var, dlabel = delay_info(rule.timing)
+            if isinstance(rule, SEMRule):
+                delay, is_var, dlabel = rule.lag, False, f"Delay = {rule.lag}"
+                src_names = ', '.join(rule.inputs)
+                input_features = rule.inputs
+            else:
+                delay, is_var, dlabel = delay_info(rule.timing)
+                src_names = ', '.join(inp.feature for inp in rule.inputs)
+                input_features = [inp.feature for inp in rule.inputs]
+                if isinstance(rule, AccumulatorRule):
+                    input_features = input_features + [rule.target]
             ls = '-' if not is_var else '--'
             color = cmap(i)
-            src_names = ', '.join(inp.feature for inp in rule.inputs)
             legend_handles.append(
                 mlines.Line2D(
                     [], [],
@@ -267,16 +301,14 @@ class CausalGraph:
                     marker='>',
                     markersize=5,
                     label=f"{src_names} → {rule.target}  [{dlabel}]"))
-            inputs = rule.inputs
-            if isinstance(rule, AccumulatorRule):
-                inputs.append(
-                    Input(feature=rule.target, transform=transforms.Value(1)))
-            for inp in rule.inputs:
+            for feat in input_features:
                 for t in range(0, max_delay + 1, time_step):
-                    t_target = t + delay
-                    if t_target > max_delay:
+                    t_target = t + delay + 1 if not isinstance(
+                        rule, SEMRule) else t + delay
+                    if (feat, t) not in pos or (rule.target,
+                                                t_target) not in pos:
                         continue
-                    x0, y0 = pos[(inp.feature, t)]
+                    x0, y0 = pos[(feat, t)]
                     x1, y1 = pos[(rule.target, t_target)]
                     dx, dy = x1 - x0, y1 - y0
                     dist = np.hypot(dx, dy)
@@ -315,95 +347,15 @@ class CausalGraph:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.close()
 
-    # def plot_temporal_graph(self, save_path: Path) -> None:
-    #     """DBN-style temporal graph showing one template of the causal structure.
 
-    #     Columns correspond to the distinct delays present across all rules.
-    #     Edges show where each rule's inputs land in time relative to t=0.
-    #     """
-
-    #     save_path = Path(save_path)
-
-    #     # Columns = t=0 plus every unique delay
-    #     cols = sorted({0} | {self._get_rule_delay(r) for r in self.rules})
-
-    #     g = graphviz.Digraph(engine='neato')
-    #     g.attr(rankdir='LR', fontname='Helvetica', fontsize='11')
-    #     g.attr('node',
-    #            shape='circle',
-    #            style='filled',
-    #            fillcolor='white',
-    #            fontname='Helvetica',
-    #            fontsize='11',
-    #            width='0.7',
-    #            height='0.4')
-    #     g.attr('edge', fontname='Helvetica', fontsize='9')
-
-    #     # Time-slice subgraphs — rank=same keeps each column vertically aligned
-    #     for col_t in cols:
-    #         with g.subgraph() as s:
-    #             s.attr(rank='same')
-    #             s.node(f'_header_{col_t}',
-    #                    label=f't' if col_t == 0 else f't+{col_t}',
-    #                    shape='plaintext',
-    #                    style='',
-    #                    fillcolor='white',
-    #                    fontsize='10',
-    #                    fontname='Helvetica',
-    #                    pos=f"{col_t * 2},0!")
-    #             for feature in self.features:
-    #                 s.node(f'{feature.name}_{col_t}', label=feature.name)
-
-    #     # Invisible chain on headers forces left-to-right column ordering
-    #     for i in range(len(cols) - 1):
-    #         g.edge(f'_header_{cols[i]}', f'_header_{cols[i+1]}', style='invis')
-
-    #     # Draw one template instance of each rule's edges
-    #     # cmap = plt.get_cmap('Set1')
-
-    #     # def value_to_hex(value, vmin=0, vmax=1):
-    #     #     norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-    #     #     rgba = cmap(norm(value))
-    #     #     return mcolors.to_hex(rgba)
-
-    #     for rule in self.rules:
-    #         label = self._rule_edge_label(rule)
-    #         delay = self._get_rule_delay(rule)
-
-    #         if isinstance(rule, AccumulatorRule):
-    #             g.edge(
-    #                 f'{rule.target}_0',
-    #                 f'{rule.target}_{delay}',
-    #                 label=label,
-    #                 style='dashed',
-    #                 color='black',
-    #             )
-    #             # Driving inputs
-    #             for inp in rule.inputs:
-    #                 g.edge(f'{inp.feature}_0',
-    #                        f'{rule.target}_{delay}',
-    #                        label='',
-    #                        color='black')
-    #         else:
-    #             for inp in rule.inputs:
-    #                 g.edge(f'{inp.feature}_0',
-    #                        f'{rule.target}_{delay}',
-    #                        label=label)
-
-    #     fmt = save_path.suffix.lstrip('.') or 'pdf'
-    #     g.render(str(save_path.with_suffix('')), format=fmt, cleanup=True)
-
-
-if __name__ == '__main__':
-    # graph = CausalGraph(time_steps=200, features=['A', 'B', 'C'])
-
+def generate_signals():
     features = [
         Feature(name='A',
                 base_func=base_funcs.Constant(0),
                 pre_noise=noise_funcs.GaussianNoise(0.5),
                 post_noise=noise_funcs.GaussianNoise(0.5)),
         Feature(name='B',
-                base_func=base_funcs.Constant(10),
+                base_func=base_funcs.Constant(0),
                 pre_noise=noise_funcs.GaussianNoise(0.5),
                 post_noise=noise_funcs.GaussianNoise(0.5)),
         Feature(name='C',
@@ -417,35 +369,66 @@ if __name__ == '__main__':
     ]
 
     rules = [
-        Rule(inputs=[Input('C', transforms.Gradient(10))],
-             target='D',
-             collapse=collapse.Max(),
-             magnitude=magnitude.Fixed(1),
-             timing=timing.Fixed(10),
-             shape=shape.Gaussian(std=5)),
-        Rule(inputs=[Input('C', transforms.Value(1))],
-             target='C',
-             collapse=collapse.Mean(),
-             magnitude=magnitude.Fixed(1),
-             timing=timing.Fixed(0),
-             shape=shape.Delta()),
-        AccumulatorRule(
-            inputs=[Input('B', transforms.Threshold(5, 11, binary=False))],
-            target='A',
-            magnitude=magnitude.Fixed(0.1),
-            collapse=collapse.Mean(),
-        )
+        SEMRule(inputs=['A', 'B'],
+                target='C',
+                structural_form=structural_forms.ModulatedInteraction(
+                    'A',
+                    'B',
+                    component_funcs.Sigmoid(k=1.0, x0=5.0),
+                    component_funcs.Linear(),
+                ),
+                lag=3),
+        SEMRule(inputs=['C', 'D'],
+                target='D',
+                structural_form=structural_forms.AdditiveWithInteraction({
+                    'C':
+                    component_funcs.Threshold(theta=0.5, scale=1.0),
+                    'D':
+                    component_funcs.Linear(slope=0.9, intercept=0.0)
+                }),
+                lag=1),
+        SEMRule(inputs=['A', 'B'],
+                target='A',
+                structural_form=structural_forms.SingleIndex({
+                    'A': 1,
+                    'B': 1
+                }, component_funcs.Linear(slope=0.8, intercept=0.0)),
+                lag=2),
+        # Rule(inputs=[Input('C', transforms.Gradient(10))],
+        #      target='D',
+        #      collapse=collapse.Max(),
+        #      magnitude=magnitude.Fixed(1),
+        #      timing=timing.Fixed(10),
+        #      shape=shape.Gaussian(std=5)),
+        # Rule(inputs=[Input('C', transforms.Value(1))],
+        #      target='C',
+        #      collapse=collapse.Mean(),
+        #      magnitude=magnitude.Fixed(1),
+        #      timing=timing.Fixed(0),
+        #      shape=shape.Delta()),
+        # AccumulatorRule(
+        #     inputs=[Input('B', transforms.Threshold(5, 11, binary=False))],
+        #     target='A',
+        #     magnitude=magnitude.Fixed(0.1),
+        #     collapse=collapse.Mean(),
+        # )
     ]
 
-    graph = CausalGraph(features, rules, time_steps=200)
-    graph.plot_temporal_graph(save_path=Path(
-        "C:\\Users\\php23rjb\\Documents\\PhagoPred\\temp\\test_temporal_graph.png"
-    ))
-    graph.plot_feature_graph(save_path=Path(
-        "C:\\Users\\php23rjb\\Documents\\PhagoPred\\temp\\test_feature_graph.png"
-    ))
-    # graph.pl
-    for n in range(5):
-        graph.plot_signals(save_path=Path(
-            f"C:\\Users\\php23rjb\\Documents\\PhagoPred\\temp\\test_data_{n}.png"
-        ))
+    graph = CausalGraph(features, rules, time_steps=10000)
+
+    return graph.sample_graph()
+    # graph.plot_temporal_graph(save_path=Path(
+    #     "C:\\Users\\php23rjb\\Documents\\PhagoPred\\temp\\test_temporal_graph.png"
+    # ))
+    # graph.plot_feature_graph(save_path=Path(
+    #     "C:\\Users\\php23rjb\\Documents\\PhagoPred\\temp\\test_feature_graph.png"
+    # ))
+    # # graph.pl
+    # for n in range(5):
+    #     graph.plot_signals(save_path=Path(
+    #         f"C:\\Users\\php23rjb\\Documents\\PhagoPred\\temp\\test_data_{n}.png"
+    #     ))
+
+
+if __name__ == '__main__':
+    generate_signals()
