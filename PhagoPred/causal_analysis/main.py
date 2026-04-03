@@ -1,3 +1,4 @@
+from __future__ import annotations
 from pathlib import Path
 from copy import deepcopy
 
@@ -8,9 +9,12 @@ from tigramite.independence_tests.cmiknn import CMIknn
 from tigramite.independence_tests.parcorr import ParCorr
 from tigramite.independence_tests.independence_tests_base import CondIndTest
 from tigramite.independence_tests.gpdc import GPDC
+from tigramite.independence_tests.parcorr_wls import ParCorrWLS
+from tigramite.independence_tests.robust_parcorr import RobustParCorr
 # from tigramite.independence_tests.gpdc_torch import GPDCtorch
 import numpy as np
 import matplotlib.pyplot as plt
+import h5py
 
 from PhagoPred.survival_v2.data.graph_synthetic_2.graph import generate_signals
 from . import fcit
@@ -45,22 +49,29 @@ class FCITWrapper(CondIndTest):
         return 1.0 - val
 
 
-def get_dataframe(signals: dict,
+def get_dataframe(signals: dict | np.ndarray,
                   feature_names: list[str]) -> data_processing.DataFrame:
 
-    signals = np.array([signal for signal in signals.values()])
-    signals = signals.T  # shape (T, N)
+    if isinstance(signals, dict):
+        signals = np.array([signal for signal in signals.values()])
+        signals = signals.T  # shape (T, N)
 
-    print(feature_names)
-
-    return data_processing.DataFrame(data=signals,
-                                     analysis_mode='single',
-                                     var_names=feature_names)
+    signals: np.ndarray
+    if signals.ndim == 2:
+        return data_processing.DataFrame(data=signals,
+                                         analysis_mode='single',
+                                         var_names=feature_names)
+    elif signals.ndim == 3:
+        # assuming (smaples, frames, features)
+        data_dict = {i: arr for i, arr in enumerate(signals)}
+        return data_processing.DataFrame(data=data_dict,
+                                         analysis_mode='multiple',
+                                         var_names=feature_names)
 
 
 def plot_signals(dataframe: data_processing.DataFrame,
                  save_path: Path = Path('temp') / 'tm_plot.png') -> None:
-    fig, axes = plotting.plot_timeseries(dataframe)
+    fig, axes = plotting.plot_timeseries(dataframe, selected_dataset=0)
     plt.savefig(save_path)
     plt.close()
 
@@ -120,14 +131,14 @@ def investigate_dependencies(dataframe: data_processing.DataFrame,
 
 def apply_pcmci(dataframe: data_processing.DataFrame, save_dir=Path('temp')):
     # pcmci = PCMCI(dataframe, GPDC(), 1)
-    pcmci = PCMCI(dataframe, cond_ind_test=CMIknn(knn=5), verbosity=1)
+    pcmci = PCMCI(dataframe, cond_ind_test=ParCorr(), verbosity=1)
     # pcmci = PCMCI(dataframe, cond_ind_test=ParCorr())
     # correlations = pcmci.get_lagged_dependencies(tau_max=20,
     #                                              val_only=True)['val_matrix']
     # fig = plotting.plot_lagfuncs(correlations,
     #                              setup_args={'var_names': dataframe.var_names})
     # plt.savefig(save_dir / 'lagged_dependencies.png')
-    results = pcmci.run_pcmci(tau_max=5, pc_alpha=0.05, alpha_level=0.01)
+    results = pcmci.run_pcmci(tau_max=5, pc_alpha=0.2, alpha_level=0.05)
     plotting.plot_graph(
         val_matrix=results['val_matrix'],
         graph=results['graph'],
@@ -142,9 +153,46 @@ def apply_pcmci(dataframe: data_processing.DataFrame, save_dir=Path('temp')):
     plt.close()
 
 
-def main():
+def get_synthetic_signals():
     signals = generate_signals()
     feature_names = list(signals.keys())
+    return signals, feature_names
+
+
+def load_signals(hdf5_paths: Path | list[Path], features: list[str]):
+    if isinstance(hdf5_paths, Path):
+        hdf5_paths = [hdf5_paths]
+    all_data = []
+    for hdf5_path in hdf5_paths:
+        with h5py.File(hdf5_path, 'r') as f:
+
+            data = f['Cells']['Phase']
+            if features is None:
+                features = [
+                    feat for feat in data.keys()
+                    if feat not in ('Images', 'First Frame', 'Last Frame', 'X',
+                                    'Y', 'CellDeath', 'Macrophage',
+                                    'Dead Macrophage')
+                ]
+            data = np.array([data[feat] for feat in features
+                             ])  # (featues, frame, samples)
+
+            # only use samples observed for full tiem series
+            nan_mask = np.any(np.isnan(data), axis=(0, 1))
+            data = data[:, :, ~nan_mask]
+            data = data.transpose(2, 1, 0)  # (samples, frame, features)
+            all_data.append(data)
+    all_data = np.concatenate(all_data, axis=0)
+    return all_data, features
+
+
+def main():
+    # signals, feature_names = get_synthetic_signals()
+    # feature_names = []
+    hdf5_paths = []
+    signals, feature_names = load_signals(hdf5_paths)
+    # signals = generate_signals()
+    # feature_names = list(signals.keys())
 
     dataframe = get_dataframe(signals, feature_names)
     plot_signals(dataframe)

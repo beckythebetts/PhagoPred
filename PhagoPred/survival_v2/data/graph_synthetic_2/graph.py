@@ -350,34 +350,42 @@ class CausalGraph:
 
 def generate_signals():
     features = [
-        Feature(name='A',
-                base_func=base_funcs.Constant(0),
-                pre_noise=noise_funcs.GaussianNoise(0.5),
-                post_noise=noise_funcs.GaussianNoise(0.5)),
-        Feature(name='B',
-                base_func=base_funcs.Constant(0),
-                pre_noise=noise_funcs.GaussianNoise(0.5),
-                post_noise=noise_funcs.GaussianNoise(0.5)),
-        Feature(name='C',
-                base_func=base_funcs.Constant(0),
-                pre_noise=noise_funcs.GaussianNoise(0.5),
-                post_noise=noise_funcs.GaussianNoise(0.5)),
-        Feature(name='D',
-                base_func=base_funcs.Constant(0),
-                pre_noise=noise_funcs.GaussianNoise(0.5),
-                post_noise=noise_funcs.GaussianNoise(0.5)),
+        Feature(
+            name='A',
+            base_func=base_funcs.Constant(0),
+            pre_noise=noise_funcs.GaussianNoise(0.5),
+            # post_noise=noise_funcs.GaussianNoise(0.5)
+        ),
+        Feature(
+            name='B',
+            base_func=base_funcs.Constant(0),
+            pre_noise=noise_funcs.GaussianNoise(0.5),
+            # post_noise=noise_funcs.GaussianNoise(0.5)
+        ),
+        Feature(
+            name='C',
+            base_func=base_funcs.Constant(0),
+            pre_noise=noise_funcs.GaussianNoise(0.5),
+            # post_noise=noise_funcs.GaussianNoise(0.5),
+        ),
+        Feature(
+            name='D',
+            base_func=base_funcs.Constant(0),
+            pre_noise=noise_funcs.GaussianNoise(0.5),
+            # post_noise=noise_funcs.GaussianNoise(0.5)
+        ),
     ]
 
     rules = [
-        SEMRule(inputs=['A', 'B'],
-                target='C',
-                structural_form=structural_forms.ModulatedInteraction(
-                    'A',
-                    'B',
-                    component_funcs.Sigmoid(k=1.0, x0=5.0),
-                    component_funcs.Linear(),
-                ),
-                lag=3),
+        # SEMRule(inputs=['A', 'B'],
+        #         target='C',
+        #         structural_form=structural_forms.ModulatedInteraction(
+        #             'A',
+        #             'B',
+        #             component_funcs.Sigmoid(k=1.0, x0=5.0),
+        #             component_funcs.Linear(),
+        #         ),
+        #         lag=3),
         SEMRule(inputs=['C', 'D'],
                 target='D',
                 structural_form=structural_forms.AdditiveWithInteraction({
@@ -416,13 +424,14 @@ def generate_signals():
 
     graph = CausalGraph(features, rules, time_steps=10000)
 
+    graph.plot_feature_graph(save_path=Path(
+        "C:\\Users\\php23rjb\\Documents\\PhagoPred\\temp\\test_feature_graph.png"
+    ))
     return graph.sample_graph()
     # graph.plot_temporal_graph(save_path=Path(
     #     "C:\\Users\\php23rjb\\Documents\\PhagoPred\\temp\\test_temporal_graph.png"
     # ))
-    # graph.plot_feature_graph(save_path=Path(
-    #     "C:\\Users\\php23rjb\\Documents\\PhagoPred\\temp\\test_feature_graph.png"
-    # ))
+
     # # graph.pl
     # for n in range(5):
     #     graph.plot_signals(save_path=Path(
