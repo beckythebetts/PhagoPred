@@ -79,7 +79,7 @@ class CausalGraph:
         G = nx.DiGraph()
         for feature in self.features:
             for time in range(self.time_steps):
-                G.add_node(str(feature), info=Node(feature, time))
+                G.add_node(feature.name, info=Node(feature, time))
 
         for rule in self.rules:
             if isinstance(rule, SEMRule):
@@ -100,7 +100,7 @@ class CausalGraph:
             for feature in self.features
         }
 
-        for t in tqdm(range(self.time_steps), desc="Simulating graph"):
+        for t in range(self.time_steps):
             for rule in self.rules:
                 signals = rule.apply_step(signals, t)
 

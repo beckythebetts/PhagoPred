@@ -11,6 +11,7 @@ from tigramite.independence_tests.independence_tests_base import CondIndTest
 from tigramite.independence_tests.gpdc import GPDC
 from tigramite.independence_tests.parcorr_wls import ParCorrWLS
 from tigramite.independence_tests.robust_parcorr import RobustParCorr
+from tigramite.jpcmciplus import JPCMCIplus
 # from tigramite.independence_tests.gpdc_torch import GPDCtorch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -69,11 +70,19 @@ def get_dataframe(signals: dict | np.ndarray,
                                          var_names=feature_names)
 
 
-def plot_signals(dataframe: data_processing.DataFrame,
-                 save_path: Path = Path('temp') / 'tm_plot.png') -> None:
-    fig, axes = plotting.plot_timeseries(dataframe, selected_dataset=0)
-    plt.savefig(save_path)
-    plt.close()
+def plot_signals(
+    dataframe: data_processing.DataFrame,
+    save_dir: Path = Path('temp')) -> None:
+    if dataframe.analysis_mode == 'single':
+        fig, axes = plotting.plot_timeseries(dataframe)
+        plt.savefig(save_dir / 'tm_plot.png')
+        plt.close()
+    elif dataframe.analysis_mode == 'multiple':
+        for i in range(10):
+            fig, axes = plotting.plot_timeseries(dataframe, selected_dataset=i)
+            plt.savefig(save_dir / f'tm_plot{i}.png')
+            plt.close()
+    # else:
 
 
 def investigate_dependencies(dataframe: data_processing.DataFrame,
@@ -86,17 +95,19 @@ def investigate_dependencies(dataframe: data_processing.DataFrame,
         var_names=dataframe.var_names,
     )
 
-    standardised_data_array = deepcopy(dataframe.values[0])
+    # Compute mean/std across all samples concatenated, then apply to each
+    all_data = np.concatenate(list(dataframe.values.values()), axis=0)
     mean, std = data_processing.weighted_avg_and_std(
-        standardised_data_array,
-        axis=0,
-        weights=np.ones_like(standardised_data_array))
-    standardised_data_array -= mean
-    standardised_data_array /= std
+        all_data, axis=0, weights=np.ones_like(all_data))
+    std = np.where(std == 0, 1, std)
 
+    standardised_dict = {
+        m: (deepcopy(arr) - mean) / std
+        for m, arr in dataframe.values.items()
+    }
     standardised_dataframe = data_processing.DataFrame(
-        data=standardised_data_array,
-        analysis_mode='single',
+        data=standardised_dict,
+        analysis_mode='multiple',
         var_names=dataframe.var_names,
     )
 
@@ -109,14 +120,7 @@ def investigate_dependencies(dataframe: data_processing.DataFrame,
         },
     )
 
-    normalised_data_array = deepcopy(dataframe.values[0])
-    normalised_data_array = data_processing.trafo2normal(
-        normalised_data_array, np.zeros_like(normalised_data_array,
-                                             dtype=bool))
-    normalised_dataframe = data_processing.DataFrame(
-        data=normalised_data_array,
-        var_names=dataframe.var_names,
-    )
+    normalised_dataframe = normalise_dataframe(dataframe)
 
     matrix.add_densityplot(normalised_dataframe,
                            snskdeplot_args={
@@ -129,16 +133,56 @@ def investigate_dependencies(dataframe: data_processing.DataFrame,
     plt.close()
 
 
+def normalise_signals(signals: np.ndarray) -> np.ndarray:
+    """Rank-Gaussianise (samples, frames, features) array across all samples."""
+    samples, frames, features = signals.shape
+    flat = signals.reshape(-1, features)
+    flat_normalised = data_processing.trafo2normal(
+        flat, np.zeros_like(flat, dtype=bool))
+    return flat_normalised.reshape(samples, frames, features)
+
+
+def normalise_dataframe(
+        dataframe: data_processing.DataFrame) -> data_processing.DataFrame:
+    lengths = [arr.shape[0] for arr in dataframe.values.values()]
+    all_data_concat = np.concatenate(list(dataframe.values.values()), axis=0)
+    all_normalised = data_processing.trafo2normal(
+        all_data_concat, np.zeros_like(all_data_concat, dtype=bool))
+    splits = np.cumsum(lengths[:-1])
+    normalised_dict = {
+        m: arr
+        for m, arr in zip(dataframe.values.keys(),
+                          np.split(all_normalised, splits))
+    }
+    normalised_dataframe = data_processing.DataFrame(
+        data=normalised_dict,
+        analysis_mode='multiple',
+        var_names=dataframe.var_names,
+    )
+    return normalised_dataframe
+
+
 def apply_pcmci(dataframe: data_processing.DataFrame, save_dir=Path('temp')):
     # pcmci = PCMCI(dataframe, GPDC(), 1)
     pcmci = PCMCI(dataframe, cond_ind_test=ParCorr(), verbosity=1)
+
+    node_classification = {
+        i: 'system'
+        for i in range(len(dataframe.var_names))
+    }
+    pcmci = JPCMCIplus(dataframe=dataframe,
+                       cond_ind_test=ParCorr(),
+                       verbosity=1,
+                       node_classification=node_classification)
     # pcmci = PCMCI(dataframe, cond_ind_test=ParCorr())
     # correlations = pcmci.get_lagged_dependencies(tau_max=20,
     #                                              val_only=True)['val_matrix']
     # fig = plotting.plot_lagfuncs(correlations,
     #                              setup_args={'var_names': dataframe.var_names})
     # plt.savefig(save_dir / 'lagged_dependencies.png')
-    results = pcmci.run_pcmci(tau_max=5, pc_alpha=0.2, alpha_level=0.05)
+    # results = pcmci.run_pcmci(tau_max=5, pc_alpha=0.2, alpha_level=0.05)
+    results = pcmci.run_pcmciplus(tau_min=0, tau_max=5, pc_alpha=0.001)
+    # results = pcmci.run
     plotting.plot_graph(
         val_matrix=results['val_matrix'],
         graph=results['graph'],
@@ -152,6 +196,13 @@ def apply_pcmci(dataframe: data_processing.DataFrame, save_dir=Path('temp')):
     plt.savefig(save_dir / 'results_graph.png')
     plt.close()
 
+    plotting.plot_time_series_graph(graph=results['graph'],
+                                    val_matrix=results['val_matrix'],
+                                    var_names=dataframe.var_names,
+                                    node_classification=node_classification)
+    plt.savefig(save_dir / 'results_tmeporal_graph.png')
+    plt.close()
+
 
 def get_synthetic_signals():
     signals = generate_signals()
@@ -159,7 +210,7 @@ def get_synthetic_signals():
     return signals, feature_names
 
 
-def load_signals(hdf5_paths: Path | list[Path], features: list[str]):
+def load_signals(hdf5_paths: Path | list[Path], features: list[str] = None):
     if isinstance(hdf5_paths, Path):
         hdf5_paths = [hdf5_paths]
     all_data = []
@@ -172,31 +223,48 @@ def load_signals(hdf5_paths: Path | list[Path], features: list[str]):
                     feat for feat in data.keys()
                     if feat not in ('Images', 'First Frame', 'Last Frame', 'X',
                                     'Y', 'CellDeath', 'Macrophage',
-                                    'Dead Macrophage')
+                                    'Dead Macrophage', 'Speed')
                 ]
             data = np.array([data[feat] for feat in features
                              ])  # (featues, frame, samples)
 
             # only use samples observed for full tiem series
             nan_mask = np.any(np.isnan(data), axis=(0, 1))
+            # print(nan_mask, np.unique(nan_mask))
             data = data[:, :, ~nan_mask]
             data = data.transpose(2, 1, 0)  # (samples, frame, features)
             all_data.append(data)
     all_data = np.concatenate(all_data, axis=0)
+    # all_data = all_data[:, 50:, :]
     return all_data, features
 
 
 def main():
     # signals, feature_names = get_synthetic_signals()
     # feature_names = []
-    hdf5_paths = []
-    signals, feature_names = load_signals(hdf5_paths)
+    hdf5_paths = [
+        h for h in (Path('~/thor_server').expanduser() / '24_02').glob('*.h5')
+        if h.stem in ('C', 'D', 'E', 'F')
+    ]
+    features = [
+        # 'Area',
+        'Total Fluorescence',
+        # 'Displacement',
+        # 'External Fluorescence Intensity within 50 pixels',
+        # 'Perimeter',
+        'Alive Phagocytes within 250 pixels',
+        'Fluorescence Distance Mean',
+        # 'Area',
+    ]
+    signals, feature_names = load_signals(hdf5_paths, features)
+    print(f'{signals.shape[0]} Samples of length {signals.shape[1]}')
     # signals = generate_signals()
     # feature_names = list(signals.keys())
 
     dataframe = get_dataframe(signals, feature_names)
+    dataframe = normalise_dataframe(dataframe)
     plot_signals(dataframe)
-    # investigate_dependencies(dataframe)
+    investigate_dependencies(dataframe)
     apply_pcmci(dataframe)
 
 
