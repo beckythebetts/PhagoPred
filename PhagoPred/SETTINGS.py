@@ -15,7 +15,8 @@ try:
     # DATASET = Path('PhagoPred')/'Datasets'/'27_05_500.h5'
     # DATASET = Path('PhagoPred')/'Datasets'/ 'Prelims' / '16_09_1_no_overlaps.h5'
     # DATASET = Path('~/thor_server/24_02/24_02_D.h5').expanduser()
-    DATASET = Path('PhagoPred') / 'Datasets' / '10_02_26_1_short.h5'
+    # DATASET = Path('PhagoPred') / 'Datasets' / '10_02_26_1_short.h5'
+    DATASET = Path("C:\\Users\\php23rjb\\Downloads\\D.h5")
     # DATASET = Path("C:\Users\php23rjb\Downloads\A.h5")
     with h5py.File(DATASET, 'r') as f:
         NUM_FRAMES = f['Images'].attrs['Number of frames']

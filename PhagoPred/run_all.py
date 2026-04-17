@@ -22,13 +22,20 @@ from PhagoPred.survival_analysis.models import losses
 if __name__ == '__main__':
     # datasets = Path('~/thor_server/24_02/').expanduser().iterdir()
     # dataset
+    h5_paths = [
+        "C:\\Users\\php23rjb\\Downloads\\A.h5",
+        "C:\\Users\\php23rjb\\Downloads\\E.h5",
+        "C:\\Users\\php23rjb\\Downloads\\C.h5",
+        "C:\\Users\\php23rjb\\Downloads\\D.h5"
+    ]
     for dataset in tqdm(
-            # datasets
-        [
-            # Path('PhagoPred') / 'Datasets' / 'E.h5',
-            # Path('~/thor_server/06_03/K').expanduser(),
-            Path("C:\\Users\\php23rjb\\Downloads\\C.h5")
-        ]):
+            h5_paths
+            # [
+            #     # Path('PhagoPred') / 'Datasets' / 'E.h5',
+            #     # Path('~/thor_server/06_03/K').expanduser(),
+            #     Path("C:\\Users\\php23rjb\\Downloads\\C.h5")
+            # ]
+    ):
 
         # if dataset.name != '10_02_26_1':
         #     continue
