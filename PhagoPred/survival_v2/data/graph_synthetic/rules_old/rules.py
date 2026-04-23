@@ -9,7 +9,7 @@ from .collapse import Collapse
 from .timing import Timing, Fixed
 from .shape import Shape
 from .magnitude import Magnitude
-from .structural_forms import StructuralForm
+from ..structural_forms import StructuralForm
 
 
 @dataclass

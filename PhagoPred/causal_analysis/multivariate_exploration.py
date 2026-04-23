@@ -455,12 +455,13 @@ def get_all_residuals(ds: xr.Dataset,
 
 
 if __name__ == '__main__':
-    h5_paths = [
-        "C:\\Users\\php23rjb\\Downloads\\A.h5",
-        "C:\\Users\\php23rjb\\Downloads\\E.h5",
-        "C:\\Users\\php23rjb\\Downloads\\C.h5",
-        "C:\\Users\\php23rjb\\Downloads\\D.h5"
-    ]
+    # h5_paths = [
+    #     "C:\\Users\\php23rjb\\Downloads\\A.h5",
+    #     "C:\\Users\\php23rjb\\Downloads\\E.h5",
+    #     "C:\\Users\\php23rjb\\Downloads\\C.h5",
+    #     "C:\\Users\\php23rjb\\Downloads\\D.h5"
+    # ]
+    # h5_paths = Path('PhagoPred') /
     fits = {}
     # for path in h5_paths:
     #     with h5py.File(path) as f:

@@ -12,23 +12,23 @@ import xarray as xr
 import numpy as np
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.tsa.stattools import adfuller, acf, pacf, ccf, arma_order_select_ic
+from statsmodels.tsa.arima.model import ARIMA
 from tqdm import tqdm
 
 from .data_loading import load_h5, arr_to_pd
 
 plt.rcParams["font.family"] = 'serif'
 
+# @dataclass
+# class FeatureFit:
+#     mean: float | None = None
+#     std: float | None = None
+#     d: int | None = None
+#     p: int | None = None
+#     q: int | None = None
 
-@dataclass
-class FeatureFit:
-    mean: float | None = None
-    std: float | None = None
-    d: int | None = None
-    p: int | None = None
-    q: int | None = None
-
-    def asdict(self):
-        return asdict(self)
+#     def asdict(self):
+#         return asdict(self)
 
 
 def differnce_ds(ds: xr.Dataset | xr.DataArray) -> None:
@@ -37,19 +37,19 @@ def differnce_ds(ds: xr.Dataset | xr.DataArray) -> None:
     return ds_diff
 
 
-def standardise(data: xr.Dataset | xr.DataArray,
-                fits: FeatureFit | None = None) -> xr.DataArray | xr.Dataset:
+def standardise(
+    data: xr.Dataset | xr.DataArray,
+    return_vals: bool = False
+    # fits: FeatureFit | None = None,
+) -> xr.DataArray | xr.Dataset:
     if isinstance(data, xr.DataArray):
         return _standardise_da(data)[0]
     standardised_ds = data.copy()
     for feature_name, da in tqdm(data.items(), desc='Standardising'):
         da, mean, std = _standardise_da(da)
         standardised_ds[feature_name] = da
-        if fits is not None:
-            if feature_name not in fits.keys():
-                fits[feature_name] = FeatureFit()
-            fits[feature_name].mean = mean
-            fits[feature_name].std = std
+        if return_vals:
+            return standardised_ds, mean, std
     return standardised_ds
 
 
@@ -85,14 +85,6 @@ def plot_stationarity_test(
         colour='k',
     )
 
-    # acf_plot_params = {
-    #     'lags': 40,
-    #     'use_vlines': False,
-    #     'color': 'k',
-    #     'alpha': None,
-    #     'marker': ',',
-    #     'title': '',
-    # }
     all_acf_vals = []
     all_pacf_vals = []
     adf_pvals = []
@@ -112,8 +104,7 @@ def plot_stationarity_test(
                        color='k')
         all_acf_vals.append(acf_vals)
         all_pacf_vals.append(pacf_vals)
-        # plot_acf(sample_da.values[0], ax_acf, **acf_plot_params)
-        # plot_pacf(sample_da.values[0], ax_pcf, **acf_plot_params)
+
         try:
             adf_pval = adfuller(sample_da.values[0])[1]
         except ValueError:
@@ -199,7 +190,7 @@ def _test_differnces_da(da: xr.DataArray,
             min_d = d_val
             # p, q = arma_order_select_ic()
             # p, q = estimate_p_q(acf_vals, pacf_vals, nobs=da.sizes['frame'])
-            p, q = estimate_p_q(
+            ps, qs = estimate_p_q(
                 da, d_val, save_path.parent / f'p_q_hist_{feature_name}.png')
         temp_da = differnce_ds(temp_da)
         temp_da = standardise(temp_da)
@@ -207,7 +198,14 @@ def _test_differnces_da(da: xr.DataArray,
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
-    return min_d, p, q
+    return min_d, ps, qs
+
+
+def fit_arma(da: xr.DataArray, d: int, save_path: Path,
+             feature_name: str) -> xr.DataArray:
+    """Fit an ARIMA model to each sample."""
+    p, q = estimate_p_q(da, d, save_path / f'p_q_hist_{feature_name}.png')
+    arima_model = arima_model()
 
 
 def estimate_p_q(da: xr.DataArray,
@@ -267,10 +265,11 @@ def estimate_p_q(da: xr.DataArray,
         plt.savefig(save_path)
         plt.close()
 
+    return bic_ps, bic_qs
     # Select best order from pooled AIC matrix
-    best = np.unravel_index(np.nanargmin(np.nanmean(aic_scores, axis=0)),
-                            aic_scores.shape[1:])
-    return int(best[0]), int(best[1])
+    # best = np.unravel_index(np.nanargmin(np.nanmean(aic_scores, axis=0)),
+    #                         aic_scores.shape[1:])
+    # return int(best[0]), int(best[1])
 
 
 def plt_ic_matrix(scores: np.ndarray, ax: plt.Axes, title: str = '') -> None:
@@ -318,7 +317,7 @@ def test_differences(ds: xr.Dataset,
                      adf_pval_thresh: float = 0.05):
     for feature_name, da in tqdm(
             ds.items(), desc='Checking stationarity over differences'):
-        min_d, p, q = _test_differnces_da(
+        min_d, ps, qs = _test_differnces_da(
             da,
             d=d,
             save_path=save_dir / f'differences_test_{feature_name}.png',
@@ -344,7 +343,7 @@ if __name__ == '__main__':
         "C:\\Users\\php23rjb\\Downloads\\C.h5",
         "C:\\Users\\php23rjb\\Downloads\\D.h5"
     ]
-
+    h5_paths = list((Path('PhagoPred') / 'Datasets' / '06_03').glob('*.h5'))
     test_dir = Path('C:\\Users\\php23rjb\\Documents\\PhagoPred\\temp'
                     ) / 'classical_analysis'
     os.makedirs(test_dir, exist_ok=True)

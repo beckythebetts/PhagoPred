@@ -23,10 +23,11 @@ if __name__ == '__main__':
     # datasets = Path('~/thor_server/24_02/').expanduser().iterdir()
     # dataset
     h5_paths = [
-        "C:\\Users\\php23rjb\\Downloads\\A.h5",
-        "C:\\Users\\php23rjb\\Downloads\\E.h5",
-        "C:\\Users\\php23rjb\\Downloads\\C.h5",
-        "C:\\Users\\php23rjb\\Downloads\\D.h5"
+        "PhagoPred\\Datasets\\D.h5",
+        # "C:\\Users\\php23rjb\\Downloads\\A.h5",
+        # "C:\\Users\\php23rjb\\Downloads\\E.h5",
+        # "C:\\Users\\php23rjb\\Downloads\\C.h5",
+        # "C:\\Users\\php23rjb\\Downloads\\D.h5"
     ]
     for dataset in tqdm(
             h5_paths

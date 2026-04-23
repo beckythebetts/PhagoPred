@@ -12,7 +12,7 @@ def load_h5(hdf5_paths: Path | list[Path], features: list[str] = None):
         hdf5_paths = [hdf5_paths]
     all_data = []
     for hdf5_path in hdf5_paths:
-        with h5py.File(hdf5_path, 'r') as f:
+        with h5py.File(hdf5_path, 'r', locking=False) as f:
 
             data = f['Cells']['Phase']
             if features is None:
@@ -51,7 +51,7 @@ def load_h5(hdf5_paths: Path | list[Path], features: list[str] = None):
     return all_data, features
 
 
-def arr_to_pd(data: np.ndarray, feature_names: list[str]) -> pd.DataFrame:
+def arr_to_xrds(data: np.ndarray, feature_names: list[str]) -> pd.DataFrame:
     data_dict = {
         feature_names[i]: (['sample', 'frame'], data[:, :, i])
         for i in range(len(feature_names))
@@ -64,7 +64,14 @@ def arr_to_pd(data: np.ndarray, feature_names: list[str]) -> pd.DataFrame:
     return ds
 
 
+def write_metadata(h5_paths: list[Path], group: str, attr_name: str,
+                   attr_val: str) -> None:
+    for h5_path in h5_paths:
+        with h5py.File(h5_path, 'r+', locking=False) as f:
+            f[group].attrs[attr_name] = attr_val
+
+
 if __name__ == '__main__':
     h5_paths = ["C:\\Users\\php23rjb\\Downloads\\A.h5"]
     data, names = load_h5(h5_paths)
-    ds = arr_to_pd(data, names)
+    ds = arr_to_xrds(data, names)
