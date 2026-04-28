@@ -22,8 +22,8 @@ def _observe_death_fraction(
     num_frames: int,
     start_frames: np.ndarray,
     end_frames: np.ndarray,
-    smooth_hazard: bool,
-    smooth_sigma: int,
+    # smooth_hazard: bool,
+    # smooth_sigma: int,
     multiplier: float,
     n_samples: int,
 ) -> float:
@@ -32,16 +32,16 @@ def _observe_death_fraction(
     for c in range(n_samples):
         signals = graph.sample_graph()
         hazard_signal = signals['Hazard'].copy()
-        if smooth_hazard:
-            shift = 2 * smooth_sigma
-            kernel_len = shift + int(4 * smooth_sigma) + 1
-            t_k = np.arange(kernel_len)
-            kernel = np.exp(-0.5 * ((t_k - shift) / smooth_sigma)**2)
-            kernel /= kernel.sum()
-            smoothed = np.convolve(hazard_signal, kernel,
-                                   mode='full')[:num_frames]
-        else:
-            smoothed = hazard_signal.copy()
+        # if smooth_hazard:
+        #     shift = 2 * smooth_sigma
+        #     kernel_len = shift + int(4 * smooth_sigma) + 1
+        #     t_k = np.arange(kernel_len)
+        #     kernel = np.exp(-0.5 * ((t_k - shift) / smooth_sigma)**2)
+        #     kernel /= kernel.sum()
+        #     smoothed = np.convolve(hazard_signal, kernel,
+        #                            mode='full')[:num_frames]
+        # else:
+        smoothed = hazard_signal.copy()
         hazard_rates = np.clip(smoothed * multiplier, 0.0, 1.0)
         pmf = _pmf_from_hazards(hazard_rates)
         cif = np.cumsum(pmf)
@@ -59,8 +59,8 @@ def _calibrate_multiplier(
     num_frames: int,
     start_frames: np.ndarray,
     end_frames: np.ndarray,
-    smooth_hazard: bool,
-    smooth_sigma: int,
+    # smooth_hazard: bool,
+    # smooth_sigma: int,
     target_death_fraction: float,
     n_calib: int = 200,
     max_iter: int = 50,
@@ -75,8 +75,8 @@ def _calibrate_multiplier(
             num_frames,
             start_frames,
             end_frames,
-            smooth_hazard,
-            smooth_sigma,
+            # smooth_hazard,
+            # smooth_sigma,
             multiplier=multiplier,
             n_samples=n_calib,
         )
@@ -97,9 +97,11 @@ def _generate_cells(
     num_frames: int,
     late_entry_prob: float,
     late_entry_range: tuple,
+    early_exit_prob: float,
+    early_exit_range: tuple,
     feature_mask_prob: float,
-    smooth_hazard: bool,
-    smooth_sigma: int,
+    # smooth_hazard: bool,
+    # smooth_sigma: int,
     hazard_multiplier: float,
     feature_names: list,
     non_hazard_names: list,
@@ -114,7 +116,17 @@ def _generate_cells(
     else:
         start_frames[:] = np.random.randint(0, 10, size=num_cells)
 
-    end_frames = np.random.randint(num_frames // 2, num_frames, size=num_cells)
+    end_frames = np.full(num_cells, num_frames - 1, dtype=int)
+    if early_exit_prob > 0.0:
+        early_mask = np.random.rand(num_cells) < early_exit_prob
+        end_frames[early_mask] = np.random.randint(early_exit_range[0],
+                                                   early_exit_range[1],
+                                                   size=int(early_mask.sum()))
+    else:
+        end_frames[:] = np.random.randint(num_frames - 10,
+                                          num_frames,
+                                          size=num_cells)
+    # end_frames = np.random.randint(num_frames // 2, num_frames, size=num_cells)
 
     all_features = {
         name: np.full((num_frames, num_cells), np.nan, dtype=np.float32)
@@ -134,16 +146,16 @@ def _generate_cells(
 
         hazard_signal = signals['Hazard'].copy()
 
-        if smooth_hazard:
-            shift = 2 * smooth_sigma
-            kernel_len = shift + int(4 * smooth_sigma) + 1
-            t_k = np.arange(kernel_len)
-            kernel = np.exp(-0.5 * ((t_k - shift) / smooth_sigma)**2)
-            kernel /= kernel.sum()
-            smoothed = np.convolve(hazard_signal, kernel,
-                                   mode='full')[:num_frames]
-        else:
-            smoothed = hazard_signal.copy()
+        # if smooth_hazard:
+        #     shift = 2 * smooth_sigma
+        #     kernel_len = shift + int(4 * smooth_sigma) + 1
+        #     t_k = np.arange(kernel_len)
+        #     kernel = np.exp(-0.5 * ((t_k - shift) / smooth_sigma)**2)
+        #     kernel /= kernel.sum()
+        #     smoothed = np.convolve(hazard_signal, kernel,
+        #                            mode='full')[:num_frames]
+        # else:
+        smoothed = hazard_signal.copy()
 
         hazard_rates = np.clip(smoothed * hazard_multiplier, 0.0,
                                1.0).astype(np.float32)
@@ -233,9 +245,9 @@ def generate_dataset(
     num_frames: int = 500,
     late_entry_prob: float = 0.0,
     late_entry_range: tuple = (0, 100),
+    early_exit_prob: float = 0.0,
+    early_exit_range: float = (0, 100),
     feature_mask_prob: float = 0.0,
-    smooth_hazard: bool = True,
-    smooth_sigma: int = 10,
     target_death_fraction: float = 0.5,
     seed: int = None,
 ) -> None:
@@ -275,14 +287,12 @@ def generate_dataset(
     calib_state = np.random.get_state()
     np.random.seed((seed or 0) + 99999)
     calib_starts = np.random.randint(0, 10, size=200)
-    calib_ends = np.random.randint(num_frames // 2, num_frames, size=200)
+    calib_ends = np.random.randint(num_frames - 10, num_frames, size=200)
     hazard_multiplier = _calibrate_multiplier(
         graph,
         num_frames,
         calib_starts,
         calib_ends,
-        smooth_hazard,
-        smooth_sigma,
         target_death_fraction,
     )
     np.random.set_state(calib_state)
@@ -296,9 +306,9 @@ def generate_dataset(
         num_frames,
         late_entry_prob,
         late_entry_range,
+        early_exit_prob,
+        early_exit_range,
         feature_mask_prob,
-        smooth_hazard,
-        smooth_sigma,
         hazard_multiplier,
         feature_names,
         non_hazard_names,
@@ -313,13 +323,13 @@ def generate_dataset(
         f"Generating validation set ({val_num_cells} cells) -> {val_filename}")
     val_data = _generate_cells(
         graph,
-        val_num_cells,
+        train_num_cells,
         num_frames,
         late_entry_prob,
         late_entry_range,
+        early_exit_prob,
+        early_exit_range,
         feature_mask_prob,
-        smooth_hazard,
-        smooth_sigma,
         hazard_multiplier,
         feature_names,
         non_hazard_names,

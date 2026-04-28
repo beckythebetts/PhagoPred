@@ -193,6 +193,15 @@ def hill(val: float, n: float = 2.0, K: float = 1.0) -> float:
     return val**n / (K**n + val**n)
 
 
+class AutoCorrelationRule(Rule):
+
+    def __init__(self, feature: str, coeff: float, lag: int = 1):
+        target = feature
+        expr = coeff * Var(feature, lag)
+
+        super().__init__(target, expr)
+
+
 # class Apply(Expr):
 #     def __init__(self, func, arg): self.func, self.arg = func, arg
 #     def __call__(self, pv): return self.func(self.arg(pv))

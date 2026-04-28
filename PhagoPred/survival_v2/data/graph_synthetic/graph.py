@@ -46,6 +46,7 @@ class Feature:
     inital_value: float = 0.0
     pre_noise: noise_funcs.Noise = field(default=noise_funcs.GaussianNoise(1))
     post_noise: noise_funcs.Noise = field(default=noise_funcs.NoNoise())
+    hidden: bool = False
 
     def generate_signal(self, time_steps: int) -> np.ndarray:
         """Generate base signal for node, with base_func and pre_noise"""
