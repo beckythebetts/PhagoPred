@@ -33,10 +33,6 @@ class DatasetConfig:
                          **kwargs)
 
 
-# ---------------------------------------------------------------------------
-# Config 1: simple linear chain  A -> B -> Hazard
-# A drifts as an AR(1); B is driven by A at lag 1; Hazard tracks positive B.
-# ---------------------------------------------------------------------------
 _simple_chain = DatasetConfig(
     filename='simple_chain',
     features=[
@@ -57,10 +53,6 @@ _simple_chain = DatasetConfig(
     seed=0,
 )
 
-# ---------------------------------------------------------------------------
-# Config 2: interaction effect  (A AND B) -> Hazard
-# Hazard only rises when both A and B simultaneously exceed their thresholds.
-# ---------------------------------------------------------------------------
 _interaction = DatasetConfig(
     filename='interaction',
     features=[

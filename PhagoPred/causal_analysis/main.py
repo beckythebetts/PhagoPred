@@ -17,7 +17,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import h5py
 
-from PhagoPred.survival_v2.data.graph_synthetic_2.graph import generate_signals
+from PhagoPred.survival_v2.data.graph_synthetic.graph import generate_signals
 from . import fcit
 
 

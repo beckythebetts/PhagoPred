@@ -7,14 +7,18 @@ import pandas as pd
 import xarray as xr
 
 
-def load_h5(hdf5_paths: Path | list[Path], features: list[str] = None):
+def load_h5(hdf5_paths: Path | list[Path],
+            features: list[str] = None,
+            arima_residuals: bool = False) -> tuple[np.ndarray, list]:
     if isinstance(hdf5_paths, Path):
         hdf5_paths = [hdf5_paths]
     all_data = []
     for hdf5_path in hdf5_paths:
         with h5py.File(hdf5_path, 'r', locking=False) as f:
-
-            data = f['Cells']['Phase']
+            if arima_residuals:
+                data = f['ARIMA']['fits']
+            else:
+                data = f['Cells']['Phase']
             if features is None:
                 features = [
                     feat for feat in data.keys() if feat not in (
@@ -33,8 +37,12 @@ def load_h5(hdf5_paths: Path | list[Path], features: list[str] = None):
                         'Confidence Score',
                     )
                 ]
-            data = np.array([data[feat] for feat in features
-                             ])  # (featues, frame, samples)
+            if arima_residuals:
+                data = [data[feat]['residuals'] for feat in features]
+            else:
+                data = [data[feat] for feat in features]  # (frame, samples)
+            min_num_frames = min(feat.shape[0] for feat in data)
+            data = np.array([feat[0:min_num_frames] for feat in data])
 
             # Set Speed to 1 for first frame to prevent NaN exclusion
             if 'Speed' in features:
@@ -42,7 +50,6 @@ def load_h5(hdf5_paths: Path | list[Path], features: list[str] = None):
                 data[speed_idx, 0, :] = 1.0
 
             nan_mask = np.any(np.isnan(data), axis=(0, 1))
-            # print(nan_mask, np.unique(nan_mask))
             data = data[:, :, ~nan_mask]
             data = data.transpose(2, 1, 0)  # (samples, frame, features)
             all_data.append(data)

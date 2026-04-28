@@ -8,11 +8,15 @@ import numpy as np
 from tqdm import tqdm
 from statsmodels.tsa.stattools import arma_order_select_ic
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
+from statsmodels.tsa.arima.model import ARIMA, ARIMAResults
 import h5py
 
+from PhagoPred.utils.logger import get_logger
 from ..data_loading import load_h5, arr_to_xrds, write_metadata
-from .plots import plot_stationarity_test
+from .plots import plot_stationarity_test, plot_cross_correlations, plot_ccf_distributions
 from .utils import standardise_da, differnce_xr
+
+log = get_logger()
 
 
 def test_differences(
@@ -75,7 +79,7 @@ def _estimate_arma_order(
 
 
 def estimate_arma_order(
-    h5_path=Path,
+    h5_path: Path,
     ic: Literal['aic', 'bic'] = 'bic',
     max_ar: int = 2,
     max_ma: int = 1,
@@ -103,7 +107,7 @@ def estimate_arma_order(
 
             if feature_name == 'Speed':
                 da.loc[{'frame': 0}] = 1.0
-            nan_mask = da.isnull().any(dim='frame')
+            nan_mask = da.isnull().any(dim='frame').values
             da_clean = da.sel(sample=~nan_mask)
             ps, qs = _estimate_arma_order(da_clean, d, mean, std, ic, max_ar,
                                           max_ma)
@@ -130,13 +134,191 @@ def estimate_arma_order(
             q_dataset[:] = all_qs
 
 
+def _fit_arima_model(da: xr.Dataset, p: int, q: int) -> tuple:
+    """Fit an ARIMA model to a single sample.
+    Returns (ar_coeffs, ma_coeffs, residuals, ar_bse, ma_bse, aic, bic, llf, sigma2, mae).
+    """
+    num_frames = da.sizes['frame']
+    nan_scalars = (np.nan, np.nan, np.nan, np.nan, np.nan)
+
+    if np.isnan(p) or np.isnan(q):
+        return (np.array([np.nan]), np.array([np.nan]),
+                np.full(num_frames, np.nan), np.array([np.nan]),
+                np.array([np.nan]), *nan_scalars)
+    p, q = int(p), int(q)
+    if p == 0 and q == 0:
+        residuals = da.values.squeeze()
+        mae = float(np.nanmean(np.abs(residuals)))
+        return (np.array([]), np.array([]), residuals, np.array([]),
+                np.array([]), *(*nan_scalars[:4], mae))
+    data = da.values.squeeze()
+    if np.sum(~np.isnan(data)) < p + q + 2:
+        return (np.full(p,
+                        np.nan), np.full(q,
+                                         np.nan), np.full(num_frames, np.nan),
+                np.full(p, np.nan), np.full(q, np.nan), *nan_scalars)
+    try:
+        arima = ARIMA(data, order=(p, 0, q))
+        arima_results: ARIMAResults = arima.fit()
+        ar_coeffs = arima_results.arparams
+        ma_coeffs = arima_results.maparams
+        arima_residuals = arima_results.resid
+        ar_bse = arima_results.bse[:p]
+        ma_bse = arima_results.bse[p:p + q]
+        aic = float(arima_results.aic)
+        bic = float(arima_results.bic)
+        llf = float(arima_results.llf)
+        sigma2 = float(arima_results.params[-1])
+        mae = float(np.mean(np.abs(arima_residuals)))
+    except (np.linalg.LinAlgError, Exception):
+        return (np.full(p,
+                        np.nan), np.full(q,
+                                         np.nan), np.full(num_frames, np.nan),
+                np.full(p, np.nan), np.full(q, np.nan), *nan_scalars)
+
+    return ar_coeffs, ma_coeffs, arima_residuals, ar_bse, ma_bse, aic, bic, llf, sigma2, mae
+
+
+def fit_arima_model(h5_path: Path):
+    with h5py.File(h5_path, 'r+') as f:
+        features_group = f['Cells/Phase']
+        arima_group = f['ARIMA/fits']
+
+        for feature_name in f['Cells/Phase'].keys():
+            if 'd' not in features_group[feature_name].attrs:
+                continue
+            d = features_group[feature_name].attrs['d']
+            mean = features_group[feature_name].attrs['mean']
+            std = features_group[feature_name].attrs['std']
+
+            data = features_group[feature_name][:]
+            num_frames, num_samples = data.shape
+
+            max_p = np.nanmax(arima_group[feature_name]['p_order'][:])
+            max_q = np.nanmax(arima_group[feature_name]['q_order'][:])
+
+            # Create datasets for MA, AR coeffs — delete and recreate if shape mismatch
+            def require_dataset_shape(group, key, shape, dtype):
+                full_key = f'{feature_name}/{key}'
+                if full_key in group:
+                    if group[full_key].shape != shape:
+                        del group[full_key]
+                return group.require_dataset(full_key,
+                                             shape=shape,
+                                             dtype=dtype)
+
+            ar_coeffs_ds = require_dataset_shape(arima_group, 'ar_coeffs',
+                                                 (num_samples, max_p),
+                                                 np.float32)
+            ma_coeffs_ds = require_dataset_shape(arima_group, 'ma_coeffs',
+                                                 (num_samples, max_q),
+                                                 np.float32)
+            ar_bse_ds = require_dataset_shape(arima_group, 'ar_bse',
+                                              (num_samples, max_p), np.float32)
+            ma_bse_ds = require_dataset_shape(arima_group, 'ma_bse',
+                                              (num_samples, max_q), np.float32)
+            for scalar_key in ('aic', 'bic', 'llf', 'sigma2', 'mae'):
+                require_dataset_shape(arima_group, scalar_key, (num_samples, ),
+                                      np.float32)
+
+            da = xr.DataArray(
+                data=data,
+                coords={
+                    'frame': np.arange(num_frames),
+                    'sample': np.arange(num_samples)
+                },
+            )
+
+            nan_mask = np.isnan(arima_group[feature_name]['p_order'][:])
+            clean_indices = np.where(~nan_mask)[0]
+            da_clean = da.sel(sample=clean_indices)
+            for _ in range(d):
+                da_clean = differnce_xr(da_clean)
+            da_clean = standardise_da(da_clean, mean, std)[0]
+
+            num_residual_frames = da_clean.sizes['frame']
+
+            arima_residuals_ds = require_dataset_shape(
+                arima_group, 'residuals', (num_residual_frames, num_samples),
+                np.float32)
+
+            ar_coeffs = []
+            ma_coeffs = []
+            residuals = []
+            ar_bse_list = []
+            ma_bse_list = []
+            aic_list = []
+            bic_list = []
+            llf_list = []
+            sigma2_list = []
+            mae_list = []
+            for sample_idx in tqdm(range(num_samples)):
+                if nan_mask[sample_idx]:
+                    ar_coeffs.append(np.full(int(max_p), np.nan))
+                    ma_coeffs.append(np.full(int(max_q), np.nan))
+                    residuals.append(np.full(num_residual_frames, np.nan))
+                    ar_bse_list.append(np.full(int(max_p), np.nan))
+                    ma_bse_list.append(np.full(int(max_q), np.nan))
+                    aic_list.append(np.nan)
+                    bic_list.append(np.nan)
+                    llf_list.append(np.nan)
+                    sigma2_list.append(np.nan)
+                    mae_list.append(np.nan)
+                    continue
+
+                sample_da = da_clean.sel(sample=sample_idx)
+                p_order = arima_group[feature_name]['p_order'][sample_idx]
+                q_order = arima_group[feature_name]['q_order'][sample_idx]
+
+                (sample_ar_coeffs, sample_ma_coeffs, sample_residuals,
+                 sample_ar_bse, sample_ma_bse, aic, bic, llf, sigma2,
+                 mae) = _fit_arima_model(sample_da, p_order, q_order)
+                sample_ar_coeffs = np.concatenate(
+                    (sample_ar_coeffs,
+                     np.zeros(int(max_p) - len(sample_ar_coeffs))))
+                sample_ma_coeffs = np.concatenate(
+                    (sample_ma_coeffs,
+                     np.zeros(int(max_q) - len(sample_ma_coeffs))))
+                sample_ar_bse = np.concatenate(
+                    (sample_ar_bse, np.zeros(int(max_p) - len(sample_ar_bse))))
+                sample_ma_bse = np.concatenate(
+                    (sample_ma_bse, np.zeros(int(max_q) - len(sample_ma_bse))))
+
+                ar_coeffs.append(sample_ar_coeffs)
+                ma_coeffs.append(sample_ma_coeffs)
+                residuals.append(sample_residuals)
+                ar_bse_list.append(sample_ar_bse)
+                ma_bse_list.append(sample_ma_bse)
+                aic_list.append(aic)
+                bic_list.append(bic)
+                llf_list.append(llf)
+                sigma2_list.append(sigma2)
+                mae_list.append(mae)
+
+            ar_coeffs = np.stack(ar_coeffs, axis=0)
+            ma_coeffs = np.stack(ma_coeffs, axis=0)
+            residuals = np.stack(residuals, axis=1)
+
+            ar_coeffs_ds[:] = ar_coeffs
+            ma_coeffs_ds[:] = ma_coeffs
+            arima_residuals_ds[:] = residuals
+            ar_bse_ds[:] = np.stack(ar_bse_list, axis=0)
+            ma_bse_ds[:] = np.stack(ma_bse_list, axis=0)
+            arima_group[f'{feature_name}/aic'][:] = aic_list
+            arima_group[f'{feature_name}/bic'][:] = bic_list
+            arima_group[f'{feature_name}/llf'][:] = llf_list
+            arima_group[f'{feature_name}/sigma2'][:] = sigma2_list
+            arima_group[f'{feature_name}/mae'][:] = mae_list
+
+
 def main():
     h5_paths = list((Path('PhagoPred') / 'Datasets' / '06_03').glob('*.h5'))
 
-    # # 1. Load data to xarray
-    # ds = arr_to_xrds(*load_h5(h5_paths))
+    # 1. Load data to xarray
+    ds = arr_to_xrds(*load_h5(h5_paths))
 
     # # 2. Find minimum d value for staionarity (per feature)
+    # log.info('Finding minimum d for stationarity')
     # results_dict = test_differences(ds,
     #                                 d=3,
     #                                 save_dir=Path('temp') /
@@ -146,12 +328,26 @@ def main():
     #         write_metadata(h5_paths, f'Cells/Phase/{feat_name}', key, val)
 
     # 3. Fit ARIMA model to each cell, and get residuals
-    for h5_path in h5_paths:
-        print(f'Processing file {h5_path.name}')
-        with h5py.File(h5_path, 'r+') as f:
-            if 'ARIMA' in f.keys():
-                del f['ARIMA']
-        estimate_arma_order(h5_path)
+    # log.info('Finding ARIMA params + residuals')
+    # for h5_path in h5_paths:
+    #     print(f'Processing file {h5_path.name}')
+    #     # with h5py.File(h5_path, 'r+') as f:
+    #     #     if 'ARIMA' in f.keys():
+    #     #         del f['ARIMA']
+    #     log.info(f'Finding ARIMA order for file at {h5_path}')
+    #     # estimate_arma_order(h5_path)
+    #     log.info(f'Fitting ARIMA for file at {h5_path}')
+    #     fit_arima_model(h5_path)
+
+    # 4. Plot cross correlations of residuals
+    residuals_ds = arr_to_xrds(*load_h5(h5_paths, arima_residuals=True))
+    save_dir = Path('temp') / 'classical_analysis'
+    plot_cross_correlations(residuals_ds,
+                            lags=5,
+                            save_path=save_dir / 'cross_correlations.png')
+    # plot_ccf_distributions(residuals_ds,
+    #                        lags=5,
+    #                        save_path=save_dir / 'ccf_distributions.png')
 
 
 if __name__ == '__main__':
