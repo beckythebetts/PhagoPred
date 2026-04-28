@@ -73,7 +73,117 @@ DATASETS = {
         min_length=50,
         prediction_horizon=200,
         name='Challenging',
-    )
+    ),
+    'Graph Simple Chain':
+    SurvivalDatasetCfg(
+        train_paths=[
+            'PhagoPred/Datasets/graph_synthetic/simple_chain_train.h5'
+        ],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/simple_chain_val.h5'],
+        min_length=50,
+        max_time_to_death=50,
+        num_bins=5,
+        name='Graph Simple Chain',
+    ),
+    'Binary Graph Simple Chain':
+    BinaryDatasetCfg(
+        train_paths=[
+            'PhagoPred/Datasets/graph_synthetic/simple_chain_train.h5'
+        ],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/simple_chain_val.h5'],
+        min_length=50,
+        prediction_horizon=25,
+        name='Graph Simple Chain',
+    ),
+    'Graph Interaction':
+    SurvivalDatasetCfg(
+        train_paths=[
+            'PhagoPred/Datasets/graph_synthetic/interaction_train.h5'
+        ],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/interaction_val.h5'],
+        min_length=50,
+        max_time_to_death=50,
+        num_bins=5,
+        name='Graph Interaction',
+    ),
+    'Binary Graph Interaction':
+    BinaryDatasetCfg(
+        train_paths=[
+            'PhagoPred/Datasets/graph_synthetic/interaction_train.h5'
+        ],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/interaction_val.h5'],
+        min_length=50,
+        prediction_horizon=25,
+        name='Graph Interaction',
+    ),
+    'Graph Lagged':
+    SurvivalDatasetCfg(
+        train_paths=['PhagoPred/Datasets/graph_synthetic/lagged_train.h5'],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/lagged_val.h5'],
+        min_length=50,
+        max_time_to_death=50,
+        num_bins=5,
+        name='Graph Lagged',
+    ),
+    'Binary Graph Lagged':
+    BinaryDatasetCfg(
+        train_paths=['PhagoPred/Datasets/graph_synthetic/lagged_train.h5'],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/lagged_val.h5'],
+        min_length=50,
+        prediction_horizon=25,
+        name='Graph Lagged',
+    ),
+    'Graph Censored':
+    SurvivalDatasetCfg(
+        train_paths=['PhagoPred/Datasets/graph_synthetic/censored_train.h5'],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/censored_val.h5'],
+        min_length=50,
+        max_time_to_death=50,
+        num_bins=5,
+        name='Graph Censored',
+    ),
+    'Binary Graph Censored':
+    BinaryDatasetCfg(
+        train_paths=['PhagoPred/Datasets/graph_synthetic/censored_train.h5'],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/censored_val.h5'],
+        min_length=50,
+        prediction_horizon=25,
+        name='Graph Censored',
+    ),
+    'Graph Confounded':
+    SurvivalDatasetCfg(
+        train_paths=['PhagoPred/Datasets/graph_synthetic/confounded_train.h5'],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/confounded_val.h5'],
+        min_length=50,
+        max_time_to_death=50,
+        num_bins=5,
+        name='Graph Confounded',
+    ),
+    'Binary Graph Confounded':
+    BinaryDatasetCfg(
+        train_paths=['PhagoPred/Datasets/graph_synthetic/confounded_train.h5'],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/confounded_val.h5'],
+        min_length=50,
+        prediction_horizon=25,
+        name='Graph Confounded',
+    ),
+    'Graph Linear':
+    SurvivalDatasetCfg(
+        train_paths=['PhagoPred/Datasets/graph_synthetic/linear_train.h5'],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/linear_val.h5'],
+        min_length=50,
+        max_time_to_death=50,
+        num_bins=5,
+        name='Graph Linear',
+    ),
+    'Binary Graph Linear':
+    BinaryDatasetCfg(
+        train_paths=['PhagoPred/Datasets/graph_synthetic/linear_train.h5'],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/linear_val.h5'],
+        min_length=50,
+        prediction_horizon=25,
+        name='Graph Linear',
+    ),
 }
 FEATURE_COMBOS = {
     'All': [

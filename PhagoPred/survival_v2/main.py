@@ -14,17 +14,17 @@ from PhagoPred.survival_v2.utils.dataset_analysis import analyse_suite_datasets,
 
 
 def train():
-    # run_experiment_suite(
-    #     suite_name='SurvivalTest',
-    #     output_dir='PhagoPred/survival_v2/experiments/results',
-    #     device='cuda',
-    #     repeats=5,
-    # )
     run_experiment_suite(
-        suite_name='BinaryTest',
+        suite_name='Graph Binary',
         output_dir='PhagoPred/survival_v2/experiments/results',
         device='cuda',
-        repeats=5,
+        repeats=3,
+    )
+    run_experiment_suite(
+        suite_name='Graph Survival',
+        output_dir='PhagoPred/survival_v2/experiments/results',
+        device='cuda',
+        repeats=3,
     )
     # # results = run_experiment_suite(
     #     suite_name='Quick Binary Test',
@@ -34,11 +34,16 @@ def train():
     # )
 
 
-# def eval():
-#     evaluate_suite(
-#         Path(
-#             'PhagoPred/survival_v2/experiments/results/framecount_feature_comparison_20260113_165826'
-#         ))
+def eval():
+    evaluate_suite(
+        Path(
+            'PhagoPred/survival_v2/experiments/results/Graph Binary_24042026_092301'
+        ))
+    evaluate_suite(
+        Path(
+            'PhagoPred/survival_v2/experiments/results/Graph Survival_24042026_094729'
+        ))
+
 
 # def interpret():
 #     interpret_model(
@@ -59,7 +64,7 @@ def view_dataset_distributions():
 
 if __name__ == '__main__':
     train()
-
+    # eval()
     # evaluate_suite(
     #     Path(
     #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/BinaryTest_24032026_144422'
