@@ -43,8 +43,7 @@ class Feature:
     base_func: base_funcs.BaseFunc = field(
         default_factory=base_funcs.Constant
     )  # Base function MUST be constant for staionarity condition!!!
-    # inital_value: noise_funcs.Noise = field(
-    #     default=noise_funcs.GaussianNoise(20))
+    inital_value: float = 0.0
     pre_noise: noise_funcs.Noise = field(default=noise_funcs.GaussianNoise(1))
     post_noise: noise_funcs.Noise = field(default=noise_funcs.NoNoise())
 

@@ -42,11 +42,6 @@ def _observe_death_fraction(
                                    mode='full')[:num_frames]
         else:
             smoothed = hazard_signal.copy()
-        smoothed -= smoothed.min()
-        mx = smoothed.max()
-        if mx > 0:
-            smoothed /= mx
-        # Apply multiplier after normalisation so it actually scales hazard rates
         hazard_rates = np.clip(smoothed * multiplier, 0.0, 1.0)
         pmf = _pmf_from_hazards(hazard_rates)
         cif = np.cumsum(pmf)
@@ -72,13 +67,8 @@ def _calibrate_multiplier(
     tol: float = 0.02,
 ) -> float:
     """Iteratively find a post-normalisation scalar multiplier on hazard rates
-    so that approximately target_death_fraction of cells die within their window.
-
-    Each iteration estimates the death fraction at the current multiplier, then
-    updates via multiplier *= target / observed (multiplicative Newton step).
-    Stops when within `tol` of the target or after `max_iter` iterations.
-    """
-    multiplier = 1.0
+    so that approximately target_death_fraction of cells die within their window."""
+    multiplier = 1e-4
     for i in range(max_iter):
         observed = _observe_death_fraction(
             graph,
@@ -98,54 +88,23 @@ def _calibrate_multiplier(
             multiplier *= 10.0
         else:
             multiplier *= target_death_fraction / observed
-        # multiplier > 1 is fine — values are clipped to [0,1] after scaling
     return float(multiplier)
 
 
-def generate_dataset(
-    filename: Path,
-    features: list[Feature],
-    rules: list[Rule],
-    num_cells: int = 1000,
-    num_frames: int = 1000,
-    late_entry_prob: float = 0.0,
-    late_entry_range: tuple = (0, 100),
-    feature_mask_prob: float = 0.0,
-    smooth_hazard: bool = True,
-    smooth_sigma: int = 10,
-    target_death_fraction: float = None,
-    seed: int = None,
-) -> None:
-    """Generate a synthetic survival dataset from a CausalGraph and save to HDF5.
-
-    Args:
-        filename: Output .h5 file path.
-        features: List of Feature objects (must include one named 'Hazard').
-        rules: List of Rule objects defining the causal graph.
-        num_cells: Number of cell trajectories to generate.
-        num_frames: Number of time frames per trajectory.
-        late_entry_prob: Fraction of cells with a late observation start
-            (truncation). 0 disables late entry entirely.
-        late_entry_range: (min, max) frame range for late entry start times.
-        feature_mask_prob: Per-frame probability of masking feature values
-            with NaN (applied after observation window). 0 disables masking.
-        smooth_hazard: If True, apply a forward-shifted Gaussian smooth to the
-            Hazard signal before converting to hazard rates.
-        smooth_sigma: Gaussian sigma (frames) used when smooth_hazard is True.
-        target_death_fraction: If set, run a calibration pass to find a scalar
-            multiplier on the Hazard signal so that approximately this fraction
-            of cells die within their observation window.
-        seed: Random seed for reproducibility.
-    """
-    if seed is not None:
-        np.random.seed(seed)
-
-    feature_names = [f.name for f in features]
-    assert 'Hazard' in feature_names, "Features must include a node named 'Hazard'."
-
-    graph = CausalGraph(features, rules, time_steps=num_frames)
-
-    # Observation windows per cell
+def _generate_cells(
+    graph: CausalGraph,
+    num_cells: int,
+    num_frames: int,
+    late_entry_prob: float,
+    late_entry_range: tuple,
+    feature_mask_prob: float,
+    smooth_hazard: bool,
+    smooth_sigma: int,
+    hazard_multiplier: float,
+    feature_names: list,
+    non_hazard_names: list,
+) -> tuple:
+    """Generate cell trajectories using a pre-calibrated hazard multiplier."""
     start_frames = np.zeros(num_cells, dtype=int)
     if late_entry_prob > 0.0:
         late_mask = np.random.rand(num_cells) < late_entry_prob
@@ -157,27 +116,6 @@ def generate_dataset(
 
     end_frames = np.random.randint(num_frames // 2, num_frames, size=num_cells)
 
-    # Calibrate hazard multiplier to hit target_death_fraction
-    if target_death_fraction is not None:
-        calib_state = np.random.get_state()
-        np.random.seed((seed or 0) + 99999)
-        calib_starts = np.random.randint(0, 10, size=200)
-        calib_ends = np.random.randint(num_frames // 2, num_frames, size=200)
-        hazard_multiplier = _calibrate_multiplier(
-            graph,
-            num_frames,
-            calib_starts,
-            calib_ends,
-            smooth_hazard,
-            smooth_sigma,
-            target_death_fraction,
-        )
-        np.random.set_state(calib_state)
-    else:
-        hazard_multiplier = 1.0
-
-    # Pre-allocate storage
-    non_hazard_names = [n for n in feature_names if n != 'Hazard']
     all_features = {
         name: np.full((num_frames, num_cells), np.nan, dtype=np.float32)
         for name in non_hazard_names
@@ -194,7 +132,6 @@ def generate_dataset(
         signals = graph.sample_graph()
         start, end = int(start_frames[c]), int(end_frames[c])
 
-        # --- derive hazard rates from the 'Hazard' feature ---
         hazard_signal = signals['Hazard'].copy()
 
         if smooth_hazard:
@@ -208,11 +145,6 @@ def generate_dataset(
         else:
             smoothed = hazard_signal.copy()
 
-        # Normalise to [0, 1]: shift to non-negative then scale
-        smoothed -= smoothed.min()
-        max_val = smoothed.max()
-        if max_val > 0:
-            smoothed /= max_val
         hazard_rates = np.clip(smoothed * hazard_multiplier, 0.0,
                                1.0).astype(np.float32)
 
@@ -223,7 +155,6 @@ def generate_dataset(
         all_pmfs[:, c] = pmf
         all_cifs[:, c] = cif
 
-        # --- sample death frame ---
         u = np.random.rand()
         if u > cif.max():
             death_frame = np.nan
@@ -231,10 +162,8 @@ def generate_dataset(
             death_frame = float(np.argmax(cif >= u))
             if death_frame < start or death_frame > end:
                 death_frame = np.nan
-
         all_deaths[c] = death_frame
 
-        # --- apply observation window to features ---
         for name in non_hazard_names:
             sig = signals[name].astype(np.float32)
             sig[:start] = np.nan
@@ -244,15 +173,31 @@ def generate_dataset(
                 sig[mask] = np.nan
             all_features[name][:, c] = sig
 
-        # Store the raw Hazard signal (within observation window only)
         hz_sig = hazard_signal.astype(np.float32)
         hz_sig[:start] = np.nan
         hz_sig[end + 1:] = np.nan
         all_hazard_signals[:, c] = hz_sig
 
-    # --- save to HDF5 ---
+    return all_features, all_hazard_signals, all_hazard_rates, all_pmfs, all_cifs, all_deaths
+
+
+def _save_dataset(
+    filename: Path,
+    all_features: dict,
+    all_hazard_signals: np.ndarray,
+    all_hazard_rates: np.ndarray,
+    all_pmfs: np.ndarray,
+    all_cifs: np.ndarray,
+    all_deaths: np.ndarray,
+    feature_names: list,
+    non_hazard_names: list,
+    num_frames: int,
+    late_entry_prob: float,
+    feature_mask_prob: float,
+) -> None:
     filename = Path(filename)
     filename.parent.mkdir(parents=True, exist_ok=True)
+    num_cells = all_deaths.shape[0]
 
     with h5py.File(filename, 'w') as f:
         grp = f.create_group('Cells/Phase')
@@ -276,3 +221,108 @@ def generate_dataset(
         meta.attrs['late_entry_prob'] = late_entry_prob
         meta.attrs['feature_mask_prob'] = feature_mask_prob
         meta.attrs['feature_names'] = feature_names
+
+
+def generate_dataset(
+    train_filename: Path,
+    val_filename: Path,
+    features: list[Feature],
+    rules: list[Rule],
+    train_num_cells: int = 1000,
+    val_num_cells: int = 200,
+    num_frames: int = 500,
+    late_entry_prob: float = 0.0,
+    late_entry_range: tuple = (0, 100),
+    feature_mask_prob: float = 0.0,
+    smooth_hazard: bool = True,
+    smooth_sigma: int = 10,
+    target_death_fraction: float = 0.5,
+    seed: int = None,
+) -> None:
+    """Generate train and validation synthetic survival datasets from a CausalGraph.
+
+    Calibrates the hazard multiplier once (from target_death_fraction) then
+    uses it for both splits, ensuring they share the same hazard scaling.
+
+    Args:
+        train_filename: Output .h5 path for the training set.
+        val_filename: Output .h5 path for the validation set.
+        features: List of Feature objects (must include one named 'Hazard').
+        rules: List of Rule objects defining the causal graph.
+        train_num_cells: Number of cells in the training set.
+        val_num_cells: Number of cells in the validation set.
+        num_frames: Number of time frames per trajectory.
+        late_entry_prob: Fraction of cells with a late observation start.
+        late_entry_range: (min, max) frame range for late entry start times.
+        feature_mask_prob: Per-frame probability of masking feature values with NaN.
+        smooth_hazard: If True, apply a forward-shifted Gaussian smooth to Hazard.
+        smooth_sigma: Gaussian sigma (frames) used when smooth_hazard is True.
+        target_death_fraction: Calibrate hazard multiplier so this fraction of
+            cells die within their observation window.
+        seed: Random seed for reproducibility. Val set uses seed+1.
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    feature_names = [f.name for f in features]
+    assert 'Hazard' in feature_names, "Features must include a node named 'Hazard'."
+    non_hazard_names = [n for n in feature_names if n != 'Hazard']
+
+    graph = CausalGraph(features, rules, time_steps=num_frames)
+
+    # Calibrate multiplier once using a separate rng state so it doesn't
+    # affect the reproducibility of the train/val splits.
+    calib_state = np.random.get_state()
+    np.random.seed((seed or 0) + 99999)
+    calib_starts = np.random.randint(0, 10, size=200)
+    calib_ends = np.random.randint(num_frames // 2, num_frames, size=200)
+    hazard_multiplier = _calibrate_multiplier(
+        graph,
+        num_frames,
+        calib_starts,
+        calib_ends,
+        smooth_hazard,
+        smooth_sigma,
+        target_death_fraction,
+    )
+    np.random.set_state(calib_state)
+
+    print(
+        f"Generating training set ({train_num_cells} cells) -> {train_filename}"
+    )
+    train_data = _generate_cells(
+        graph,
+        train_num_cells,
+        num_frames,
+        late_entry_prob,
+        late_entry_range,
+        feature_mask_prob,
+        smooth_hazard,
+        smooth_sigma,
+        hazard_multiplier,
+        feature_names,
+        non_hazard_names,
+    )
+    _save_dataset(train_filename, *train_data, feature_names, non_hazard_names,
+                  num_frames, late_entry_prob, feature_mask_prob)
+
+    # Val set uses a different seed so cells are independent of the train set.
+    if seed is not None:
+        np.random.seed(seed + 1)
+    print(
+        f"Generating validation set ({val_num_cells} cells) -> {val_filename}")
+    val_data = _generate_cells(
+        graph,
+        val_num_cells,
+        num_frames,
+        late_entry_prob,
+        late_entry_range,
+        feature_mask_prob,
+        smooth_hazard,
+        smooth_sigma,
+        hazard_multiplier,
+        feature_names,
+        non_hazard_names,
+    )
+    _save_dataset(val_filename, *val_data, feature_names, non_hazard_names,
+                  num_frames, late_entry_prob, feature_mask_prob)

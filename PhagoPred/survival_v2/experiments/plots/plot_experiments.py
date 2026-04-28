@@ -23,7 +23,8 @@ log = get_logger()
 plt.rcParams['font.family'] = 'serif'
 
 
-def plot_experiment_results(experiments_dir: Path) -> None:
+def plot_experiment_results(experiments_dir: Path,
+                            ignore_params: list[str] | None = None) -> None:
     """Plot metrics for all experiments in a directory."""
     all_experiemnts = []
     varying_params = {f.name: [] for f in fields(ExperimentCfg)}
@@ -59,6 +60,11 @@ def plot_experiment_results(experiments_dir: Path) -> None:
                     varying_params[f.name].append(val)
 
     varying_params = {k: v for k, v in varying_params.items() if len(v) > 1}
+    if ignore_params:
+        varying_params = {
+            k: v
+            for k, v in varying_params.items() if k not in ignore_params
+        }
     log.info(f'Got {len(varying_params)} varying paramaters {varying_params}')
 
     _plot_and_save(plot_box_plots, all_experiemnts, varying_params,
@@ -154,7 +160,7 @@ if __name__ == "__main__":
     )
 
     # Plot main experiment results (accuracy, c-index, etc.)
-    plot_experiment_results(experiments_path, plot_type='box')
+    # plot_experiment_results(experiments_path, plot_type='box')
 
     # Plot confusion matrices
     # plot_confusion_matrices(experiments_path)

@@ -299,13 +299,13 @@ def run_experiment_suite(
         result = run_single_experiment(exp_config, output_dir, device)
         results.append(result)
 
-    plot_experiment_results(output_dir)
+    plot_experiment_results(output_dir, ignore_params=['feature_combo'])
     # plot_confusion_matrices(output_dir)
-    # plot_experiment_losses(output_di
+    # plot_experiment_losses(output_dir)
     return results
 
 
 def evaluate_suite(experiment_dir: Path) -> None:
-    plot_experiment_results(experiment_dir)
+    plot_experiment_results(experiment_dir, ignore_params=['feature_combo'])
     # plot_confusion_matrices(experiment_dir)
     # plot_experiment_losses(experiment_dir)

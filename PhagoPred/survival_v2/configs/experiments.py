@@ -170,6 +170,34 @@ EXPERIMENT_SUITES = {
                       ],
                       training=TRAINING['Standard'],
                       feature_combo=FEATURE_COMBOS['All'])),
+    'Graph Survival':
+    generate_experiment_grid(
+        ExperimentCfg(
+            model=[
+                MODELS['CNN Medium'],
+                MODELS['LSTM Medium'],
+                MODELS['Random Forest'],
+            ],
+            attention=ATTENTION['Last'],
+            loss=LOSSES['NLL'],
+            dataset=DATASETS['Graph Linear'],
+            training=TRAINING['Standard'],
+            feature_combo=['A', 'B', 'C'],
+        )),
+    'Graph Binary':
+    generate_experiment_grid(
+        ExperimentCfg(
+            model=[
+                MODELS['CNN Medium'],
+                MODELS['LSTM Medium'],
+                MODELS['Random Forest'],
+            ],
+            attention=ATTENTION['Last'],
+            loss=LOSSES['Weighted BCE'],
+            dataset=DATASETS['Binary Graph Linear'],
+            training=TRAINING['Standard'],
+            feature_combo=['A', 'B', 'C'],
+        )),
 }
 # EXPERIMENT_SUITES = {
 #     'quick_test':

@@ -182,6 +182,17 @@ def threshold(val: float, thresh: float):
     return 0
 
 
+def sigmoid(val: float, k: float = 10.0, thresh: float = 0.0) -> float:
+    """Smooth switch; k controls steepness."""
+    return 1.0 / (1.0 + np.exp(-k * (val - thresh)))
+
+
+def hill(val: float, n: float = 2.0, K: float = 1.0) -> float:
+    """Cooperative binding; n=Hill coefficient, K=EC50."""
+    val = max(val, 0.0)
+    return val**n / (K**n + val**n)
+
+
 # class Apply(Expr):
 #     def __init__(self, func, arg): self.func, self.arg = func, arg
 #     def __call__(self, pv): return self.func(self.arg(pv))
