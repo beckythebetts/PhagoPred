@@ -180,9 +180,15 @@ EXPERIMENT_SUITES = {
             ],
             attention=ATTENTION['Last'],
             loss=LOSSES['NLL'],
-            dataset=DATASETS['Graph Linear'],
+            dataset=[
+                DATASETS['Graph Linear'],
+                DATASETS['Graph Chain'],
+                DATASETS['Graph Multiplicative'],
+                DATASETS['Graph Resetting Accumulation'],
+                DATASETS['Graph Ratio'],
+            ],
             training=TRAINING['Standard'],
-            feature_combo=['A', 'B', 'C'],
+            feature_combo=['A', 'B', 'C', 'D'],
         )),
     'Graph Binary':
     generate_experiment_grid(
@@ -194,9 +200,51 @@ EXPERIMENT_SUITES = {
             ],
             attention=ATTENTION['Last'],
             loss=LOSSES['Weighted BCE'],
-            dataset=DATASETS['Binary Graph Linear'],
+            dataset=[
+                DATASETS['Binary Graph Linear'],
+                DATASETS['Binary Graph Chain'],
+                DATASETS['Binary Graph Multiplicative'],
+                DATASETS['Binary Graph Resetting Accumulation'],
+                DATASETS['Binary Graph Ratio'],
+            ],
             training=TRAINING['Standard'],
-            feature_combo=['A', 'B', 'C'],
+            feature_combo=['A', 'B', 'C', 'D'],
+        )),
+    'Graph Noise Survival':
+    generate_experiment_grid(
+        ExperimentCfg(
+            model=[
+                MODELS['CNN Medium'],
+                MODELS['LSTM Medium'],
+                MODELS['Random Forest'],
+            ],
+            attention=ATTENTION['Last'],
+            loss=LOSSES['NLL'],
+            dataset=[
+                DATASETS['Graph Linear No Noise'],
+                DATASETS['Graph Linear Low Noise'],
+                DATASETS['Graph Linear High Noise'],
+            ],
+            training=TRAINING['Standard'],
+            feature_combo=['A', 'B', 'C', 'D'],
+        )),
+    'Graph Noise Binary':
+    generate_experiment_grid(
+        ExperimentCfg(
+            model=[
+                MODELS['CNN Medium'],
+                MODELS['LSTM Medium'],
+                MODELS['Random Forest'],
+            ],
+            attention=ATTENTION['Last'],
+            loss=LOSSES['Weighted BCE'],
+            dataset=[
+                DATASETS['Binary Graph Linear No Noise'],
+                DATASETS['Binary Graph Linear Low Noise'],
+                DATASETS['Binary Graph Linear High Noise'],
+            ],
+            training=TRAINING['Standard'],
+            feature_combo=['A', 'B', 'C', 'D'],
         )),
 }
 # EXPERIMENT_SUITES = {

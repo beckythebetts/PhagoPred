@@ -15,9 +15,7 @@ from torch.utils.data import DataLoader
 from PhagoPred.survival_v2.configs.experiments import EXPERIMENT_SUITES, ExperimentCfg, ModelCfg, AttentionCfg, DatasetCfg
 from PhagoPred.survival_v2.configs.models import LSTMCfg, CNNCfg, RSFCfg
 from PhagoPred.survival_v2.configs.datasets import SurvivalDatasetCfg, BinaryDatasetCfg
-from PhagoPred.survival_v2.models.lstm_survival import LSTMSurvival
-from PhagoPred.survival_v2.models.cnn_survival import CNNSurvival
-from PhagoPred.survival_v2.models.random_forest import RandomSurvivalForestModel
+from PhagoPred.survival_v2.models.build import build_model
 from PhagoPred.survival_v2.train.train import train
 from PhagoPred.survival_v2.evaluate import evaluate
 from PhagoPred.survival_v2.data import (
@@ -28,6 +26,7 @@ from PhagoPred.survival_v2.data import (
     survival_collate_fn,
 )
 from PhagoPred.survival_v2.utils.plots import plot_losses
+from PhagoPred.survival_v2.interpret.run_interpret import interpret
 from PhagoPred.utils.logger import get_logger
 from PhagoPred.utils.tools import highlight_str
 from .plots.plot_experiments import (
@@ -37,66 +36,6 @@ from .plots.plot_experiments import (
 )
 
 log = get_logger()
-
-
-def build_model(model_config: ModelCfg,
-                attention_config: AttentionCfg,
-                num_features: int,
-                num_bins: int,
-                device: str,
-                feature_names: list[str] = None):
-    """
-    Build a model from configuration.
-
-    Args:
-        model_config: ModelCfg subclass with model architecture parameters
-        attention_config: dict with attention mechanism parameters
-        num_features: number of input features
-        num_bins: number of time bins
-        device: torch device
-        feature_names: optional list of feature names (for classical models)
-
-    Returns:
-        model: SurvivalModel or ClassicalSurvivalModel instance
-    """
-
-    # Deep learning models
-    if isinstance(model_config, LSTMCfg):
-        model = LSTMSurvival(
-            num_features=num_features,
-            num_bins=num_bins,
-            lstm_hidden_size=model_config.hidden_size,
-            lstm_num_layers=model_config.num_layers,
-            lstm_dropout=model_config.dropout,
-            fc_layers=model_config.fc_layers,
-            attention_config=attention_config,
-            predictor_layers=model_config.predictor_layers,
-        )
-        return model.to(device)
-
-    if isinstance(model_config, CNNCfg):
-        model = CNNSurvival(num_features=num_features,
-                            num_bins=num_bins,
-                            num_channels=model_config.num_channels,
-                            kernel_sizes=model_config.kernel_sizes,
-                            dilations=model_config.dilations,
-                            fc_layers=model_config.fc_layers,
-                            attention_config=attention_config)
-        return model.to(device)
-
-    # Classical ML models
-    if isinstance(model_config, RSFCfg):
-        model = RandomSurvivalForestModel(
-            num_bins=num_bins,
-            n_estimators=model_config.n_estimators,
-            max_depth=model_config.max_depth,
-            feature_names=feature_names,
-            window_sizes=model_config.window_sizes,
-        )
-        return model
-
-    else:
-        raise ValueError(f"Unknown model config type: {type(model_config)}")
 
 
 def build_datasets(
@@ -173,7 +112,7 @@ def run_single_experiment(
     experiment_config: ExperimentCfg,
     output_dir: Path,
     device='cuda' if torch.cuda.is_available() else 'cpu',
-):
+) -> tuple[dict, Path]:
     """
     Run a single experiment.
 
@@ -193,9 +132,6 @@ def run_single_experiment(
         file_idx += 1
         exp_dir = Path(output_dir) / f"experiment_{file_idx:02d}"
     exp_dir.mkdir(parents=True)
-
-    with (exp_dir / 'config.json').open('w') as f:
-        json.dump(asdict(experiment_config), f, indent=2)
 
     print(f"Building datasets {experiment_config.dataset.name}...")
     log.info(
@@ -235,6 +171,9 @@ def run_single_experiment(
                         device,
                         feature_names=experiment_config.feature_combo)
 
+    with (exp_dir / 'config.json').open('w') as f:
+        json.dump(asdict(experiment_config), f, indent=2)
+
     print('Training Model...')
     log.info(
         f'Training Model:\n\t{asdict(experiment_config.training)}\n\t{asdict(experiment_config.loss)}'
@@ -256,7 +195,7 @@ def run_single_experiment(
         'metrics': evaluation_metrics,
         'history': history,
         'config': experiment_config
-    }
+    }, exp_dir
 
 
 def run_experiment_suite(
@@ -264,7 +203,8 @@ def run_experiment_suite(
     output_dir,
     device='cuda' if torch.cuda.is_available() else 'cpu',
     repeats: int = 1,
-):
+    shap_interpret: bool = False,
+) -> Path:
     """
     Run a predefined experiment suite.
 
@@ -296,13 +236,15 @@ def run_experiment_suite(
     results = []
     for i, exp_config in enumerate(experiments):
         print(highlight_str(f"Experiment {i+1}/{len(experiments)}"))
-        result = run_single_experiment(exp_config, output_dir, device)
+        result, exp_dir = run_single_experiment(exp_config, output_dir, device)
         results.append(result)
+        if shap_interpret:
+            interpret(exp_dir, device=device, num_segments=8)
 
     plot_experiment_results(output_dir, ignore_params=['feature_combo'])
     # plot_confusion_matrices(output_dir)
     # plot_experiment_losses(output_dir)
-    return results
+    return output_dir
 
 
 def evaluate_suite(experiment_dir: Path) -> None:

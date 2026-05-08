@@ -15,6 +15,8 @@ from .SHAP_kernel import (
     quick_feature_importance,
 )
 
+from .run_interpret import interpret
+
 __all__ = [
     # Gradient-based SHAP
     "SurvivalSHAP",
@@ -29,4 +31,6 @@ __all__ = [
     "FeatureMaskWrapper",
     "quick_temporal_importance",
     "quick_feature_importance",
+    # Top-level runner
+    "interpret",
 ]

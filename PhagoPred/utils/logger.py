@@ -15,10 +15,10 @@ def get_logger(name: str = "PhagoPred") -> logging.Logger:
     if _logger is not None:
         return logging.getLogger(name)
 
-    _log_file_path = Path('temp') / 'log.txt'
+    _log_file_path = Path('temp') / 'log.log'
     logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        level=logging.DEBUG,
+        format="%(asctime)s [%(levelname)s] %(pathname)s: %(message)s",
         handlers=[
             logging.FileHandler(_log_file_path, mode='w'),
         ],

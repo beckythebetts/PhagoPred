@@ -3,6 +3,7 @@ import faulthandler
 import warnings
 
 from sympy import im
+
 sys.path.insert(0, 'detectron2')
 
 from pathlib import Path
@@ -28,22 +29,23 @@ from PhagoPred import SETTINGS
 from PhagoPred.utils import tools, mask_funcs
 
 
-
 def make_coco_subset(orig_coco, ims):
     with open(orig_coco, 'r') as f:
         orig_coco = json.load(f)
         new_coco = {
-        'images': [],
-        'annotations': [],
-        'categories': orig_coco['categories']
+            'images': [],
+            'annotations': [],
+            'categories': orig_coco['categories']
         }
         annotation_id = 1
         for image in orig_coco['images']:
             if image['file_name'] in [im.name for im in ims]:
-                new_coco['images'].append({'id': len(new_coco['images']) + 1,
-                                           'file_name': image['file_name'],
-                                           'width': image['width'],
-                                           'height': image['height']})
+                new_coco['images'].append({
+                    'id': len(new_coco['images']) + 1,
+                    'file_name': image['file_name'],
+                    'width': image['width'],
+                    'height': image['height']
+                })
                 for annotation in orig_coco['annotations']:
                     if annotation['image_id'] == image['id']:
                         new_annotation = annotation.copy()
@@ -53,6 +55,7 @@ def make_coco_subset(orig_coco, ims):
                         new_coco['annotations'].append(new_annotation)
     return new_coco
 
+
 class KFold:
 
     def __init__(self, directory, fine_tune: bool = False):
@@ -61,20 +64,25 @@ class KFold:
         self.coco = directory / 'labels.json'
         self.fine_tune = fine_tune
         with open(self.coco, 'r') as f:
-            self.categories = [category['name'] for category in json.load(f)["categories"]]
+            self.categories = [
+                category['name'] for category in json.load(f)["categories"]
+            ]
 
     def split_all(self, num_val=1):
         if self.fine_tune:
             self.split_for_fine_tune()
             return 0
-        
-        for i in range(int(len(self.ims)/num_val)):
+
+        for i in range(int(len(self.ims) / num_val)):
             training_data = self.directory / f'model_{i}' / 'Training_Data'
 
             tools.remake_dir(training_data / 'train' / 'images')
             tools.remake_dir(training_data / 'validate' / 'images')
 
-            val_ims = [self.ims[((i*num_val)+x) % len(self.ims)] for x in range(num_val)]
+            val_ims = [
+                self.ims[((i * num_val) + x) % len(self.ims)]
+                for x in range(num_val)
+            ]
             train_ims = [im for im in self.ims if im not in val_ims]
 
             val_coco = make_coco_subset(self.coco, val_ims)
@@ -86,10 +94,12 @@ class KFold:
 
             for im in self.ims:
                 if im in val_ims:
-                    shutil.copy(im, training_data / 'validate' / 'images' / im.name)
+                    shutil.copy(
+                        im, training_data / 'validate' / 'images' / im.name)
 
                 elif im in train_ims:
-                    shutil.copy(im, training_data / 'train' / 'images' / im.name)
+                    shutil.copy(im,
+                                training_data / 'train' / 'images' / im.name)
 
     def split_for_fine_tune(self, num_splits: int = 3):
         """
@@ -101,7 +111,10 @@ class KFold:
             if 'alive' in im.name or 'dead' in im.name:
                 all_cell_idxs.append(im.name.split('_')[0])
         all_cell_idxs = set(all_cell_idxs)
-        validation_cell_idxs = np.random.choice(list(all_cell_idxs), size=int(num_splits*0.2*len(all_cell_idxs)), replace=False)
+        validation_cell_idxs = np.random.choice(list(all_cell_idxs),
+                                                size=int(num_splits * 0.2 *
+                                                         len(all_cell_idxs)),
+                                                replace=False)
         for i in range(num_splits):
             split_data_dir = self.directory / f'split_{i}' / 'Fine_Tuning_Data'
 
@@ -113,19 +126,30 @@ class KFold:
                 if 'alive' in im.name or 'dead' in im.name:
                     cell_idx = im.name.split('_')[0]
                     if cell_idx in split_val_idxs:
-                        shutil.copy(im, split_data_dir / 'validate' / 'images' / im.name)
+                        shutil.copy(
+                            im,
+                            split_data_dir / 'validate' / 'images' / im.name)
                     else:
-                        shutil.copy(im, split_data_dir / 'train' / 'images' / im.name)
+                        shutil.copy(
+                            im, split_data_dir / 'train' / 'images' / im.name)
                 else:
                     val = np.random.rand() < 0.2
                     if val:
-                        shutil.copy(im, split_data_dir / 'validate' / 'images' / im.name)   
+                        shutil.copy(
+                            im,
+                            split_data_dir / 'validate' / 'images' / im.name)
                     else:
-                        shutil.copy(im, split_data_dir / 'train' / 'images' / im.name)
+                        shutil.copy(
+                            im, split_data_dir / 'train' / 'images' / im.name)
 
             # Collect names s all training and validation images
-            train_ims = [im for im in (split_data_dir / 'train' / 'images').iterdir()]
-            val_ims = [im for im in (split_data_dir / 'validate' / 'images').iterdir()]
+            train_ims = [
+                im for im in (split_data_dir / 'train' / 'images').iterdir()
+            ]
+            val_ims = [
+                im
+                for im in (split_data_dir / 'validate' / 'images').iterdir()
+            ]
 
             # Make COCO subsets and save
             train_coco = make_coco_subset(self.coco, train_ims)
@@ -134,13 +158,11 @@ class KFold:
             val_coco = make_coco_subset(self.coco, val_ims)
             with open(split_data_dir / 'validate' / 'labels.json', 'w') as f:
                 json.dump(val_coco, f)
-            
+
             # Copy original model into each split directory
-            shutil.copytree(self.directory.parent / 'Model', split_data_dir.parent / 'Model')
+            shutil.copytree(self.directory.parent / 'Model',
+                            split_data_dir.parent / 'Model')
 
-
-
-    
         # for names in [('00', '01'), ('01', '10'), ('10', '11'), ('11', '10')]:
         #     self.make_split(names)
 
@@ -161,9 +183,18 @@ class KFold:
                 unregister_coco_instances('my_dataset_val')
 
     def eval(self):
-        for file in self.directory.glob('*split_*'):
-            evaluator = Evaluator(file / 'Fine_Tuning_Data', file / 'Model', eval_mode='metrics')
-            evaluator.eval()
+        if self.fine_tune:
+            for file in self.directory.glob('*split_*'):
+                evaluator = Evaluator(file / 'Fine_Tuning_Data',
+                                      file / 'Model',
+                                      eval_mode='metrics')
+                evaluator.eval()
+        else:
+            for file in self.directory.glob('model_*'):
+                evaluator = Evaluator(file / 'Training_Data',
+                                      file / 'Model',
+                                      eval_mode='metrics')
+                evaluator.eval()
             # for im_name in (file / 'Fine_Tuning_Data' / 'validate' / 'images').iterdir():
             #     im = plt.imread(im_name)
 
@@ -175,13 +206,13 @@ class KFold:
             #     # frame_processed = np.stack([np.array(im)]*3, axis=-1)
             #     print(frame_processed.shape)
             #     pred_masks = seg_image(cfg_dir = file / 'Model', im = frame_processed)
-            #     true_masks = mask_funcs.coco_to_masks(coco_file = file / 'Fine_Tuning_Data' / 'validate' / 'labels.json', im_name = im_name) 
-                
+            #     true_masks = mask_funcs.coco_to_masks(coco_file = file / 'Fine_Tuning_Data' / 'validate' / 'labels.json', im_name = im_name)
+
             #     if pred_masks is not None:
             #         combi_pred = mask_funcs.combine_masks(list(pred_masks.values()))
-            #     else: 
+            #     else:
             #         combi_pred = np.zeros(im.shape[:2], dtype=np.uint8)
-                
+
             #     if true_masks is not None:
             #         combi_true = mask_funcs.combine_masks(list(true_masks.values()))
             #     else:
@@ -192,7 +223,7 @@ class KFold:
 
             #     pred_mask_im = Image.fromarray(combi_pred.astype(np.int32), mode='I')
             #     pred_mask_im.save(file / f'{im_name.stem}_pred_mask.png')
-                
+
             #     results = self.prec_recall_curve(combi_true, combi_pred)
             #     results.to_csv(str(file / f'{im_name.stem}_all_results.txt'), sep='\t')
 
@@ -205,31 +236,36 @@ class KFold:
 
             #         results = self.prec_recall_curve(true_masks[category], pred_masks[category])
             #         results.to_csv(str(file / f'{im_name.stem}_{category}_results.txt'), sep='\t')
-    
+
     def fine_tune_eval_clusters(self, plot_title: str):
         """Plot precision recall curves of clusters."""
         results = []
         for file in self.directory.glob('split_*'):
-            metric_evaluator = Evaluator(file / 'Fine_Tuning_Data', file / 'Model', eval_mode='metrics')
+            metric_evaluator = Evaluator(file / 'Fine_Tuning_Data',
+                                         file / 'Model',
+                                         eval_mode='metrics')
             metric_evaluator.eval()
             for results_file in (file / 'Evaluation').glob("*_results.txt"):
-                results.append(pd.read_csv(results_file, sep = '\t', index_col = 0))
+                results.append(pd.read_csv(results_file, sep='\t',
+                                           index_col=0))
         results = pd.concat(results, axis=0)
-        means, stds = results.groupby(level=0).mean(), results.groupby(level=0).std()
-        percentiles = results.groupby(level=0).quantile([0.05, 0.5, 0.95]).unstack(level=1)
+        means, stds = results.groupby(level=0).mean(), results.groupby(
+            level=0).std()
+        percentiles = results.groupby(level=0).quantile([0.05, 0.5, 0.95
+                                                         ]).unstack(level=1)
         metrics = means.columns.values
         thresholds = means.index.values
-        
+
         plt.rcParams["font.family"] = 'serif'
         fig, axs = plt.subplots(1, 3, figsize=(12, 4))
         for ax, metric in zip(axs, metrics):
             p5 = percentiles[(metric, 0.05)]
             median = percentiles[(metric, 0.5)]
             p95 = percentiles[(metric, 0.95)]
-            
+
             # ax.plot(thresholds, means[metric], color=colour, label=label)
             # ax.fill_between(thresholds, means[metric]-stds[metric], means[metric]+stds[metric], color=colour, alpha=0.5, edgecolor='none')
-            
+
             ax.plot(thresholds, median)
             ax.fill_between(thresholds, p5, p95, alpha=0.5, edgecolor='none')
             ax.set_xlabel('IOU Threshold')
@@ -238,12 +274,14 @@ class KFold:
         plt.title(plot_title)
         # plt.legend()
         plt.savefig(self.directory / 'cluster_results.png')
-        
+
     def fine_tune_eval(self, cm_title: str):
         cms = []
         accs = []
         for file in self.directory.glob('split_*'):
-            evaluator = Evaluator(file / 'Fine_Tuning_Data', file / 'Model', eval_mode="confusion")
+            evaluator = Evaluator(file / 'Fine_Tuning_Data',
+                                  file / 'Model',
+                                  eval_mode="confusion")
             cm, acc = evaluator.eval()
             cms.append(cm)
             accs.append(acc)
@@ -251,7 +289,7 @@ class KFold:
         cms = np.array(cms)
         mean_cm = np.mean(cms, axis=0)
         std_cm = np.std(cms, axis=0)
-        
+
         median_cm = np.median(cms, axis=0)
         p5_cm = np.percentile(cms, 5, axis=0)
         p95_cm = np.percentile(cms, 95, axis=0)
@@ -261,12 +299,20 @@ class KFold:
         for i in range(mean_cm.shape[0]):
             for j in range(mean_cm.shape[1]):
                 # annotations[i, j] = f"{mean_cm[i, j]:.2f}±{std_cm[i, j]:.2f}"
-                annotations[i, j] = f"{median_cm[i, j]:.2f} ({p5_cm[i, j]:.2f}–{p95_cm[i, j]:.2f})"
+                annotations[
+                    i,
+                    j] = f"{median_cm[i, j]:.2f} ({p5_cm[i, j]:.2f}–{p95_cm[i, j]:.2f})"
 
         labels = ['Macrophage', 'Dead Macrophage', 'No Cell']
         # Plot
         plt.figure(figsize=(6, 6))
-        sns.heatmap(median_cm, annot=annotations, fmt='', cmap='Blues', xticklabels=labels, yticklabels=labels, cbar=False)
+        sns.heatmap(median_cm,
+                    annot=annotations,
+                    fmt='',
+                    cmap='Blues',
+                    xticklabels=labels,
+                    yticklabels=labels,
+                    cbar=False)
         plt.xlabel("Predicted label")
         plt.ylabel("True label")
         plt.title(cm_title)
@@ -279,11 +325,13 @@ class KFold:
         plt.savefig(self.directory / "confusion_matrix_mean_std.png")
 
         print(f'Accuracy: {np.mean(accs):.4f} ± {np.std(accs):.4f}')
-    
-    def prec_recall_curve(self, true_mask: np.ndarray, 
-                          pred_mask: np.ndarray, 
-                          thresholds: np.ndarray = np.arange(0.5, 1.0, 0.05)
-                          ) -> pd.DataFrame:
+
+    def prec_recall_curve(
+        self,
+        true_mask: np.ndarray,
+        pred_mask: np.ndarray,
+        thresholds: np.ndarray = np.arange(0.5, 1.0, 0.05)
+    ) -> pd.DataFrame:
         """
         Computes pandas datframe representing preciosn, recall and f1 curves over iou threshold sspecifed
         Parameters:
@@ -293,19 +341,19 @@ class KFold:
             thresholds
         """
         APs, TPs, FPs, FNs = cellpose.metrics.average_precision(
-            true_mask.astype(int), 
-            pred_mask.astype(int), 
-            threshold=thresholds
-            )
-        precisions = TPs / (TPs+FPs)
-        recalls = TPs / (TPs+FNs)
-        F1s = TPs / (TPs + 0.5*(FPs+FNs))
-        df = pd.DataFrame({'Precision': precisions,
-                        'Recall': recalls,
-                        'F1': F1s},
-                        index=thresholds)
+            true_mask.astype(int), pred_mask.astype(int), threshold=thresholds)
+        precisions = TPs / (TPs + FPs)
+        recalls = TPs / (TPs + FNs)
+        F1s = TPs / (TPs + 0.5 * (FPs + FNs))
+        df = pd.DataFrame(
+            {
+                'Precision': precisions,
+                'Recall': recalls,
+                'F1': F1s
+            },
+            index=thresholds)
         return df
-    
+
     def plot(self) -> None:
         """
         Plot precision-recall and f1 curves of each category + all categories
@@ -313,8 +361,11 @@ class KFold:
         plt.rcParams["font.family"] = 'serif'
         fig, axs = plt.subplots(1, 3, figsize=(12, 4))
         cmap = plt.cm.get_cmap('gist_rainbow')
-        colours = [cmap(i / (len(self.categories)+1)) for i in range(len(self.categories)+1)]
-        for category, colour in zip(self.categories+['all'], colours):
+        colours = [
+            cmap(i / (len(self.categories) + 1))
+            for i in range(len(self.categories) + 1)
+        ]
+        for category, colour in zip(self.categories + ['all'], colours):
             self.plot_category(category, axs, colour)
         plt.legend()
         plt.savefig(self.directory / 'results.png')
@@ -324,8 +375,9 @@ class KFold:
         ious = []
         num_training_cells = []
         for dir in self.directory.glob('*model*'):
-            for file in (dir / 'Training_Data' / 'validate').glob('*_results.txt'):
-                results.append(pd.read_csv(file, sep = '\t', index_col = 0))
+            for file in (dir / 'Training_Data' /
+                         'validate').glob('*_results.txt'):
+                results.append(pd.read_csv(file, sep='\t', index_col=0))
             for file in (dir / 'Training_Data' / 'validate').glob('*_iou.txt'):
                 with open(file, 'r') as f:
                     ious.append(float(f.read()))
@@ -333,7 +385,8 @@ class KFold:
                 num_training_cells.append(int(f.read()))
         # results = [pd.read_csv(file, sep='\t', index_col=0) for file in self.directory.iterdir() if file.suffix=='.txt']
         results = pd.concat(results, axis=0)
-        means, stds = results.groupby(level=0).mean(), results.groupby(level=0).std()
+        means, stds = results.groupby(level=0).mean(), results.groupby(
+            level=0).std()
         metrics = means.columns.values
         thresholds = means.index.values
 
@@ -343,8 +396,16 @@ class KFold:
         for ax, metric in zip(axs, metrics):
             # ax.plot(thresholds, cellpose_means[metric], color='red', label='Cellpose')
             # ax.fill_between(thresholds, cellpose_means[metric]-cellpose_stds[metric], cellpose_means[metric]+cellpose_stds[metric], color='red', alpha=0.5, edgecolor='none')
-            ax.plot(thresholds, means[metric], color='navy', label='Mask R-CNN')
-            ax.fill_between(thresholds, means[metric]-stds[metric], means[metric]+stds[metric], color='navy', alpha=0.5, edgecolor='none')
+            ax.plot(thresholds,
+                    means[metric],
+                    color='navy',
+                    label='Mask R-CNN')
+            ax.fill_between(thresholds,
+                            means[metric] - stds[metric],
+                            means[metric] + stds[metric],
+                            color='navy',
+                            alpha=0.5,
+                            edgecolor='none')
             ax.set_xlabel('IOU Threshold')
             ax.set_ylabel(metric)
             ax.grid(True)
@@ -353,20 +414,28 @@ class KFold:
         plt.savefig(self.directory / 'results.png')
         print(ious)
         with open(self.directory / 'info.txt', 'w') as file:
-            file.write(f'IOUS = {np.mean(ious)} +- {np.std(ious)}\nNumber of training cells = {np.mean(num_training_cells)} +- {np.std(num_training_cells)}')
+            file.write(
+                f'IOUS = {np.mean(ious)} +- {np.std(ious)}\nNumber of training cells = {np.mean(num_training_cells)} +- {np.std(num_training_cells)}'
+            )
 
-    def features_scatter_plot(self, feature_func=mask_funcs.get_areas, feature_name='area/pixels'):
+    def features_scatter_plot(self,
+                              feature_func=mask_funcs.get_areas,
+                              feature_name='area/pixels'):
         all_areas_true = []
         all_ious_true = []
 
         all_areas_pred = []
         all_ious_pred = []
-        for file in self.directory.glob('*model*'):               
-            for im_name in (file / 'Training_Data' / 'validate' / 'images').iterdir():
+        for file in self.directory.glob('*model*'):
+            for im_name in (file / 'Training_Data' / 'validate' /
+                            'images').iterdir():
                 print(im_name)
                 with Image.open(file / f'{im_name.stem}_pred_mask.png') as im:
                     pred_mask = np.array(im)
-                true_masks = mask_funcs.coco_to_masks(coco_file = file / 'Training_Data' / 'validate' / 'labels.json', im_name = im_name) 
+                true_masks = mask_funcs.coco_to_masks(
+                    coco_file=file / 'Training_Data' / 'validate' /
+                    'labels.json',
+                    im_name=im_name)
 
                 true_mask = mask_funcs.combine_masks(list(true_masks.values()))
                 true_areas = feature_func(true_mask)
@@ -376,78 +445,125 @@ class KFold:
                 all_areas_pred += list(pred_areas)
 
                 for i, area in enumerate(true_areas):
-                    true_cell = np.where(true_mask==i, True, False)
+                    true_cell = np.where(true_mask == i, True, False)
                     pred_idxs = np.unique(pred_mask[true_cell])
-                    iou = np.max([mask_funcs.cal_iou(true_cell, np.where(pred_mask==pred_idx, True, False)) for pred_idx in pred_idxs])
+                    iou = np.max([
+                        mask_funcs.cal_iou(
+                            true_cell,
+                            np.where(pred_mask == pred_idx, True, False))
+                        for pred_idx in pred_idxs
+                    ])
                     all_ious_true += [iou]
 
                 for i, area in enumerate(pred_areas):
-                    pred_cell = np.where(pred_mask==i, True, False)
+                    pred_cell = np.where(pred_mask == i, True, False)
                     true_idxs = np.unique(true_mask[pred_cell])
-                    iou = np.max([mask_funcs.cal_iou(pred_cell, np.where(true_mask==true_idx, True, False)) for true_idx in true_idxs])
+                    iou = np.max([
+                        mask_funcs.cal_iou(
+                            pred_cell,
+                            np.where(true_mask == true_idx, True, False))
+                        for true_idx in true_idxs
+                    ])
                     all_ious_pred += [iou]
 
         plt.rcParams["font.family"] = 'serif'
-        plt.scatter(all_areas_true, all_ious_true, marker='.', color='r', edgecolors='none', alpha=0.5, label=f'True Cell {feature_name}')
-        plt.scatter(all_areas_pred, all_ious_pred, marker='.', color='b', edgecolors='none', alpha=0.5, label=f'Predicted Cell {feature_name}')
+        plt.scatter(all_areas_true,
+                    all_ious_true,
+                    marker='.',
+                    color='r',
+                    edgecolors='none',
+                    alpha=0.5,
+                    label=f'True Cell {feature_name}')
+        plt.scatter(all_areas_pred,
+                    all_ious_pred,
+                    marker='.',
+                    color='b',
+                    edgecolors='none',
+                    alpha=0.5,
+                    label=f'Predicted Cell {feature_name}')
         plt.ylabel('Intersection over Union')
         plt.xlabel(feature_name)
         plt.legend()
         plt.grid()
         plt.savefig(self.directory / f'per_ar_scatter.png')
 
-    def eval_feature(self, feature_func=mask_funcs.get_areas, feature_name='area/pixels', n_groups=4):
+    def eval_feature(self,
+                     feature_func=mask_funcs.get_areas,
+                     feature_name='area/pixels',
+                     n_groups=4):
         # calculte area percentiles based on true masks
         all_areas = np.array([])
         num_ims = 0
         for file in self.directory.glob('*model*'):
-            for im_name in (file / 'Training_Data' / 'validate' / 'images').iterdir():
-                true_masks = mask_funcs.coco_to_masks(coco_file = file / 'Training_Data' / 'validate' / 'labels.json', im_name = im_name) 
+            for im_name in (file / 'Training_Data' / 'validate' /
+                            'images').iterdir():
+                true_masks = mask_funcs.coco_to_masks(
+                    coco_file=file / 'Training_Data' / 'validate' /
+                    'labels.json',
+                    im_name=im_name)
                 true_mask = mask_funcs.combine_masks(list(true_masks.values()))
                 all_areas = np.append(all_areas, feature_func(true_mask))
                 num_ims += 1
 
-        area_thresholds = np.percentile(all_areas, np.linspace(0, 100, n_groups+1))
+        area_thresholds = np.percentile(all_areas,
+                                        np.linspace(0, 100, n_groups + 1))
         area_thresholds[0] = 0
         area_thresholds[-1] = np.inf
 
         # split masks
         iou_thresholds = np.arange(0.5, 1.0, 0.05)
         metrics = ['Precision', 'Recall', 'F1']
-        area_threshold_names = [f'{low:.4f} - {high:.4f}' for low, high in zip(area_thresholds[:-1], area_thresholds[1:])]
+        area_threshold_names = [
+            f'{low:.4f} - {high:.4f}'
+            for low, high in zip(area_thresholds[:-1], area_thresholds[1:])
+        ]
 
         print(area_threshold_names)
 
-        results = pd.DataFrame(columns=pd.MultiIndex.from_product([metrics, area_threshold_names, iou_thresholds], 
-                                                                  names = ['Metric', 'Area Threshold', 'IOU Threshold']),
-                                                                  index=np.arange(num_ims))
-        
-        results = results.sort_index(level=['Metric', 'Area Threshold', 'IOU Threshold'])
-    
+        results = pd.DataFrame(columns=pd.MultiIndex.from_product(
+            [metrics, area_threshold_names, iou_thresholds],
+            names=['Metric', 'Area Threshold', 'IOU Threshold']),
+                               index=np.arange(num_ims))
+
+        results = results.sort_index(
+            level=['Metric', 'Area Threshold', 'IOU Threshold'])
+
         row = 0
         for file in self.directory.glob('*model*'):
-            for im_name in (file / 'Training_Data' / 'validate' / 'images').iterdir():
+            for im_name in (file / 'Training_Data' / 'validate' /
+                            'images').iterdir():
 
                 # pred_mask = plt.imread(file / 'Training_Data' / 'validate' / f'{im_name.stem}_pred_mask.png')
                 with Image.open(file / f'{im_name.stem}_pred_mask.png') as im:
                     pred_mask = np.array(im)
-                true_masks = mask_funcs.coco_to_masks(coco_file = file / 'Training_Data' / 'validate' / 'labels.json', im_name = im_name) 
+                true_masks = mask_funcs.coco_to_masks(
+                    coco_file=file / 'Training_Data' / 'validate' /
+                    'labels.json',
+                    im_name=im_name)
                 true_mask = mask_funcs.combine_masks(list(true_masks.values()))
-                true_areas, pred_areas = feature_func(true_mask), feature_func(pred_mask)
+                true_areas, pred_areas = feature_func(true_mask), feature_func(
+                    pred_mask)
 
-                for col, (lower_threshold, upper_threshold) in enumerate(zip(area_thresholds[:-1], area_thresholds[1:])):
-                    
-                    true_idxs = np.where((true_areas >= lower_threshold) & (true_areas < upper_threshold))[0]
-                    pred_idxs = np.where((pred_areas >= lower_threshold) & (pred_areas < upper_threshold))[0]
+                for col, (lower_threshold, upper_threshold) in enumerate(
+                        zip(area_thresholds[:-1], area_thresholds[1:])):
 
-                    split_true_mask = np.where(np.isin(true_mask, true_idxs), true_mask, 0)
+                    true_idxs = np.where((true_areas >= lower_threshold)
+                                         & (true_areas < upper_threshold))[0]
+                    pred_idxs = np.where((pred_areas >= lower_threshold)
+                                         & (pred_areas < upper_threshold))[0]
+
+                    split_true_mask = np.where(np.isin(true_mask, true_idxs),
+                                               true_mask, 0)
                     split_true_mask = mask_funcs.squash_idxs(split_true_mask)
 
-                    split_pred_mask = np.where(np.isin(pred_mask, pred_idxs), pred_mask, 0)    
-                    split_pred_mask = mask_funcs.squash_idxs(split_pred_mask)        
+                    split_pred_mask = np.where(np.isin(pred_mask, pred_idxs),
+                                               pred_mask, 0)
+                    split_pred_mask = mask_funcs.squash_idxs(split_pred_mask)
 
-                    unt, cto = np.unique(split_true_mask[split_true_mask>0], return_counts=True)
-                    unp, ctp = np.unique(split_pred_mask[split_pred_mask>0], return_counts=True)
+                    unt, cto = np.unique(split_true_mask[split_true_mask > 0],
+                                         return_counts=True)
+                    unp, ctp = np.unique(split_pred_mask[split_pred_mask > 0],
+                                         return_counts=True)
 
                     # print(np.min(cto), np.max(cto))
                     # print(np.min(ctp), np.max(ctp))
@@ -459,15 +575,20 @@ class KFold:
 
                     # calculate precision using subset of predicted cells and all true cells, calaulcte recall using subset of true cells, all predicted cells
                     # APs, TPs, FPs, FNs = cellpose.metrics.average_precision(split_true_mask.astype(int), split_pred_mask.astype(int), threshold=iou_thresholds)
-                    _, TPs, FPs, FNs = cellpose.metrics.average_precision(true_mask.astype(int), split_pred_mask.astype(int), threshold=iou_thresholds)
-                    precisions = TPs / (TPs+FPs)
+                    _, TPs, FPs, FNs = cellpose.metrics.average_precision(
+                        true_mask.astype(int),
+                        split_pred_mask.astype(int),
+                        threshold=iou_thresholds)
+                    precisions = TPs / (TPs + FPs)
                     # assert all(TPs+FPs) == len(np.unique(split_pred_mask))-1, f"{TPs}, {FPs}, {len(np.unique(split_pred_mask))}, {len(np.unique(true_mask))}"
-                    
-                    _, TPs, FPs, FNs = cellpose.metrics.average_precision(split_true_mask.astype(int), pred_mask.astype(int), threshold=iou_thresholds)          
-                    recalls = TPs / (TPs+FNs)
 
-                    F1s = 2/((1/recalls)+(1/precisions))
+                    _, TPs, FPs, FNs = cellpose.metrics.average_precision(
+                        split_true_mask.astype(int),
+                        pred_mask.astype(int),
+                        threshold=iou_thresholds)
+                    recalls = TPs / (TPs + FNs)
 
+                    F1s = 2 / ((1 / recalls) + (1 / precisions))
 
                     # APs, TPs, FPs, FNs = cellpose.metrics.average_precision(split_true_mask.astype(int), split_pred_mask.astype(int), threshold=iou_thresholds)
                     # precisions = TPs / (TPs+FPs)
@@ -476,13 +597,19 @@ class KFold:
 
                     with warnings.catch_warnings():
 
-                        warnings.filterwarnings('ignore', category=UserWarning, message=".*lexsort depth*")
+                        warnings.filterwarnings('ignore',
+                                                category=UserWarning,
+                                                message=".*lexsort depth*")
 
-                        results.loc[row, ('Precision', area_threshold_names[col])] = precisions
+                        results.loc[row,
+                                    ('Precision',
+                                     area_threshold_names[col])] = precisions
                         # results.xs(('Precision', lower_threshold), axis=1, level=['Metric', 'Area Threshold']).iloc[row] = precisions
-                        results.loc[row, ('Recall', area_threshold_names[col])] = recalls
+                        results.loc[row, ('Recall',
+                                          area_threshold_names[col])] = recalls
                         # results.xs(('Recall', lower_threshold), axis=1, level=['Metric', 'Area Threshold']).iloc[row] = recalls
-                        results.loc[row, ('F1', area_threshold_names[col])] = F1s
+                        results.loc[row,
+                                    ('F1', area_threshold_names[col])] = F1s
                         # results.xs(('F1', lower_threshold), axis=1, level=['Metric', 'Area Threshold']).iloc[row] = F1s
                 row += 1
 
@@ -494,18 +621,82 @@ class KFold:
         cmap = plt.get_cmap('viridis')
         for ax, metric in zip(axs, metrics):
             for i, area_threshold_name in enumerate(area_threshold_names):
-                means = results_means[(metric, area_threshold_name)].to_numpy().astype(np.float32)
-                stds = results_stds[(metric, area_threshold_name)].to_numpy().astype(np.float32)
+                means = results_means[(metric,
+                                       area_threshold_name)].to_numpy().astype(
+                                           np.float32)
+                stds = results_stds[(metric,
+                                     area_threshold_name)].to_numpy().astype(
+                                         np.float32)
 
-                ax.plot(iou_thresholds, means, color=cmap((i+1)/n_groups), label=area_threshold_name)
-                ax.fill_between(iou_thresholds, means-stds, means+stds, color=cmap((i+1)/n_groups), alpha=0.5, edgecolor='none')
+                ax.plot(iou_thresholds,
+                        means,
+                        color=cmap((i + 1) / n_groups),
+                        label=area_threshold_name)
+                ax.fill_between(iou_thresholds,
+                                means - stds,
+                                means + stds,
+                                color=cmap((i + 1) / n_groups),
+                                alpha=0.5,
+                                edgecolor='none')
                 ax.set_xlabel('IOU Threshold')
                 ax.set_ylabel(metric)
                 ax.grid(True)
         plt.legend(title=feature_name)
         plt.savefig(self.directory / f'{feature_name}_results.png')
 
-    def plot_category(self, category: str, axs: plt.Axes, colour, label: 'str' = None) -> None:
+    def plot_metrics_vs_iou(self,
+                            category: str = 'all',
+                            save_as: Path = None) -> None:
+        """3-panel plot of Precision, Recall and F1 vs IOU threshold, averaged over all folds.
+        category: 'all', 'Macrophage', 'Dead Macrophage', etc.
+        """
+        results = []
+        for dir in self.directory.glob('*model*'):
+            eval_dir = dir / 'Evaluation'
+            if not eval_dir.exists():
+                continue
+            for file in eval_dir.glob(f'*_{category}_results.txt'):
+                results.append(pd.read_csv(file, sep='\t', index_col=0))
+        if not results:
+            print(f"No results files found for category '{category}'.")
+            return
+        results = pd.concat(results, axis=0)
+        means = results.groupby(level=0).mean()
+        stds = results.groupby(level=0).std()
+        thresholds = means.index.values
+
+        plt.rcParams["font.family"] = 'serif'
+        fig, axs = plt.subplots(1, 3, figsize=(12, 4))
+
+        for ax, metric in zip(axs, ['Precision', 'Recall', 'F1']):
+            ax.plot(thresholds, means[metric], color='navy', label='Mean')
+            ax.fill_between(thresholds,
+                            means[metric] - stds[metric],
+                            means[metric] + stds[metric],
+                            color='navy',
+                            alpha=0.3,
+                            edgecolor='none',
+                            label='±1 std')
+            ax.set_xlabel('IOU Threshold')
+            ax.set_ylabel(metric)
+            ax.set_ylim(0, 1.05)
+            ax.grid(True)
+
+        axs[0].legend()
+        plt.suptitle(
+            f'{category} — averaged over {len(results) // len(thresholds)} folds'
+        )
+        plt.tight_layout()
+
+        out = save_as or self.directory / f'metrics_vs_iou_{category}.png'
+        plt.savefig(out)
+        print(f"Saved to {out}")
+
+    def plot_category(self,
+                      category: str,
+                      axs: plt.Axes,
+                      colour,
+                      label: 'str' = None) -> None:
         """
         Plot precision-recall curves for given category on axs.
         """
@@ -514,19 +705,25 @@ class KFold:
         results = []
         for dir in self.directory.glob('*model*'):
             for file in (dir).glob(f"*{category}_results.txt"):
-                results.append(pd.read_csv(file, sep = '\t', index_col = 0))
+                results.append(pd.read_csv(file, sep='\t', index_col=0))
         results = pd.concat(results, axis=0)
-        means, stds = results.groupby(level=0).mean(), results.groupby(level=0).std()
+        means, stds = results.groupby(level=0).mean(), results.groupby(
+            level=0).std()
         metrics = means.columns.values
         thresholds = means.index.values
-        
+
         for ax, metric in zip(axs, metrics):
             ax.plot(thresholds, means[metric], color=colour, label=label)
-            ax.fill_between(thresholds, means[metric]-stds[metric], means[metric]+stds[metric], color=colour, alpha=0.5, edgecolor='none')
+            ax.fill_between(thresholds,
+                            means[metric] - stds[metric],
+                            means[metric] + stds[metric],
+                            color=colour,
+                            alpha=0.5,
+                            edgecolor='none')
             ax.set_xlabel('IOU Threshold')
             ax.set_ylabel(metric)
             ax.grid(True)
-                
+
     def getAP(self, file):
         try:
             with open(file / 'Model' / 'eval.txt', 'r') as f:
@@ -538,9 +735,12 @@ class KFold:
         except ValueError as e:
             print("Error:", e)
 
-
     def plot_av_loss(self, output_path: Path) -> None:
-        list_of_paths = [file / 'Model' / 'metrics.json' for file in self.directory.glob('*model*') if file.is_dir()]
+        list_of_paths = [
+            file / 'Model' / 'metrics.json'
+            for file in self.directory.glob('*model*') if file.is_dir()
+        ]
+
         def load_json_arr(file_path):
             with open(file_path, 'r') as f:
                 return [json.loads(line) for line in f]
@@ -558,9 +758,11 @@ class KFold:
                     continue
 
                 if 'total_loss' in x:
-                    training_losses.setdefault(iter, []).append(x['total_loss'])
+                    training_losses.setdefault(iter,
+                                               []).append(x['total_loss'])
                 if 'validation_loss' in x:
-                    validation_losses.setdefault(iter, []).append(x['validation_loss'])
+                    validation_losses.setdefault(iter, []).append(
+                        x['validation_loss'])
 
         def compute_stats(loss_dict):
             iterations = sorted(loss_dict.keys())
@@ -572,21 +774,30 @@ class KFold:
         val_iters, val_mean, val_std = compute_stats(validation_losses)
 
         plt.rcParams["font.family"] = 'serif'
-        plt.plot(train_iters, train_mean, color='navy', label='Train Loss (mean)')
-        plt.fill_between(train_iters, 
-                        np.array(train_mean) - np.array(train_std),
-                        np.array(train_mean) + np.array(train_std),
-                        color='navy', alpha=0.2)
-        plt.plot(val_iters, val_mean, color='orange', label='Validation Loss (mean)')
+        plt.plot(train_iters,
+                 train_mean,
+                 color='navy',
+                 label='Train Loss (mean)')
+        plt.fill_between(train_iters,
+                         np.array(train_mean) - np.array(train_std),
+                         np.array(train_mean) + np.array(train_std),
+                         color='navy',
+                         alpha=0.2)
+        plt.plot(val_iters,
+                 val_mean,
+                 color='orange',
+                 label='Validation Loss (mean)')
         plt.fill_between(val_iters,
-                        np.array(val_mean) - np.array(val_std),
-                        np.array(val_mean) + np.array(val_std),
-                        color='orange', alpha=0.2)
+                         np.array(val_mean) - np.array(val_std),
+                         np.array(val_mean) + np.array(val_std),
+                         color='orange',
+                         alpha=0.2)
         plt.xlabel('Iteration')
         plt.ylabel('Loss')
         plt.grid(True)
         plt.legend()
         plt.savefig(output_path)
+
 
 def unregister_coco_instances(name):
     if name in DatasetCatalog.list():
@@ -594,14 +805,19 @@ def unregister_coco_instances(name):
     if name in MetadataCatalog.list():
         MetadataCatalog.pop(name)
 
+
 def merge_jsons(directory):
     print(directory)
     print([f for f in directory.glob('*')])
     all_jsons = [f for f in directory.glob('*.json')]
     json_0 = all_jsons[0]
     for i in range(1, len(all_jsons)):
-        call(['python', '-m', 'COCO_merger.merge', '--src', json_0, all_jsons[i], '--out', directory / 'labels.json'])
+        call([
+            'python', '-m', 'COCO_merger.merge', '--src', json_0, all_jsons[i],
+            '--out', directory / 'labels.json'
+        ])
         json_0 = directory / 'labels.json'
+
 
 # def plot_comparison(kfold_dict, save_as):
 #     colours = ['red', 'navy']
@@ -611,6 +827,7 @@ def merge_jsons(directory):
 #         kfold.plot_multiple(name, axs, colour)
 #     plt.legend()
 #     plt.savefig(save_as)
+
 
 def plot_comparison(kfols_dict, save_as, category):
     colours = ['red', 'navy']
@@ -622,6 +839,7 @@ def plot_comparison(kfols_dict, save_as, category):
     plt.suptitle(f'Comparison of {category} category')
     plt.savefig(save_as)
 
+
 def split_masks_by_area(true_masks, pred_masks, n_groups=4):
     '''
     Split both sets of masks into n_groups based on size. Thresholds are determined by evenly spaced percentiles of true_mask
@@ -631,17 +849,24 @@ def split_masks_by_area(true_masks, pred_masks, n_groups=4):
     for mask in true_masks:
         areas = mask_funcs.get_areas(mask)
         all_areas = np.append(all_areas, areas)
-    
-    area_thresholds = np.percentile(all_areas, np.linspace(0, 100, n_groups+1))
+
+    area_thresholds = np.percentile(all_areas,
+                                    np.linspace(0, 100, n_groups + 1))
     # split masks
     split_true_masks, split_pred_masks = [], []
     for true_mask, pred_mask in zip(true_masks, pred_masks):
-        true_areas, pred_areas = mask_funcs.get_areas(true_mask), mask_funcs.get_areas(pred_mask)
-        for lower_threshold, upper_threshold in zip(area_thresholds[:-1], area_thresholds[1:]):
-            true_idxs = np.where((true_areas >= lower_threshold) & (true_areas < upper_threshold)) 
-            pred_ixs = np.where((true_areas >= lower_threshold) & (true_areas < upper_threshold))                                     
+        true_areas, pred_areas = mask_funcs.get_areas(
+            true_mask), mask_funcs.get_areas(pred_mask)
+        for lower_threshold, upper_threshold in zip(area_thresholds[:-1],
+                                                    area_thresholds[1:]):
+            true_idxs = np.where((true_areas >= lower_threshold)
+                                 & (true_areas < upper_threshold))
+            pred_ixs = np.where((true_areas >= lower_threshold)
+                                & (true_areas < upper_threshold))
 
-def compare_prec_recall_curves(directories: list, save_as: Path, labels: list) -> None:
+
+def compare_prec_recall_curves(directories: list, save_as: Path,
+                               labels: list) -> None:
     cmap = plt.cm.get_cmap('Set1')
     plt.rcParams["font.family"] = 'serif'
     colours = [cmap(i) for i in range(len(labels))]
@@ -652,40 +877,51 @@ def compare_prec_recall_curves(directories: list, save_as: Path, labels: list) -
             # metric_evaluator = Evaluator(file / 'Fine_Tuning_Data', file / 'Model', eval_mode='metrics')
             # metric_evaluator.eval()
             for results_file in (file / 'Evaluation').glob("*_results.txt"):
-                results.append(pd.read_csv(results_file, sep = '\t', index_col = 0))
+                results.append(pd.read_csv(results_file, sep='\t',
+                                           index_col=0))
         results = pd.concat(results, axis=0)
-        means, stds = results.groupby(level=0).mean(), results.groupby(level=0).std()
-        percentiles = results.groupby(level=0).quantile([0.05, 0.5, 0.95]).unstack(level=1)
+        means, stds = results.groupby(level=0).mean(), results.groupby(
+            level=0).std()
+        percentiles = results.groupby(level=0).quantile([0.05, 0.5, 0.95
+                                                         ]).unstack(level=1)
         metrics = means.columns.values
         thresholds = means.index.values
-    
+
         for ax, metric in zip(axs, metrics):
             p5 = percentiles[(metric, 0.05)]
             median = percentiles[(metric, 0.5)]
             p95 = percentiles[(metric, 0.95)]
-            
+
             # ax.plot(thresholds, means[metric], color=colour, label=label)
             # ax.fill_between(thresholds, means[metric]-stds[metric], means[metric]+stds[metric], color=colour, alpha=0.5, edgecolor='none')
-            
+
             ax.plot(thresholds, median, color=colours[i], label=labels[i])
-            ax.fill_between(thresholds, p5, p95, color=colours[i], alpha=0.5, edgecolor='none')
+            ax.fill_between(thresholds,
+                            p5,
+                            p95,
+                            color=colours[i],
+                            alpha=0.5,
+                            edgecolor='none')
             ax.set_xlabel('IOU Threshold')
             ax.set_ylabel(metric.capitalize())
             ax.grid(True)
     plt.legend()
-    plt.tight_layout()#
+    plt.tight_layout()  #
     plt.savefig(save_as)
+
 
 def main():
     faulthandler.enable()
-    merge_jsons(Path('PhagoPred')/ 'detectron_segmentation' / 'models' / '16_02_26' / 'Training_Data' / 'train')
+    # merge_jsons(Path('PhagoPred')/ 'detectron_segmentation' / 'models' / '16_02_26' / 'Training_Data' / 'train')
     # compare_prec_recall_curves([
     #     Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_no_fine_tune_16_10',
     #     Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_fine_tune_16_10'
     # ],
     #                            Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'comparison_plot.png',
     #                            ['No Fine Tune', 'Fine Tune'])
-    # my_kfold = KFold(Path('PhagoPred')/ 'detectron_segmentation' / 'models' / '27_05_mac_fine_tune_all_12_02_26' / 'kfold_fine_tune', fine_tune=False)
+    my_kfold = KFold(
+        Path('PhagoPred/detectron_segmentation/models/bio_20x_j774/kfold'),
+        fine_tune=False)
     # my_kfold.split_all()
     # my_kfold.train()
     # my_kfold.eval()
@@ -695,6 +931,8 @@ def main():
     # my_kfold.train()
     # my_kfold.eval()
     # my_kfold.plot()
+    for cat in ['all', 'Macrophage', 'Dead Macrophage']:
+        my_kfold.plot_metrics_vs_iou(category=cat)
 
     # my_kfold.plot_results()
     # my_kfold.eval_feature(feature_func=mask_funcs.get_perimeters_over_areas, feature_name='perim_over_area', n_groups=3)
@@ -708,5 +946,6 @@ def main():
 
     # my_kfold.plot_av_loss(output_path=Path('temp') / 'av_loss_plot.png')
 
-if __name__=='__main__':
+
+if __name__ == '__main__':
     main()

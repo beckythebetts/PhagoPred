@@ -1,5 +1,7 @@
 from abc import abstractmethod
 from dataclasses import dataclass, asdict
+from pathlib import Path
+import json
 
 import torch
 import numpy as np
@@ -11,6 +13,7 @@ import shap
 
 from PhagoPred.survival_v2.models.base import SurvivalModel
 from PhagoPred.survival_v2.data.dataset import CellDataset, collate_fn
+from PhagoPred.survival_v2.utils.io import load_dataset, load_model
 
 
 @dataclass
@@ -103,6 +106,8 @@ class MaskWrapperBase:
         """Extract the appropriate scalar output from model logits."""
         if self.output_type == "expected_time":
             return self.model.predict_expected_time(logits)
+        elif self.output_type == "binary":
+            return self.model.predict_binary(logits)
         elif self.output_type == "cif":
             cif = self.model.predict_cif(logits)
             if self.target_bin is not None:
@@ -418,6 +423,7 @@ class KernelSHAP:
     def analyse_batch(
         self,
         dataset: Union[CellDataset, torch.Tensor],
+        device: torch.device,
         lengths: Optional[torch.Tensor] = None,
         num_samples: int = 10,
         num_segments: int = 50,
@@ -427,6 +433,9 @@ class KernelSHAP:
         output_type: str = "expected_time",
         target_bin: Optional[int] = None,
         mask_value: float = 0.0,
+        compute_temporal: bool = True,
+        compute_feature: bool = True,
+        compute_temporal_feature: bool = True,
         max_len: int = 1000,
     ) -> KernelSHAPResults:
         """
@@ -444,6 +453,9 @@ class KernelSHAP:
             output_type: Model output to explain
             target_bin: Target bin for pmf/cif
             mask_value: Value to use when masking
+            compute_temporal: Whether to compute temporal importance
+            compute_feature: Whether to compute feature importance
+            compute_temporal_feature: Whether to compute temporal-feature importance
             max_len: Maximum sequence length
 
         Returns:
@@ -455,8 +467,7 @@ class KernelSHAP:
                 dataset,
                 batch_size=num_samples,
                 shuffle=True,
-                collate_fn=lambda batch: collate_fn(
-                    batch, dataset, max_seq_len=max_len),
+                collate_fn=lambda batch: collate_fn(batch, device=device),
             )
             batch = next(iter(dataloader))
             x_batch = batch['features']
@@ -486,19 +497,24 @@ class KernelSHAP:
                 output_type=output_type,
                 target_bin=target_bin,
                 mask_value=mask_value,
+                compute_temporal=compute_temporal,
+                compute_feature=compute_feature,
+                compute_temporal_feature=compute_temporal_feature,
                 show_progress=False,
             )
 
-            all_temporal.append(result.temporal_shap_values)
-            all_feature.append(result.feature_shap_values)
-            if result.temporal_feature_shap_values is not None:
+            if compute_temporal:
+                all_temporal.append(result.temporal_shap_values)
+                segment_boundaries = result.segment_boundaries
+            if compute_feature:
+                all_feature.append(result.feature_shap_values)
+            if compute_temporal_feature and result.temporal_feature_shap_values is not None:
                 all_temporal_feature.append(
                     result.temporal_feature_shap_values)
-            segment_boundaries = result.segment_boundaries
 
         # Aggregate
-        temporal_shap = np.vstack(all_temporal)
-        feature_shap = np.vstack(all_feature)
+        temporal_shap = np.vstack(all_temporal) if all_temporal else None
+        feature_shap = np.vstack(all_feature) if all_feature else None
 
         tf_shap = None
         tf_importance = None
@@ -508,10 +524,12 @@ class KernelSHAP:
 
         return KernelSHAPResults(
             temporal_shap_values=temporal_shap,
-            temporal_importance=np.abs(temporal_shap).mean(axis=0),
+            temporal_importance=np.abs(temporal_shap).mean(
+                axis=0) if temporal_shap is not None else None,
             segment_boundaries=segment_boundaries,
             feature_shap_values=feature_shap,
-            feature_importance=np.abs(feature_shap).mean(axis=0),
+            feature_importance=np.abs(feature_shap).mean(
+                axis=0) if feature_shap is not None else None,
             feature_names=self.feature_names,
             temporal_feature_shap_values=tf_shap,
             temporal_feature_importance=tf_importance,
@@ -988,3 +1006,8 @@ def quick_feature_importance(
     explainer = KernelSHAP(model, feature_names=feature_names, device=device)
     shap_vals, _ = explainer.compute_feature_importance(x, lengths, nsamples)
     return np.abs(shap_vals)
+
+
+def interpret(model_dir: Path) -> None:
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dataset = load_dataset(model_dir, 'val')

@@ -26,10 +26,10 @@ TRAINING = {
     'Standard':
     TrainingCfg(num_epochs=50,
                 batch_size=256,
-                lr=1e-3,
+                lr=1e-4,
                 scheduler='step',
                 step_size=10,
-                gamma=0.9,
+                gamma=0.7,
                 name='Standard'),
     'Long':
     TrainingCfg(num_epochs=300,

@@ -1,7 +1,9 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from collections import defaultdict
 
 import numpy as np
+import sympy as sp
 
 
 class Expr(ABC):
@@ -202,162 +204,53 @@ class AutoCorrelationRule(Rule):
         super().__init__(target, expr)
 
 
-# class Apply(Expr):
-#     def __init__(self, func, arg): self.func, self.arg = func, arg
-#     def __call__(self, pv): return self.func(self.arg(pv))
+class MeanReversionRule(Rule):
 
-# class StructuralForm(ABC):
-#     """Base class.  compute() maps {feature: scalar} -> scalar increment."""
+    def __init__(self, feature: str, mean: float, theta: float):
+        target = feature
+        expr = theta * (mean - Var(feature))
 
-#     @abstractmethod
-#     def compute(self, parent_values: dict[str, float]) -> float:
-#         ...
+        super().__init__(target, expr)
 
-#     def __call__(self, parent_values: dict[str, float]) -> float:
-#         return self.compute(parent_values)
 
-# class Sum(StructuralForm):
-#     """g(\sum_i(f_i(x_i)))"""
+def expand_to_noise(rules: list[Rule],
+                    target: str,
+                    t: int,
+                    max_depth: int = 10):
+    rules_by_target = defaultdict(list)
+    for rule in rules:
+        rules_by_target[rule.target].append(rule)
 
-#     def __init__(self, g: ComponentFunc, f_dict: dict[str, ComponentFunc]):
-#         self.g = g
-#         self.f_dict = f_dict
+    def expand_var(name, time, depth):
+        noise_term = sp.Symbol(f'noise_{name}_{time}')
+        if depth <= 0 or name not in rules_by_target:
+            return noise_term  # terminal — just the noise at this timestep
+        # noise injected HERE plus the deterministic rule contributions expanded further back
+        return noise_term + sum(
+            expand_expr(rule.expr, time, depth - 1)
+            for rule in rules_by_target[name])
 
-#     def compute(self, parent_values: dict[str, float]) -> float:
-#         for name in self.f_dict:
-#             if name not in parent_values:
-#                 raise KeyError(
-#                     f"Parent '{name}' missing from parent_values: {list(parent_values.keys())}"
-#                 )
+    def expand_expr(expr, time, depth):
+        if isinstance(expr, Const):
+            return sp.Float(expr.val)
+        elif isinstance(expr, Var):
+            return expand_var(expr.name, time - expr.lag, depth)
+        elif isinstance(expr, Add):
+            return expand_expr(expr.left, time, depth) + expand_expr(
+                expr.right, time, depth)
+        elif isinstance(expr, Sub):
+            return expand_expr(expr.left, time, depth) - expand_expr(
+                expr.right, time, depth)
+        elif isinstance(expr, Mul):
+            return expand_expr(expr.left, time, depth) * expand_expr(
+                expr.right, time, depth)
+        elif isinstance(expr, Div):
+            return expand_expr(expr.left, time, depth) / expand_expr(
+                expr.right, time, depth)
+        elif isinstance(expr, Apply):
+            inner = expand_expr(expr.source, time, depth)
+            return sp.Function(expr.func.__name__)(
+                inner)  # opaque for nonlinear
+        return sp.Symbol(f'unknown_{time}')
 
-#         output = self.g(
-#             sum([
-#                 self.f_dict[name](parent_values[name]) for name in self.f_dict
-#             ]))
-#         return output
-
-# class Product(StructuralForm):
-#     """g(\product_i(f_i(x_i)))"""
-#     def __init__(self, g)
-
-# # ── Axis 1a: Single Index (monotone) ─────────────────────────────────────────
-
-# class SingleIndex(StructuralForm):
-#     """f(sum_i w_i * x_i)
-
-#     All parents are first collapsed into one linear index, then a single
-#     component function is applied.  The canonical single-cause or
-#     dose–response model.
-
-#     Args:
-#         weights: {feature_name: weight}.  Missing features default to 1.0.
-#         func:    ComponentFunc applied to the weighted sum.
-#     """
-
-#     def __init__(self, weights: dict[str, float], func: ComponentFunc):
-#         self.weights = weights
-#         self.func = func
-
-#     def compute(self, parent_values: dict[str, float]) -> float:
-#         index = sum(
-#             self.weights.get(name, 1.0) * val
-#             for name, val in parent_values.items())
-#         return self.func(index)
-
-# # ── Axis 1b: Additive Nonlinear ───────────────────────────────────────────────
-
-# class AdditiveNonlinear(StructuralForm):
-#     """sum_i f_i(x_i)
-
-#     Each parent is transformed by its own component function, then the results
-#     are summed.  Captures independent nonlinear contributions.
-
-#     Args:
-#         funcs: {feature_name: ComponentFunc}.
-#                Features not in the dict fall through unchanged (identity).
-#     """
-
-#     def __init__(self, funcs: dict[str, ComponentFunc]):
-#         self.funcs = funcs
-
-#     def compute(self, parent_values: dict[str, float]) -> float:
-#         total = 0.0
-#         for name, val in parent_values.items():
-#             f = self.funcs.get(name, Linear(slope=1.0, intercept=0.0))
-#             total += f(val)
-#         return total
-
-# # ── Axis 1c: Interaction ──────────────────────────────────────────────────────
-
-# class MultiplicativeInteraction(StructuralForm):
-#     """prod_i f_i(x_i)
-#     Args:
-#         funcs: {feature_name: ComponentFunc}.
-#     """
-
-#     def __init__(self, funcs: dict[str, ComponentFunc]):
-#         self.funcs = funcs
-
-#     def compute(self, parent_values: dict[str, float]) -> float:
-#         result = 1.0
-#         for name, val in parent_values.items():
-#             f = self.funcs.get(name, Linear(slope=1.0, intercept=0.0))
-#             result *= f(val)
-#         return result
-
-# class ModulatedInteraction(StructuralForm):
-#     """f_driver(x_driver) * g_modulator(x_modulator)
-
-#     One parent drives the effect; another scales (gates) it.
-#     Models conditional activation: the effect only appears when both the
-#     driver signal and modulator are non-zero.
-
-#     Args:
-#         driver:    name of the driving parent feature.
-#         modulator: name of the gating parent feature.
-#         driver_func:    ComponentFunc for the driver.
-#         modulator_func: ComponentFunc for the modulator.
-#     """
-
-#     def __init__(
-#         self,
-#         driver: str,
-#         modulator: str,
-#         driver_func: ComponentFunc,
-#         modulator_func: ComponentFunc,
-#     ):
-#         self.driver = driver
-#         self.modulator = modulator
-#         self.driver_func = driver_func
-#         self.modulator_func = modulator_func
-
-#     def compute(self, parent_values: dict[str, float]) -> float:
-#         d = self.driver_func(parent_values.get(self.driver, 0.0))
-#         m = self.modulator_func(parent_values.get(self.modulator, 0.0))
-#         return d * m
-
-# class AdditiveWithInteraction(StructuralForm):
-#     """sum_i f_i(x_i) + interaction_scale * prod_i x_i
-
-#     Additive baseline plus a pairwise (or higher) interaction term.
-#     The interaction_scale controls the strength of synergy/antagonism.
-
-#     Args:
-#         funcs:             {feature_name: ComponentFunc} for the additive part.
-#         interaction_scale: weight on the product interaction term.
-#     """
-
-#     def __init__(
-#         self,
-#         funcs: dict[str, ComponentFunc],
-#         interaction_scale: float = 1.0,
-#     ):
-#         self.funcs = funcs
-#         self.interaction_scale = interaction_scale
-
-#     def compute(self, parent_values: dict[str, float]) -> float:
-#         additive = sum(
-#             self.funcs.get(name, Linear(slope=1.0, intercept=0.0))(val)
-#             for name, val in parent_values.items())
-#         product = float(np.prod(list(parent_values.values())))
-#         return additive + self.interaction_scale * product
+    return sp.expand(expand_var(target, t, max_depth))
