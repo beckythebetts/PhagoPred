@@ -4,7 +4,7 @@ from pathlib import Path
 from . import base_funcs, noise_funcs
 from .generate_datasets import generate_dataset
 from .graph import Feature
-from .rules import Apply, Rule, ReLU, Var, threshold
+from .rules import Rule, ReLU, Threshold, Var
 
 
 @dataclass
@@ -59,13 +59,12 @@ _linear = DatasetConfig(
         Rule(target='C', expr=0.9 * Var('C')),
         Rule(
             target='Hazard',
-            expr=Apply(ReLU,
-                       0.99 * Var('Hazard') + 0.9 * Var('A') + 0.9 * Var('B') +
-                       0.9 * Var('C'),
-                       thresh=0.0),
+            expr=ReLU(0.99 * Var('Hazard') + 0.9 * Var('A') + 0.9 * Var('B') +
+                      0.9 * Var('C'),
+                      thresh=0.0),
         )
     ])
-_l
+
 # ---------------------------------------------------------------------------
 # Config 1: simple linear chain  A -> B -> Hazard
 # A drifts as an AR(1); B is driven by A at lag 1; Hazard tracks positive B.
@@ -85,7 +84,7 @@ _simple_chain = DatasetConfig(
     ],
     rules=[
         Rule(target='B', expr=0.8 * Var('B') + 0.5 * Var('A')),
-        Rule(target='Hazard', expr=Apply(ReLU, Var('B'), thresh=0.0) * 0.1),
+        Rule(target='Hazard', expr=ReLU(Var('B'), thresh=0.0) * 0.1),
     ],
     seed=0,
 )
@@ -107,8 +106,8 @@ _interaction = DatasetConfig(
     rules=[
         Rule(target='A', expr=0.9 * Var('A')),
         Rule(target='Hazard',
-             expr=Apply(threshold, Var('A'), thresh=1.0) *
-             Apply(threshold, Var('B'), thresh=0.5) * 0.5),
+             expr=Threshold(Var('A'), thresh=1.0) *
+             Threshold(Var('B'), thresh=0.5) * 0.5),
     ],
     seed=1,
 )
@@ -130,7 +129,7 @@ _lagged = DatasetConfig(
     rules=[
         Rule(target='A', expr=0.8 * Var('A')),
         Rule(target='Hazard',
-             expr=Apply(ReLU, Var('A', lag=10), thresh=0.5) * 0.2),
+             expr=ReLU(Var('A', lag=10), thresh=0.5) * 0.2),
     ],
     seed=2,
 )
@@ -154,7 +153,7 @@ _censored = DatasetConfig(
     ],
     rules=[
         Rule(target='B', expr=0.8 * Var('B') + 0.5 * Var('A')),
-        Rule(target='Hazard', expr=Apply(ReLU, Var('B'), thresh=0.0) * 0.1),
+        Rule(target='Hazard', expr=ReLU(Var('B'), thresh=0.0) * 0.1),
     ],
     late_entry_prob=0.4,
     late_entry_range=(50, 200),
@@ -182,7 +181,7 @@ _confounded = DatasetConfig(
     rules=[
         Rule(target='C', expr=0.9 * Var('C')),
         Rule(target='A', expr=0.5 * Var('C')),
-        Rule(target='Hazard', expr=Apply(ReLU, Var('C'), thresh=1.0) * 0.15),
+        Rule(target='Hazard', expr=ReLU(Var('C'), thresh=1.0) * 0.15),
     ],
     seed=4,
 )

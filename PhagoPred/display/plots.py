@@ -19,6 +19,7 @@ plt.rcParams["font.family"] = 'serif'
 
 
 def plot_cell_features(
+        h5_file: Path,
         cell_idx: int,
         first_frame: int,
         last_frame: int,
@@ -27,7 +28,7 @@ def plot_cell_features(
     """Plot time series of features for given cell index. If list of features is not given, plot all features."""
     plt.rcParams["font.family"] = 'serif'
 
-    with h5py.File(SETTINGS.DATASET, 'r') as f:
+    with h5py.File(h5_file, 'r') as f:
         if feature_names is None:
             feature_names = list(f['Cells']['Phase'].keys())
 
@@ -1129,17 +1130,18 @@ def main():
         'Skeleton Branch Length Std',
         'Skeleton Branch Length Max',
     ]
-    # plot_cell_features(0,
-    #                    0,
-    #                    100,
-    #                    Path('temp') / 'cell_features.png',
-    #                    feature_names=feature_names)
-    plot_cell_tracks(Path('temp') / 'tracks.png',
-                     50,
-                     99,
-                     99,
-                     SETTINGS.DATASET,
-                     linewidth=1.0)
+    plot_cell_features(Path('PhagoPred\\Datasets\\06_03\\H.h5'),
+                       0,
+                       0,
+                       100,
+                       Path('temp') / 'cell_features.png',
+                       feature_names=feature_names)
+    # plot_cell_tracks(Path('temp') / 'tracks.png',
+    #                  50,
+    #                  99,
+    #                  99,
+    #                  SETTINGS.DATASET,
+    #                  linewidth=1.0)
     # plot_two_death_frame_hists(
     #     Path('temp') / 'death_frames_fine_tuned.txt',
     #     Path('temp') / 'cell_deaths_24_06.txt',

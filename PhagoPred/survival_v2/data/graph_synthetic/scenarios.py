@@ -5,11 +5,10 @@ from . import base_funcs, noise_funcs
 from .generate_datasets import generate_dataset
 from .graph import Feature
 from .rules import (
-    Apply,
     Rule,
     ReLU,
+    Threshold,
     Var,
-    threshold,
     AutoCorrelationRule,
     MeanReversionRule,
     expand_to_noise,
@@ -122,9 +121,10 @@ _low_missingness = MissingnessCfg(prob_missing=0.0,
 def auto_correlate(feature_coeffs: dict[str, float] = None) -> list[Rule]:
     if feature_coeffs is None:
         feature_coeffs = {
-            feat_name: 1.0
-            for feat_name in ('A', 'B', 'C', 'D', 'Hazard')
+            feat_name: 0.999
+            for feat_name in ('A', 'B', 'C', 'D')
         }
+        # feature_coeffs['Hazard'] = 0.8
     rules = []
     for key, val in feature_coeffs.items():
         rules.append(AutoCorrelationRule(key, val))
@@ -147,63 +147,59 @@ def mean_reversion(feature_params: dict[str, tuple] = None) -> list[Rule]:
 
 _linear = [
     Rule(target='Hazard',
-         expr=Apply(ReLU,
-                    0.9 * Var('A') + 0.9 * Var('B') + 0.9 * Var('C'),
-                    thresh=0.0))
+         expr=ReLU(0.999 * Var('A') + 0.999 * Var('B') + 0.999 * Var('C'),
+                   thresh=3.0))
 ] + auto_correlate() + mean_reversion()
 
 _chain = [
     Rule(target='B', expr=0.8 * Var('A')),
     Rule(target='C', expr=0.8 * Var('B')),
-    Rule(target='Hazard', expr=Apply(ReLU, 0.9 * Var('C'), thresh=0.0))
+    Rule(target='Hazard', expr=ReLU(0.999 * Var('C'), thresh=0.0))
 ] + auto_correlate({
-    'A': 1.0,
+    'A': 0.999,
     'B': 0.2,
     'C': 0.2,
-    'D': 1.0,
-    'Hazard': 1.0
+    'D': 0.999,
+    # 'Hazard': 0.8
 }) + mean_reversion()
 
 _multiplicative = [
-    Rule(target='Hazard', expr=Apply(ReLU, Var('A') * Var('B'), thresh=0.0))
+    Rule(target='Hazard', expr=ReLU(Var('A') * Var('B'), thresh=0.0))
 ] + auto_correlate() + mean_reversion()
 
-_ratio = [
-    Rule(target='Hazard', expr=Apply(ReLU, Var('A') / Var('B'), thresh=0.5))
-] + auto_correlate() + mean_reversion()
+_ratio = [Rule(target='Hazard', expr=ReLU(Var('A') / Var('B'), thresh=0.5))
+          ] + auto_correlate() + mean_reversion()
 
-_resetting_accumulation = [
-    Rule(target='Hazard',
-         expr=Apply(threshold, Var('A'), thresh=0.0) *
-         Apply(ReLU, Var('Hazard'), thresh=0.0))
-] + auto_correlate({
-    'A': 1.0,
-    'B': 1.0,
-    'C': 1.0,
-    'D': 1.0,
-}) + mean_reversion()
+# _resetting_accumulation = [
+#     Rule(target='Hazard', expr=ReLU(Var('A') - )
+# ] + auto_correlate({
+#     'A': 0.999,
+#     'B': 0.999,
+#     'C': 0.999,
+#     'D': 0.999,
+# }) + mean_reversion()
 
 ALL_CFGS: list[ScenarioCfg] = [
-    # ScenarioCfg('base_linear',
-    #             rules=_linear,
-    #             noise_cfg=_low_noise,
-    #             missingness_cfg=_low_missingness),
-    # ScenarioCfg('base_chain',
-    #             rules=_chain,
-    #             noise_cfg=_low_noise,
-    #             missingness_cfg=_low_missingness),
-    # ScenarioCfg('base_multiplicative',
-    #             rules=_multiplicative,
-    #             noise_cfg=_low_noise,
-    #             missingness_cfg=_low_missingness),
-    # ScenarioCfg('base_ratio',
-    #             rules=_ratio,
-    #             noise_cfg=_low_noise,
-    #             missingness_cfg=_low_missingness),
-    ScenarioCfg('base_restting_accumulation',
-                rules=_resetting_accumulation,
+    ScenarioCfg('base_linear',
+                rules=_linear,
                 noise_cfg=_low_noise,
                 missingness_cfg=_low_missingness),
+    ScenarioCfg('base_chain',
+                rules=_chain,
+                noise_cfg=_low_noise,
+                missingness_cfg=_low_missingness),
+    ScenarioCfg('base_multiplicative',
+                rules=_multiplicative,
+                noise_cfg=_low_noise,
+                missingness_cfg=_low_missingness),
+    ScenarioCfg('base_ratio',
+                rules=_ratio,
+                noise_cfg=_low_noise,
+                missingness_cfg=_low_missingness),
+    # ScenarioCfg('base_restting_accumulation',
+    #             rules=_resetting_accumulation,
+    #             noise_cfg=_low_noise,
+    #             missingness_cfg=_low_missingness),
     # Noise-level comparison (linear rules)
     # ScenarioCfg('linear_no_noise',
     #             rules=_linear,
@@ -220,13 +216,13 @@ ALL_CFGS: list[ScenarioCfg] = [
 ]
 
 if __name__ == '__main__':
-    # save_dir = Path('PhagoPred') / 'Datasets' / 'graph_synthetic'
+    save_dir = Path('PhagoPred') / 'Datasets' / 'graph_synthetic'
 
-    # for cfg in ALL_CFGS:
-    #     print(f"Generating '{cfg.filename}' ...")
-    #     cfg.generate(save_dir)
-    # print('Done.')
+    for cfg in ALL_CFGS:
+        print(f"Generating '{cfg.filename}' ...")
+        cfg.generate(save_dir)
+    print('Done.')
 
-    print(expand_to_noise(_chain, 'Hazard', 10, 10))
-    print(expand_to_noise(_multiplicative, 'Hazard', 10, 10))
-    print(expand_to_noise(_linear, 'Hazard', 10, 10))
+    # print(expand_to_noise(_chain, 'Hazard', 10, 10))
+    # print(expand_to_noise(_multiplicative, 'Hazard', 10, 10))
+    # print(expand_to_noise(_linear, 'Hazard', 10, 10))

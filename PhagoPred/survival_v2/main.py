@@ -15,10 +15,10 @@ from PhagoPred.survival_v2.utils.dataset_analysis import analyse_suite_datasets,
 
 def train():
     suites = (
-        # 'Graph Survival',
+        'Graph Survival',
         'Graph Binary',
-        'Graph Noise Survival',
-        'Graph Noise Binary',
+        # 'Graph Noise Survival',
+        # 'Graph Noise Binary',
     )
     for suite in suites:
         run_experiment_suite(

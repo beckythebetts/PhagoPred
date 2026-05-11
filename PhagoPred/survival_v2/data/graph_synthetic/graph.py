@@ -15,10 +15,9 @@ from .rules import (
     Const,
     Min,
     Max,
-    Apply,
     Rule,
-    ReLU,
-    threshold,
+    Abs,
+    Threshold,
 )
 
 temp_save_path = Path(
@@ -257,8 +256,8 @@ def test():
         Rule(target='A', expr=0.8 * Var('A')),
         Rule(target='B', expr=(0.8 * Var('B')) - Var('A')),
         Rule(target='C',
-             expr=Apply(abs, Var('B', lag=5)) + (0.9 * Apply(abs, Var('C')))),
-        Rule(target='D', expr=Apply(threshold, Var('B'), thresh=2.0) * 10)
+             expr=Abs(Var('B', lag=5)) + (0.9 * Abs(Var('C')))),
+        Rule(target='D', expr=Threshold(Var('B'), thresh=2.0) * 10)
     ]
 
     graph = CausalGraph(features, rules, time_steps=500)
