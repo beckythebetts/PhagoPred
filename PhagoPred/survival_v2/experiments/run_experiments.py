@@ -1,8 +1,10 @@
 from pathlib import Path
 import json
+import hashlib
 from datetime import datetime
 from dataclasses import asdict
 
+import h5py
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
@@ -112,6 +114,7 @@ def run_single_experiment(
     experiment_config: ExperimentCfg,
     output_dir: Path,
     device='cuda' if torch.cuda.is_available() else 'cpu',
+    scenario_cfg=None,
 ) -> tuple[dict, Path]:
     """
     Run a single experiment.
@@ -153,6 +156,14 @@ def run_single_experiment(
 
         bins = train_dataset.event_time_bins
         log.info(f"Event time bins: {bins}")
+
+        load_or_compute_variances(
+            exp_dir=exp_dir,
+            suite_dir=Path(output_dir),
+            dataset_cfg=experiment_config.dataset,
+            event_time_bins=bins,
+            scenario_cfg=scenario_cfg,
+        )
 
         bin_weights = train_dataset.get_bin_weights()
         setattr(experiment_config.loss, 'bin_weights', bin_weights)
@@ -196,6 +207,88 @@ def run_single_experiment(
         'history': history,
         'config': experiment_config
     }, exp_dir
+
+
+def _variance_cache_key(train_paths: list, bins: np.ndarray) -> str:
+    key = ','.join(sorted(str(p) for p in train_paths)) + '|' + ','.join(
+        str(b) for b in bins)
+    return hashlib.md5(key.encode()).hexdigest()[:16]
+
+
+def load_or_compute_variances(
+    exp_dir: Path,
+    suite_dir: Path,
+    dataset_cfg,
+    event_time_bins: np.ndarray,
+    scenario_cfg=None,
+    base_sample_size: int = 200,
+    branch_sample_size: int = 500,
+) -> dict | None:
+    """Load or compute CDF + binned hazard variances, caching at suite level.
+
+    Avoids recomputation across experiments that share the same dataset and
+    event_time_bins. CDF variance is read directly from the HDF5 (computed at
+    dataset creation). Binned hazard variance is cached in
+    suite_dir/_variance_cache/ keyed by a hash of (train_paths, bins).
+    """
+    if scenario_cfg is None:
+        return None
+
+    # CDF: already saved in HDF5 at dataset creation time
+    cdf_var = None
+    try:
+        with h5py.File(dataset_cfg.val_paths[0], 'r') as f:
+            attrs = f['Cells']['Phase']['CIFs'].attrs
+            cdf_var = {
+                'Total': np.array(attrs['Total Variance']),
+                'Unobserved': np.array(attrs['Unobserved Variance']),
+            }
+    except (KeyError, OSError):
+        log.warning('CDF variance not found in HDF5 — skipping.')
+
+    # Hazard: cached at suite level, keyed by (dataset paths, bins)
+    cache_key = _variance_cache_key(dataset_cfg.train_paths, event_time_bins)
+    cache_path = suite_dir / '_variance_cache' / f'{cache_key}.npz'
+    cache_path.parent.mkdir(exist_ok=True)
+
+    hazard_var = None
+    if cache_path.exists():
+        cached = np.load(cache_path)
+        if np.array_equal(cached['bins'], event_time_bins):
+            hazard_var = {
+                'Total': cached['total'],
+                'Unobserved': cached['unobserved']
+            }
+            log.info(f'Loaded hazard variance from cache {cache_path.name}')
+
+    if hazard_var is None:
+        from PhagoPred.survival_v2.data.graph_synthetic.generate_datasets import _estimate_variances
+        log.info('Computing binned hazard variance...')
+        var = _estimate_variances(
+            scenario_cfg.graph,
+            scenario_cfg.hazard_calibration_func,
+            max_horizon=int(event_time_bins[-1]),
+            max_base_time_steps=scenario_cfg.num_frames,
+            base_sample_size=base_sample_size,
+            branch_sample_size=branch_sample_size,
+            hazard_bins=event_time_bins,
+        )['hazard']
+        np.savez(cache_path,
+                 bins=event_time_bins,
+                 total=var['Total'],
+                 unobserved=var['Unobserved'])
+        hazard_var = var
+        log.info(f'Cached hazard variance to {cache_path.name}')
+
+    save_kwargs = dict(hazard_total=hazard_var['Total'],
+                       hazard_unobserved=hazard_var['Unobserved'],
+                       hazard_bins=event_time_bins)
+    if cdf_var is not None:
+        save_kwargs.update(cdf_total=cdf_var['Total'],
+                           cdf_unobserved=cdf_var['Unobserved'])
+    np.savez(exp_dir / 'variances.npz', **save_kwargs)
+
+    return {'hazard': hazard_var, 'cdf': cdf_var}
 
 
 def run_experiment_suite(

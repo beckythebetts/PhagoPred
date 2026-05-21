@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import graphviz
 from pyvis.network import Network
+from tqdm import tqdm
 
 from . import noise_funcs, base_funcs
 from .rules import (
@@ -79,6 +80,89 @@ class CausalGraph:
         self.time_steps = time_steps
         self.nx_graph = self._build_nx_graph()
 
+    def get_variances(
+        self,
+        target_feature: str,
+        max_horizon: int,
+        max_base_time_steps: int,
+        hazard_calibration_func: callable,
+        base_sample_size: int = 200,
+        branch_sample_size: int = 1000,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Compute hazard variance and binary Bernoulli floor via branching.
+
+        base_time_steps is sampled uniformly from [1, max_base_time_steps] each
+        iteration to approximately match the landmark frame distribution of the test dataset.
+        The Bernoulli floor is weighted by base survival to condition on the cell
+        being alive at the branch point.
+
+        Returns:
+            hazard_branch_var: (max_horizon,) unobserved hazard variance
+            hazard_total_var:  (max_horizon,) total hazard variance
+            bernoulli_floor:   (max_horizon,) survival-weighted E[p̄*(1-p̄)]
+        """
+        hazard_branches = []
+        cdf_branches = []
+        survival_weights = []
+
+        for _ in tqdm(range(base_sample_size)):
+            base_time_steps = np.random.randint(1, max_base_time_steps + 1)
+            base_signals = self.sample_graph(base_time_steps)
+
+            base_hazard = np.clip(
+                hazard_calibration_func(base_signals[target_feature]), 0.0,
+                1.0)
+            survival_weights.append(float(np.prod(1.0 - base_hazard)))
+
+            base_hazard_results = []
+            base_cdf_results = []
+            for _ in range(branch_sample_size):
+                signals = {
+                    feature.name:
+                    np.append(base_signals[feature.name],
+                              feature.generate_signal(max_horizon))
+                    for feature in self.features
+                }
+                for t in range(base_time_steps, base_time_steps + max_horizon):
+                    for rule in self.rules:
+                        signals = rule.apply_step(signals, t)
+
+                branch_traj = signals[target_feature][
+                    base_time_steps:base_time_steps + max_horizon]
+                hazard = np.clip(hazard_calibration_func(branch_traj), 0.0,
+                                 1.0)
+                base_hazard_results.append(hazard)
+                base_cdf_results.append(1.0 - np.cumprod(1.0 - hazard))
+
+            hazard_branches.append(base_hazard_results)
+            cdf_branches.append(base_cdf_results)
+
+        h_arr = np.array(
+            hazard_branches
+        )  # (base_sample_size, branch_sample_size, max_horizon)
+        c_arr = np.array(cdf_branches)
+
+        weights = np.array(survival_weights)
+        weights = weights / weights.sum()
+        w = weights[:, np.newaxis]  # (base_sample_size, 1)
+
+        # hazard variance — no survival weighting needed
+        hazard_branch_var = np.mean(np.var(h_arr, axis=1), axis=0)
+        hazard_total_var = hazard_branch_var + np.var(np.mean(h_arr, axis=1),
+                                                      axis=0)
+
+        # CDF variance — survival-weighted, same decomposition as hazard
+        p_bar = np.mean(c_arr, axis=1)  # (base_sample_size, max_horizon)
+        cdf_branch_var = np.sum(w * np.var(c_arr, axis=1), axis=0)
+        grand_mean = np.sum(w * p_bar, axis=0)  # (max_horizon,)
+        cdf_between_var = np.sum(w * (p_bar - grand_mean)**2, axis=0)
+        cdf_total_var = cdf_branch_var + cdf_between_var
+
+        # Bernoulli floor — derivable from CDF variance
+        bernoulli_floor = grand_mean * (1.0 - grand_mean) - cdf_between_var
+
+        return hazard_branch_var, hazard_total_var, cdf_branch_var, cdf_total_var, bernoulli_floor
+
     def _build_nx_graph(self) -> nx.DiGraph:
         """Construct a NetworkX DiGraph from the features and rules."""
         G = nx.DiGraph()
@@ -92,20 +176,22 @@ class CausalGraph:
 
         return G
 
-    def sample_graph(self) -> dict[str, np.ndarray]:
+    def sample_graph(self, time_steps: int = None) -> dict[str, np.ndarray]:
         """Simulate feature trajectories according to the graph's rules."""
+        if time_steps is None:
+            time_steps = self.time_steps
         signals = {
-            feature.name: feature.generate_signal(self.time_steps)
+            feature.name: feature.generate_signal(time_steps)
             for feature in self.features
         }
 
-        for t in range(self.time_steps):
+        for t in range(time_steps):
             for rule in self.rules:
                 signals = rule.apply_step(signals, t)
 
         for feature in self.features:
             signal = signals[feature.name]
-            signal += feature.post_noise.sample(self.time_steps).astype(float)
+            signal += feature.post_noise.sample(time_steps).astype(float)
             signals[feature.name] = signal
 
         return signals
@@ -255,8 +341,7 @@ def test():
     rules = [
         Rule(target='A', expr=0.8 * Var('A')),
         Rule(target='B', expr=(0.8 * Var('B')) - Var('A')),
-        Rule(target='C',
-             expr=Abs(Var('B', lag=5)) + (0.9 * Abs(Var('C')))),
+        Rule(target='C', expr=Abs(Var('B', lag=5)) + (0.9 * Abs(Var('C')))),
         Rule(target='D', expr=Threshold(Var('B'), thresh=2.0) * 10)
     ]
 

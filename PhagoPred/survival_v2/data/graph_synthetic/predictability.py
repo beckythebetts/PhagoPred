@@ -2,12 +2,20 @@
 from collections import defaultdict
 from pathlib import Path
 
+import numpy as np
+import matplotlib.pyplot as plt
+
 from PhagoPred.utils.logger import get_logger
 from .rules import Var, Const, Add, Sub, Mul, Div, Rule, _vars
+from .graph import CausalGraph
 import numpy as np
 import matplotlib.pyplot as plt
 
 log = get_logger()
+
+# def hazard_var
+
+# def calculate_covariance_matrix(rules: list[Rule]) -> np.ndarray:
 
 
 def get_variance_contribution(
@@ -40,10 +48,6 @@ def estimate_variances(rules: list[Rule],
         var = new_var
 
     return var
-
-
-import numpy as np
-import matplotlib.pyplot as plt
 
 
 def _squared_derivs(rule: Rule) -> dict[tuple[str, int], float]:

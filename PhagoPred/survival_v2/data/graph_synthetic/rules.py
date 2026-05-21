@@ -184,7 +184,8 @@ class Apply(Expr):
         x = self.source(context)
         eps = 1e-7
         func_deriv = (self.func(x + eps, *self.args, **self.kwargs) -
-                      self.func(x - eps, *self.args, **self.kwargs)) / (2 * eps)
+                      self.func(x - eps, *self.args, **self.kwargs)) / (2 *
+                                                                        eps)
         return func_deriv * inner_deriv
 
 
@@ -219,7 +220,10 @@ class Threshold(Expr):
 
 class Sigmoid(Expr):
 
-    def __init__(self, source: str | Expr, k: float = 10.0, thresh: float = 0.0):
+    def __init__(self,
+                 source: str | Expr,
+                 k: float = 10.0,
+                 thresh: float = 0.0):
         self.source = Var(source) if isinstance(source, str) else source
         self.k = k
         self.thresh = thresh
@@ -230,7 +234,8 @@ class Sigmoid(Expr):
 
     def partial(self, var_name, lag, context):
         s = self(context)
-        return self.k * s * (1 - s) * self.source.partial(var_name, lag, context)
+        return self.k * s * (1 - s) * self.source.partial(
+            var_name, lag, context)
 
 
 class Hill(Expr):
@@ -276,14 +281,15 @@ class Rule:
         self.target = target
         self.expr = expr
 
-        self.max_lag = max(max(lags) for lags in self.get_inputs().values())
+        self.inputs = self.get_inputs()
+        self.max_lag = max(max(lags) for lags in self.inputs.values())
 
     def apply_step(self, signals: dict[str, np.ndarray], t: int) -> dict:
         if t < self.max_lag:
             return signals
         context = {
             (name, lag): signals[name][t - lag]
-            for name, lags in self.get_inputs().items()
+            for name, lags in self.inputs.items()
             for lag in lags
         }
         signals[self.target][t] += self.expr(context)

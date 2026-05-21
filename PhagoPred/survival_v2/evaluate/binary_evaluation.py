@@ -35,6 +35,7 @@ class BinaryResults:
     cm: np.ndarray
     fpr: np.ndarray | list[float]
     tpr: np.ndarray | list[float]
+    true_cdf_mse: float | None = None
 
 
 def evaluate_binary_model(model,
@@ -68,13 +69,12 @@ def evaluate_binary_model(model,
     feature_names = dataset.feature_names
 
     if isinstance(model, ClassicalSurvivalModel):
-        predictions, labels = _get_classical_predictions(
+        predictions, labels, event_probs = _get_classical_predictions(
             model, dataset, save_dir, visualise_predicitons, feature_names)
     elif isinstance(model, SurvivalModel):
-        predictions, labels = _get_deep_predictions(model, dataset, device,
-                                                    save_dir,
-                                                    visualise_predicitons,
-                                                    feature_names, batch_size)
+        predictions, labels, event_probs = _get_deep_predictions(
+            model, dataset, device, save_dir, visualise_predicitons,
+            feature_names, batch_size)
     else:
         raise ValueError(
             "Model must be an instance of SurvivalModel or ClassicalSurvivalModel."
@@ -83,6 +83,9 @@ def evaluate_binary_model(model,
     roc_auc, fpr, tpr, thresholds = reciever_operator_characteristic(
         predictions, labels)
     mse = mean_squared_error(predictions, labels)
+
+    valid = [(p, e) for p, e in zip(predictions.ravel(), event_probs) if e is not None]
+    true_cdf_mse = float(np.mean([(p - e) ** 2 for p, e in valid])) if valid else None
 
     optimal_threshold = thresholds[np.argmax(tpr - fpr)]
     cm = confusion_matrix(labels,
@@ -95,7 +98,8 @@ def evaluate_binary_model(model,
                             n_events=np.sum(labels),
                             cm=cm,
                             fpr=fpr,
-                            tpr=tpr)
+                            tpr=tpr,
+                            true_cdf_mse=true_cdf_mse)
 
     plot_roc_curve(fpr,
                    tpr,
@@ -132,6 +136,7 @@ def _get_deep_predictions(
 
     all_predictions = []
     all_labels = []
+    all_event_probs = []
 
     visualised = 0
 
@@ -149,6 +154,14 @@ def _get_deep_predictions(
             all_predictions.append(binary_preds)
             all_labels.append(batch.event.cpu().numpy())
 
+            event_probs = batch.event_probability
+            if event_probs is not None:
+                if hasattr(event_probs, 'cpu'):
+                    event_probs = event_probs.cpu().numpy()
+                all_event_probs.extend(event_probs)
+            else:
+                all_event_probs.extend([None] * len(binary_preds))
+
             for i in range(len(lengths)):
                 if visualised < visualise_predicitons:
                     single_sample_dict = {}
@@ -164,7 +177,7 @@ def _get_deep_predictions(
                     )
                     visualised += 1
 
-    return np.concatenate(all_predictions), np.concatenate(all_labels)
+    return np.concatenate(all_predictions), np.concatenate(all_labels), all_event_probs
 
 
 def _get_classical_predictions(model: ClassicalSurvivalModel,
@@ -175,6 +188,10 @@ def _get_classical_predictions(model: ClassicalSurvivalModel,
     val_data = model.get_temporal_summary(dataset)
     all_predicitons = model.predict(val_data)
     all_labels = val_data.event.astype(int)
+
+    event_probs = (list(val_data.event_probability)
+                   if val_data.event_probability is not None
+                   else [None] * len(all_predicitons))
 
     log.info(
         f'Got all_preeictions, shape: {all_predicitons.shape}, {type(all_predicitons)}'
@@ -196,4 +213,4 @@ def _get_classical_predictions(model: ClassicalSurvivalModel,
             )
             visualised += 1
 
-    return all_predicitons, all_labels
+    return all_predicitons, all_labels, event_probs

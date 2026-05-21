@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Union
 
 from PhagoPred.survival_v2.configs import ExperimentCfg
@@ -11,3 +11,4 @@ class ExperimentRecord:
     experiemnt_cfg: ExperimentCfg
     results: Union[BinaryResults, SurvivalResults]
     training_history: list[dict]
+    variances: dict | None = None

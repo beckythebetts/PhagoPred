@@ -35,6 +35,7 @@ class SurvivalResults:
     cm_argmax: np.ndarray
     brier_times: np.ndarray
     brier_scores: np.ndarray
+    hazard_mse_per_bin: np.ndarray | None = None
 
 
 def evaluate_survival_model(model,
@@ -58,11 +59,11 @@ def evaluate_survival_model(model,
     feature_names = dataset.feature_names
 
     if isinstance(model, ClassicalSurvivalModel):
-        predictions, binned_times, times, events = _get_classical_predictions(
+        predictions, binned_times, times, events, true_binned_pmfs = _get_classical_predictions(
             model, dataset, save_dir / 'plots', visulaise_predictions,
             feature_names)
     elif isinstance(model, SurvivalModel):
-        predictions, binned_times, times, events = _get_deep_predictions(
+        predictions, binned_times, times, events, true_binned_pmfs = _get_deep_predictions(
             model, dataset, device, save_dir / 'plots', visulaise_predictions,
             feature_names, batch_size)
     else:
@@ -99,6 +100,8 @@ def evaluate_survival_model(model,
     plot_brier_scores(brier_times, brier_scores,
                       save_dir / "plots" / "brier_scores.png")
 
+    hazard_mse_per_bin = _compute_hazard_mse_per_bin(predictions, true_binned_pmfs)
+
     results = SurvivalResults(
         C_Index=c_indexs[-1],
         Brier_Score=ibs,
@@ -110,6 +113,7 @@ def evaluate_survival_model(model,
         cm_argmax=cm_argmax,
         brier_times=brier_times,
         brier_scores=brier_scores,
+        hazard_mse_per_bin=hazard_mse_per_bin,
     )
 
     results_dict = to_json_safe(asdict(results))
@@ -120,6 +124,29 @@ def evaluate_survival_model(model,
     return results
 
 
+def _compute_hazard_mse_per_bin(
+    pred_pmf: np.ndarray,
+    true_binned_pmfs: list[np.ndarray | None],
+) -> np.ndarray | None:
+    """Per-bin hazard MSE against the true underlying PMF.
+
+    Only uses samples where the true binned PMF is available (synthetic data).
+    """
+    valid = [(p, t) for p, t in zip(pred_pmf, true_binned_pmfs) if t is not None]
+    if not valid:
+        return None
+    pred = np.array([p for p, _ in valid])
+    true = np.array([t for _, t in valid])
+
+    true_cdf = np.cumsum(true, axis=1)
+    pred_cdf = np.cumsum(pred, axis=1)
+    true_sf = np.concatenate([np.ones((len(true), 1)), 1.0 - true_cdf[:, :-1]], axis=1)
+    pred_sf = np.concatenate([np.ones((len(pred), 1)), 1.0 - pred_cdf[:, :-1]], axis=1)
+    true_hazard = true / np.clip(true_sf, 1e-8, None)
+    pred_hazard = pred / np.clip(pred_sf, 1e-8, None)
+    return np.mean((pred_hazard - true_hazard) ** 2, axis=0)
+
+
 def _get_deep_predictions(
     model: SurvivalModel,
     dataset: SurvivalCellDataset,
@@ -128,7 +155,7 @@ def _get_deep_predictions(
     visualise_predicitons: int = 10,
     feature_names: list[str] = None,
     batch_size: int = 128,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list]:
     model.eval()
     model = model.to(device)
 
@@ -143,6 +170,7 @@ def _get_deep_predictions(
     all_true_bins = []
     all_true_times = []
     all_events = []
+    all_true_binned_pmfs = []
     visualised = 0
 
     with torch.no_grad():
@@ -159,9 +187,16 @@ def _get_deep_predictions(
 
             all_true_bins.append(batch.time_to_event_bin.cpu().numpy())
             all_events.append(batch.event_indicator.cpu().numpy())
-
             all_pmfs.append(pmf)
             all_true_times.append(batch.time_to_event)
+
+            binned_pmfs = batch.binned_pmf
+            if binned_pmfs is not None:
+                if hasattr(binned_pmfs, 'cpu'):
+                    binned_pmfs = binned_pmfs.cpu().numpy()
+                all_true_binned_pmfs.extend(binned_pmfs)
+            else:
+                all_true_binned_pmfs.extend([None] * len(pmf))
 
             for i in range(len(lengths)):
                 if visualised < visualise_predicitons:
@@ -180,9 +215,9 @@ def _get_deep_predictions(
                     )
                     visualised += 1
 
-    return np.concatenate(all_pmfs), np.concatenate(
-        all_true_bins), np.concatenate(all_true_times), np.concatenate(
-            all_events)
+    return (np.concatenate(all_pmfs), np.concatenate(all_true_bins),
+            np.concatenate(all_true_times), np.concatenate(all_events),
+            all_true_binned_pmfs)
 
 
 def _get_classical_predictions(model: ClassicalSurvivalModel,
@@ -195,6 +230,10 @@ def _get_classical_predictions(model: ClassicalSurvivalModel,
     all_true_bins = val_data.time_to_event_bin.astype(int)
     all_true_times = val_data.time_to_event
     all_events = val_data.event_indicator.astype(int)
+
+    true_binned_pmfs = (list(val_data.binned_pmf)
+                        if val_data.binned_pmf is not None
+                        else [None] * len(all_pmfs))
     visualised = 0
 
     for i, pmf in enumerate(all_pmfs):
@@ -214,4 +253,4 @@ def _get_classical_predictions(model: ClassicalSurvivalModel,
             )
             visualised += 1
 
-    return all_pmfs, all_true_bins, all_true_times, all_events
+    return all_pmfs, all_true_bins, all_true_times, all_events, true_binned_pmfs

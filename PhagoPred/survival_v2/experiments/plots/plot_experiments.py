@@ -6,6 +6,7 @@ from dataclasses import asdict, fields
 from functools import partial
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 from PhagoPred.survival_v2.configs.io import ExperimentCfg, load_experiment_cfg
 from PhagoPred.survival_v2.evaluate import BinaryResults, SurvivalResults
@@ -17,6 +18,7 @@ from .cm_plots import plot_confusion_matrices
 from .roc_plots import plot_rocs
 from .plot_brier_scores import plot_brier_scores
 from .plot_c_idxs import plot_c_idxs_scores
+from .plot_variance_mse import plot_variance_mse
 
 log = get_logger()
 
@@ -51,8 +53,14 @@ def plot_experiment_results(experiments_dir: Path,
             with training_history.open('r') as f:
                 training_history = json.load(f)
 
+            variances = None
+            variances_path = experiment_path / 'variances.npz'
+            if variances_path.exists():
+                npz = np.load(variances_path)
+                variances = {k: npz[k] for k in npz.files}
+
             all_experiemnts.append(
-                ExperimentRecord(config, results, training_history))
+                ExperimentRecord(config, results, training_history, variances=variances))
             log.info(f'Gathered resulsts for experiment {asdict(config)}')
             for f in fields(ExperimentCfg):
                 val = getattr(config, f.name)
@@ -85,6 +93,9 @@ def plot_experiment_results(experiments_dir: Path,
                        experiments_dir / 'brier_scores.png')
         _plot_and_save(plot_c_idxs_scores, all_experiemnts, varying_params,
                        experiments_dir / 'concordance_idxs.png')
+
+    _plot_and_save(plot_variance_mse, all_experiemnts, varying_params,
+                   experiments_dir / 'variance_mse.png')
     # if len(varying_params) == 0:
     #     print('No varying configurations found, skipping plotting')
 
