@@ -1,9 +1,16 @@
+from __future__ import annotations
 from abc import ABC, abstractmethod
 
+import numpy as np
 import torch
 import torch.nn as nn
 
 from PhagoPred.utils import get_logger
+from PhagoPred.survival_v2.probability_calib import (
+    TemperatureScalingResult,
+    VectorScalingResult,
+    PlattScalingResult,
+)
 
 log = get_logger()
 
@@ -46,6 +53,31 @@ class SurvivalModel(nn.Module, ABC):
     def __init__(self, num_bins: int):
         super().__init__()
         self.num_bins = num_bins
+        self.calibration: TemperatureScalingResult | VectorScalingResult | PlattScalingResult | None = None
+
+    def set_calibration(
+        self,
+        result: TemperatureScalingResult | VectorScalingResult | PlattScalingResult,
+    ) -> None:
+        self.calibration = result
+
+    def get_logits(self, outputs: torch.Tensor) -> torch.Tensor:
+        """Return raw logits (pre-sigmoid hazard logits or binary logit)."""
+        return outputs
+
+    def _calibrate_logits(self, outputs: torch.Tensor) -> torch.Tensor:
+        """Apply calibration to hazard logits (survival) or binary logit."""
+        if self.calibration is None:
+            return outputs
+        if isinstance(self.calibration, TemperatureScalingResult):
+            return outputs / self.calibration.T
+        if isinstance(self.calibration, VectorScalingResult):
+            w = torch.tensor(self.calibration.w, dtype=outputs.dtype, device=outputs.device)
+            b = torch.tensor(self.calibration.b, dtype=outputs.dtype, device=outputs.device)
+            return outputs * w + b
+        if isinstance(self.calibration, PlattScalingResult):
+            return outputs * self.calibration.a + self.calibration.b
+        return outputs
 
     @abstractmethod
     def forward(self,
@@ -75,6 +107,7 @@ class SurvivalModel(nn.Module, ABC):
     #     return torch.nn.functional.softmax(outputs, dim=1)
     def predict_pmf(self, outputs: torch.Tensor) -> torch.Tensor:
         """Compute hazard for each time bin, then cacluate pmf from hazards"""
+        outputs = self._calibrate_logits(outputs)
         h = torch.sigmoid(outputs)  # hazard rates (batch, num_bins)
         log_s = torch.log1p(-h).cumsum(dim=1)  # log S(t) = Σ log(1-h)
         # S(t-1): prepend log S(-1)=0, drop last
@@ -109,6 +142,5 @@ class SurvivalModel(nn.Module, ABC):
         Sigmoid applied
         """
         assert self.num_bins == 1, "Binary prediction only valid for num_bins=1"
-        # log.info(f'Raw binary outputs {outputs}')
-        binary_prediction = torch.nn.functional.sigmoid(outputs)
-        return binary_prediction
+        outputs = self._calibrate_logits(outputs)
+        return torch.nn.functional.sigmoid(outputs)

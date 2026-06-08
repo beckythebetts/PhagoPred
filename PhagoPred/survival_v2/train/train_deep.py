@@ -43,6 +43,9 @@ def epoch(
     else:
         model.eval()
     num_samples = 0
+    num_events = 0
+    num_batches = 0
+    min_events_per_batch = None
     losses = defaultdict(float)
 
     for batch in dataloader:
@@ -69,11 +72,30 @@ def epoch(
 
         batch_size = batch.features.size(0)
         num_samples += batch_size
+
+        # Track event/censoring balance (event=1, censored=0). Survival batches
+        # expose `event_indicator`; binary batches expose `event`.
+        ev = getattr(batch, 'event_indicator', None)
+        if ev is None:
+            ev = getattr(batch, 'event', None)
+        if ev is not None:
+            batch_events = int((ev == 1).sum().item())
+            num_events += batch_events
+            num_batches += 1
+            min_events_per_batch = (batch_events
+                                    if min_events_per_batch is None else min(
+                                        min_events_per_batch, batch_events))
+
         for key, val in batch_losses.items():
             losses[key] += val.item() * batch_size
 
-    # average losses
-    return {key: value / num_samples for key, value in losses.items()}
+    # average losses, plus event-balance diagnostics
+    metrics = {key: value / num_samples for key, value in losses.items()}
+    metrics['event_fraction'] = num_events / max(num_samples, 1)
+    metrics['avg_events_per_batch'] = num_events / max(num_batches, 1)
+    metrics['min_events_per_batch'] = (min_events_per_batch if
+                                       min_events_per_batch is not None else 0)
+    return metrics
 
 
 def train_deep(
@@ -123,7 +145,11 @@ def train_deep(
                 'train_loss':
                 f"{train_losses['total']:.4f}",
                 'val_loss':
-                f"{validate_losses.get('total', float('nan')):.4f}"
+                f"{validate_losses.get('total', float('nan')):.4f}",
+                'ev_frac':
+                f"{train_losses.get('event_fraction', float('nan')):.2f}",
+                'min_ev/batch':
+                int(train_losses.get('min_events_per_batch', 0)),
             })
 
     return history

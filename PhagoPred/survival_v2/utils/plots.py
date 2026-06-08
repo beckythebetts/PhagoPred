@@ -356,108 +356,6 @@ def plot_brier_scores(brier_times, brier_scores, save_path=None) -> None:
         plt.close(fig)
 
 
-# def plot_pmf_comparison_grid(pred_pmfs,
-#                              true_pmfs,
-#                              true_bins,
-#                              bin_edges,
-#                              num_examples=16,
-#                              save_path=None) -> None:
-#     """
-#     Grid of example predictions showing predicted vs true PMFs.
-
-#     Args:
-#         pred_pmfs: (n_samples, num_bins) - predicted PMFs
-#         true_pmfs: (n_samples, num_bins) - true PMFs (can be None)
-#         true_bins: (n_samples,) - true time bins (for vertical line)
-#         bin_edges: bin edge positions
-#         num_examples: number of examples to show
-#         save_path: Path to save figure
-
-#     This answers: "What do individual predictions look like compared to truth?"
-#     """
-#     num_examples = min(num_examples, len(pred_pmfs))
-
-#     # Select diverse examples (spread across true bins)
-#     unique_bins = np.unique(true_bins)
-#     examples_per_bin = max(1, num_examples // len(unique_bins))
-
-#     selected_indices = []
-#     for bin_idx in unique_bins:
-#         bin_mask = true_bins == bin_idx
-#         bin_indices = np.where(bin_mask)[0]
-#         if len(bin_indices) > 0:
-#             selected = np.random.choice(bin_indices,
-#                                         size=min(examples_per_bin,
-#                                                  len(bin_indices)),
-#                                         replace=False)
-#             selected_indices.extend(selected)
-
-#     selected_indices = selected_indices[:num_examples]
-
-#     # Create grid
-#     ncols = 4
-#     nrows = (num_examples + ncols - 1) // ncols
-
-#     fig, axes = plt.subplots(nrows, ncols, figsize=(16, 4 * nrows))
-#     axes = axes.flatten() if num_examples > 1 else [axes]
-
-#     num_bins = pred_pmfs.shape[1]
-#     bin_widths = np.diff(bin_edges)
-
-#     for plot_idx, sample_idx in enumerate(selected_indices):
-#         ax = axes[plot_idx]
-
-#         # Plot bars
-#         ax.bar(bin_edges[:-1],
-#                pred_pmfs[sample_idx],
-#                width=bin_widths,
-#                align='edge',
-#                alpha=0.6,
-#                color='tab:blue',
-#                edgecolor='black',
-#                label='Predicted PMF')
-
-#         if true_pmfs is not None:
-#             ax.bar(bin_edges[:-1],
-#                    true_pmfs[sample_idx],
-#                    width=bin_widths,
-#                    align='edge',
-#                    alpha=0.4,
-#                    color='tab:red',
-#                    edgecolor='black',
-#                    label='True PMF')
-
-#         # True event time
-#         true_time = bin_edges[true_bins[sample_idx]]
-#         ax.axvline(true_time,
-#                    color='red',
-#                    linestyle='--',
-#                    linewidth=2,
-#                    label='True event')
-
-#         ax.set_xlabel('Time')
-#         ax.set_ylabel('Probability')
-#         ax.set_title(f'Sample {sample_idx} (true bin {true_bins[sample_idx]})')
-#         ax.legend(fontsize=8)
-#         ax.grid(True, alpha=0.3)
-#         ax.set_ylim(
-#             0,
-#             max(pred_pmfs[sample_idx].max(),
-#                 true_pmfs[sample_idx].max() if true_pmfs is not None else 0) *
-#             1.1)
-
-#     # Hide unused subplots
-#     for plot_idx in range(len(selected_indices), len(axes)):
-#         axes[plot_idx].axis('off')
-
-#     plt.suptitle('Predicted vs True PMF Distributions', fontsize=16, y=1.00)
-#     plt.tight_layout()
-
-#     if save_path:
-#         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-#         plt.close(fig)
-
-
 def plot_spread_analysis(pred_pmfs,
                          true_pmfs,
                          true_bins,
@@ -721,7 +619,14 @@ def plot_losses(loss_history, save_path) -> None:
     """
     epochs = np.arange(1, len(loss_history) + 1)
 
-    loss_types = list(loss_history[0]['train'].keys())
+    # Diagnostic metrics stored alongside losses in training_history but which
+    # are not losses and should not be plotted on the loss axes.
+    non_loss_keys = {
+        'event_fraction', 'avg_events_per_batch', 'min_events_per_batch'
+    }
+    loss_types = [
+        lt for lt in loss_history[0]['train'].keys() if lt not in non_loss_keys
+    ]
 
     train_losses = {lt: [] for lt in loss_types}
     val_losses = {lt: [] for lt in loss_types}

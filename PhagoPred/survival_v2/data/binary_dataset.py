@@ -5,6 +5,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import h5py
+from tqdm import tqdm
 
 from .dataset import (
     CellSample,
@@ -16,6 +18,8 @@ from .dataset import (
     PathType_T,
     ListType_T,
 )
+from .graph_synthetic.scenarios import ALL_CFGS
+from .graph_synthetic.generate_datasets import estimate_variances
 
 
 @dataclass
@@ -146,6 +150,49 @@ class BinaryCellDataset(CellDataset):
         if n_pos == 0:
             return 1.0
         return float(n_neg) / float(n_pos)
+
+    def _load_true_variances(self) -> None:
+        file_path = self.hdf5_paths[0]
+        for cfg in ALL_CFGS:
+            if cfg.filename in Path(file_path).name:
+                cfg.load(Path(file_path).parent)
+
+                variances = estimate_variances(
+                    cfg.graph,
+                    cfg.hazard_calibration_func,
+                    self.prediction_horizon,
+                    self.full_len_frames,
+                    self.min_length,
+                    1000,
+                    1000,
+                )
+                # landmark_dist = self._sample_landmark_distribution(
+                #     n_samples=5000)
+                # variances = estimate_variances(
+                #     cfg.graph,
+                #     cfg.hazard_calibration_func,
+                #     self.prediction_horizon,
+                #     cfg.num_frames - self.prediction_horizon,
+                #     base_sample_size=200,
+                #     branch_sample_size=1000,
+                #     warm_up_steps=self.min_length,
+                #     landmark_distribution=landmark_dist,
+                # )
+                # cdf['Total'] is shape (prediction_horizon,);
+                # index -1 gives cumulative P(death within full horizon)
+                self.total_variances = float(variances['cdf']['Total'][-1])
+                self.unobserved_variances = float(
+                    variances['cdf']['Unobserved'][-1])
+                return
+
+    def _compute_variance(self, sample_size: int = 1000) -> None:
+        vals = []
+        for _ in tqdm(range(sample_size), 'Smapling cells for cdf variance'):
+            cell_idx = np.random.randint(len(self.cell_metadata))
+            cell = self[cell_idx]
+            vals.append(cell.event_probability)
+
+        return np.var(vals)
 
 
 def binary_collate_fn(batch: list[CellSample],

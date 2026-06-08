@@ -8,24 +8,25 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from PhagoPred.survival_v2.experiments.run_experiments import run_experiment_suite, evaluate_suite
+from PhagoPred.survival_v2.experiments.run_experiments import run_experiment_suite, evaluate_suite, test_variances
+from PhagoPred.survival_v2.experiments.plots.plot_experiments import plot_experiment_results
 from PhagoPred.survival_v2.interpret import interpret
 from PhagoPred.survival_v2.utils.dataset_analysis import analyse_suite_datasets, plot_suite_event_distributions, plot_suite_absolute_distributions
 
 
 def train():
     suites = (
-        'Graph Survival',
-        'Graph Binary',
+        # 'Graph Survival',
+        # 'Graph Binary',
         # 'Graph Noise Survival',
         # 'Graph Noise Binary',
-    )
+        'Learning Curve Survival', )
     for suite in suites:
         run_experiment_suite(
             suite_name=suite,
             output_dir='PhagoPred/survival_v2/experiments/results',
             device='cuda',
-            repeats=1,
+            repeats=3,
             shap_interpret=False)
     # _ = run_experiment_suite(
     #     suite_name='Graph Survival',
@@ -62,12 +63,12 @@ def train():
 def eval():
     evaluate_suite(
         Path(
-            'PhagoPred/survival_v2/experiments/results/Graph Binary_24042026_092301'
+            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Learning Curve Survival_05062026_102742'
         ))
-    evaluate_suite(
-        Path(
-            'PhagoPred/survival_v2/experiments/results/Graph Survival_24042026_094729'
-        ))
+    # evaluate_suite(
+    #     Path(
+    #         'PhagoPred/survival_v2/experiments/results/Graph Survival_24042026_094729'
+    #     ))
 
 
 # def interpret_suite(suite_dir: Path):
@@ -86,12 +87,38 @@ def view_dataset_distributions():
     plot_suite_absolute_distributions(path, results)
 
 
+def plot():
+    plot_experiment_results(
+        Path(
+            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Binary_29052026_232327'
+        ))
+
+
 if __name__ == '__main__':
     # interpret(
     #     '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Survival_30042026_140226/experiment_06'
     # )
     train()
     # eval()
+    # plot_experiment_results(
+    #     Path(
+    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Survival_02062026_105718'
+    #     ))
+    # plot()
+    # eval()
+    # evaluate_suite(
+    #     Path(
+    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Survival_29052026_200757'
+    #     ))
+    # evaluate_suite(
+    #     Path(
+    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Survival_02062026_120922'
+    #     ))
+
+    # test_variances(
+    #     Path(
+    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Survival_29052026_200757/experiment_00'
+    #     ))
     # evaluate_suite(
     #     Path(
     #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/BinaryTest_24032026_144422'

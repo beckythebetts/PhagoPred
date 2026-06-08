@@ -39,7 +39,7 @@ def train(
             shuffle=False,
             collate_fn=lambda batch: collate_fn(batch, device=device))
 
-        optimiser = torch.optim.Adam(model.parameters())
+        optimiser = torch.optim.Adam(model.parameters(), lr=train_config.lr)
         scheduler_type = train_config.scheduler
         if scheduler_type == 'step':
             scheduler = torch.optim.lr_scheduler.StepLR(

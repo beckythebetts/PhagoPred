@@ -53,14 +53,14 @@ def plot_experiment_results(experiments_dir: Path,
             with training_history.open('r') as f:
                 training_history = json.load(f)
 
-            variances = None
-            variances_path = experiment_path / 'variances.npz'
-            if variances_path.exists():
-                npz = np.load(variances_path)
-                variances = {k: npz[k] for k in npz.files}
+            # variances = None
+            # variances_path = experiment_path / 'variances.npz'
+            # if variances_path.exists():
+            #     npz = np.load(variances_path)
+            #     variances = {k: npz[k] for k in npz.files}
 
             all_experiemnts.append(
-                ExperimentRecord(config, results, training_history, variances=variances))
+                ExperimentRecord(config, results, training_history))
             log.info(f'Gathered resulsts for experiment {asdict(config)}')
             for f in fields(ExperimentCfg):
                 val = getattr(config, f.name)
@@ -96,55 +96,6 @@ def plot_experiment_results(experiments_dir: Path,
 
     _plot_and_save(plot_variance_mse, all_experiemnts, varying_params,
                    experiments_dir / 'variance_mse.png')
-    # if len(varying_params) == 0:
-    #     print('No varying configurations found, skipping plotting')
-
-    # if len(varying_params) == 1:
-    #     fig = plot_box_plots_1var(all_experiemnts, varying_params)
-    #     log.info('Saving results figure')
-    #     plt.savefig(experiments_dir / 'results.png',
-    #                 bbox_inches='tight',
-    #                 dpi=150)
-    #     plt.close(fig)
-
-    #     fig = plt_cms_1var(all_experiemnts, varying_params)
-    #     log.info('Saving confusion matrices figure')
-    #     plt.savefig(experiments_dir / 'confusion_matrcies.png',
-    #                 bbox_inches='tight',
-    #                 dpi=150)
-    #     plt.close(fig)
-
-    #     fig = plot_experiment_losses_1var(all_experiemnts, varying_params)
-    #     log.info('Saving all losses plot')
-    #     plt.savefig(experiments_dir / 'losses.png',
-    #                 bbox_inches='tight',
-    #                 dpi=150)
-    #     plt.close(fig)
-
-    #     if is_binary:
-    #         fig = plot_rocs_1var(all_experiemnts, varying_params)
-    #         log.info('Saving ROC plot')
-    #         plt.savefig(experiments_dir / 'roc.png')
-    #         plt.close(fig)
-
-    # elif len(varying_params) == 2:
-    #     fig = plot_box_plots_2var(all_experiemnts, varying_params)
-    #     log.info('Saving results figure')
-    #     plt.savefig(experiments_dir / 'results.png',
-    #                 bbox_inches='tight',
-    #                 dpi=150)
-    #     plt.close(fig)
-
-    #     fig = plot_cms_2var(all_experiemnts, varying_params)
-    #     log.info('Saving confusion matrices figure')
-    #     plt.savefig(experiments_dir / 'confusion_matrcies.png',
-    #                 bbox_inches='tight',
-    #                 dpi=150)
-    #     plt.close(fig)
-    # else:
-    #     print(
-    #         f'More than 2 varying parameters {list(varying_params.keys())}, skipping plot'
-    #     )
 
 
 def _plot_and_save(plotting_func: Callable,

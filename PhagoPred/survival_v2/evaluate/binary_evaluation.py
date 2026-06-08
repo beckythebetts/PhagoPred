@@ -14,6 +14,7 @@ from PhagoPred.survival_v2.utils.plots import (
     plot_roc_curve,
     plot_binary_cm,
 )
+from PhagoPred.survival_v2.configs.datasets import DatasetCfg
 from PhagoPred.utils.logger import get_logger
 from PhagoPred.utils.tools import to_json_safe
 from PhagoPred.survival_v2.data import BinaryCellDataset, BinaryCellSample, BinaryCell, binary_collate_fn
@@ -35,12 +36,16 @@ class BinaryResults:
     cm: np.ndarray
     fpr: np.ndarray | list[float]
     tpr: np.ndarray | list[float]
-    true_cdf_mse: float | None = None
+    cdf_mse: float | None = None
+
+    total_true_variance: float | None = None
+    unobserved_true_variance: float | None = None
 
 
 def evaluate_binary_model(model,
                           dataset: BinaryCellDataset,
                           save_dir: Path,
+                          dataset_cfg: DatasetCfg,
                           device='cpu',
                           visualise_predicitons: int = 10,
                           batch_size: int = 128) -> BinaryResults:
@@ -54,7 +59,7 @@ def evaluate_binary_model(model,
         visulaise_predicitons: number of predictions to visualise and save
         save_dir: directory to save visualisations
     """
-    os.mkdir(save_dir / 'plots')
+    os.makedirs(save_dir / 'plots', exist_ok=True)
 
     # if isinstance(dataset, torch.utils.data.DataLoader):
     #     data_loader = dataset
@@ -84,22 +89,51 @@ def evaluate_binary_model(model,
         predictions, labels)
     mse = mean_squared_error(predictions, labels)
 
-    valid = [(p, e) for p, e in zip(predictions.ravel(), event_probs) if e is not None]
-    true_cdf_mse = float(np.mean([(p - e) ** 2 for p, e in valid])) if valid else None
+    valid = [(p, e) for p, e in zip(predictions.ravel(), event_probs)
+             if e is not None]
+    cdf_mean_squared_error = float(np.mean([(p - e)**2 for p, e in valid
+                                            ])) if valid else None
 
     optimal_threshold = thresholds[np.argmax(tpr - fpr)]
     cm = confusion_matrix(labels,
                           predictions > optimal_threshold,
                           labels=[0, 1])
 
-    results = BinaryResults(ROC_AUC=roc_auc,
-                            MSE=mse,
-                            n_samples=len(labels),
-                            n_events=np.sum(labels),
-                            cm=cm,
-                            fpr=fpr,
-                            tpr=tpr,
-                            true_cdf_mse=true_cdf_mse)
+    variances_json = save_dir.parent / 'variances.json'
+    cache_key = str(dataset_cfg)
+
+    cache = {}
+    if variances_json.exists():
+        with variances_json.open('r') as f:
+            cache = json.load(f)
+
+    entry = cache.get(cache_key)
+    if entry is not None:
+        total_variance = entry['total']
+        unobserved_variance = entry['unobserved']
+    else:
+        total_variance = np.asarray(dataset.get_total_variances()).tolist()
+        unobserved_variance = np.asarray(
+            dataset.get_unobserved_variances()).tolist()
+        cache[cache_key] = {
+            'total': total_variance,
+            'unobserved': unobserved_variance
+        }
+        with variances_json.open('w') as f:
+            json.dump(cache, f, indent=2)
+
+    results = BinaryResults(
+        ROC_AUC=roc_auc,
+        MSE=mse,
+        n_samples=len(labels),
+        n_events=np.sum(labels),
+        cm=cm,
+        fpr=fpr,
+        tpr=tpr,
+        cdf_mse=cdf_mean_squared_error,
+        total_true_variance=total_variance,
+        unobserved_true_variance=unobserved_variance,
+    )
 
     plot_roc_curve(fpr,
                    tpr,
@@ -177,7 +211,8 @@ def _get_deep_predictions(
                     )
                     visualised += 1
 
-    return np.concatenate(all_predictions), np.concatenate(all_labels), all_event_probs
+    return np.concatenate(all_predictions), np.concatenate(
+        all_labels), all_event_probs
 
 
 def _get_classical_predictions(model: ClassicalSurvivalModel,
@@ -190,8 +225,8 @@ def _get_classical_predictions(model: ClassicalSurvivalModel,
     all_labels = val_data.event.astype(int)
 
     event_probs = (list(val_data.event_probability)
-                   if val_data.event_probability is not None
-                   else [None] * len(all_predicitons))
+                   if val_data.event_probability is not None else [None] *
+                   len(all_predicitons))
 
     log.info(
         f'Got all_preeictions, shape: {all_predicitons.shape}, {type(all_predicitons)}'

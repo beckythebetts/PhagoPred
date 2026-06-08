@@ -3,6 +3,7 @@ Base class for classical (non-deep learning) survival models.
 Provides common interface for sklearn-style models.
 """
 
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Dict, List, Union
 import numpy as np
@@ -10,6 +11,14 @@ import torch
 import pickle
 
 from PhagoPred.survival_v2.data import TemporalSummary, CellDataset, BinaryTemporalSummaryDataset, SurvivalTemopralSummaryDataset
+from PhagoPred.survival_v2.probability_calib import (
+    TemperatureScalingResult,
+    VectorScalingResult,
+    PlattScalingResult,
+    apply_temperature_scaling,
+    apply_vector_scaling,
+    apply_platt_scaling,
+)
 
 
 class ClassicalSurvivalModel(ABC):
@@ -51,8 +60,14 @@ class ClassicalSurvivalModel(ABC):
 
         self._is_fitted = False
         self.model = None
-
         self.test_data = None
+        self.calibration: TemperatureScalingResult | VectorScalingResult | PlattScalingResult | None = None
+
+    def set_calibration(
+        self,
+        result: TemperatureScalingResult | VectorScalingResult | PlattScalingResult,
+    ) -> None:
+        self.calibration = result
 
     def get_temporal_summary(
         self, dataset: CellDataset
@@ -81,7 +96,7 @@ class ClassicalSurvivalModel(ABC):
                              SurvivalTemopralSummaryDataset]
     ) -> np.ndarray:
         """Predict ouput pmf/event probabilities from model
-        
+
         Return:
             pmfs [samples, output_bins] (if survival model)
             probabilities [samples] (if binary model)
@@ -89,6 +104,18 @@ class ClassicalSurvivalModel(ABC):
         predictions = self._predict(dataset.temporal_summary_features)
         if self.binary:
             predictions = predictions[:, 0]
+            if self.calibration is not None:
+                logits = np.log(
+                    np.clip(predictions, 1e-8, 1.0) /
+                    np.clip(1.0 - predictions, 1e-8, 1.0))
+                predictions = apply_platt_scaling(logits, self.calibration)
+        else:
+            if self.calibration is not None:
+                log_pmf = np.log(np.clip(predictions, 1e-8, 1.0))
+                if isinstance(self.calibration, TemperatureScalingResult):
+                    predictions = apply_temperature_scaling(log_pmf, self.calibration)
+                elif isinstance(self.calibration, VectorScalingResult):
+                    predictions = apply_vector_scaling(log_pmf, self.calibration)
         return predictions
 
     @abstractmethod

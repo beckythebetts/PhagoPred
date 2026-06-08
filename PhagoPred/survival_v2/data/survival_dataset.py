@@ -11,6 +11,13 @@ import torch
 from .dataset import (CellSample, CellDataset, CellDatasetMetadata, collate_fn,
                       ArrayType_T, ScalarType_T, PathType_T, ListType_T)
 
+from .graph_synthetic.scenarios import ScenarioCfg, ALL_CFGS
+from .graph_synthetic.generate_datasets import estimate_variances
+
+from PhagoPred.utils.logger import get_logger
+
+logger = get_logger()
+
 
 @dataclass
 class SurvivalCell(CellSample[
@@ -48,17 +55,18 @@ class SurvivalCellDataset(CellDataset):
                  *args,
                  num_bins: int,
                  max_time_to_death: int,
-                 event_time_bins: np.ndarray | None = None,
+                 event_time_bins: np.ndarray | list | None = None,
                  **kwargs):
 
         self.num_bins = num_bins
         self.max_time_to_death = max_time_to_death
-        self.event_time_bins = event_time_bins
+        self.event_time_bins = np.array(
+            event_time_bins) if event_time_bins is not None else None
 
         super().__init__(*args, **kwargs)
 
-        if self.event_time_bins is None:
-            self._compute_bins()
+        # if self.event_time_bins is None:
+        #     self._compute_bins()
 
     def _compute_bins(self, num_samples: int = 10000) -> None:
         """Compute event time bins based on quantiles of observed event times in the dataset."""
@@ -72,7 +80,11 @@ class SurvivalCellDataset(CellDataset):
             t = item.time_to_event
 
             events += e
-            if e == 1:
+            # Only within-horizon events shape the bin edges: deaths beyond
+            # max_time_to_death become administratively censored, and including
+            # their (large) times would push a quantile above bins[-1] =
+            # max_time_to_death + 1, breaking monotonicity in np.digitize.
+            if e == 1 and t <= self.max_time_to_death:
                 times.append(t)
 
         times = np.array(times)
@@ -83,7 +95,9 @@ class SurvivalCellDataset(CellDataset):
         self.event_time_bins = bins
 
     def get_bins(self) -> np.ndarray:
-        """Return eveent time bins."""
+        """Return event time bins."""
+        if self.event_time_bins is None:
+            self._compute_bins()
         return self.event_time_bins
 
     def get_bin_weights(self, num_samples: int = 1000) -> list:
@@ -101,20 +115,20 @@ class SurvivalCellDataset(CellDataset):
     def _get_valid_landmarks(self, idx: int) -> list:
         """Allowed landmark frames for cell {idx}.
         * Total length must be >= self.min_length.
-        * Time to death must be <= self.max_time_to_death if cell is uncensored.
+        * ==Time to death must be <= self.max_time_to_death if cell is uncensored.==
         """
 
         cell_metadata = self.cell_metadata.get_cell(idx)
         last_frame = cell_metadata.end_frames if np.isnan(
             cell_metadata.death_frames) else cell_metadata.death_frames
 
-        event_indicator = 0 if np.isnan(cell_metadata.death_frames) else 1
-        if event_indicator == 0:
-            min_landmark_dist = self.min_length
-        else:
-            min_landmark_dist = max(
-                self.min_length, last_frame - self.max_time_to_death -
-                cell_metadata.start_frames)
+        # event_indicator = 0 if np.isnan(cell_metadata.death_frames) else 1
+        # if event_indicator == 0:
+        min_landmark_dist = self.min_length
+        # else:
+        #     min_landmark_dist = max(
+        #         self.min_length, last_frame - self.max_time_to_death -
+        #         cell_metadata.start_frames)
 
         if last_frame <= cell_metadata.start_frames + min_landmark_dist:
             return []
@@ -126,6 +140,8 @@ class SurvivalCellDataset(CellDataset):
 
     def __getitem__(self, idx: int) -> SurvivalCellSample:
         """Get a single sample from the dataset as a SurvivalCellSample dataclass."""
+        logger.debug(
+            f'Getting item, event time abins are: {self.event_time_bins}')
         features, landmark_frame, event_indicator, cell_metadata = super(
         ).__getitem__(idx)
 
@@ -135,9 +151,13 @@ class SurvivalCellDataset(CellDataset):
 
         time_to_event_bin = None
         if self.event_time_bins is not None:
-            time_to_event_bin = np.digitize(time_to_event,
-                                            self.event_time_bins[1:])
-            time_to_event_bin = min(time_to_event_bin, self.num_bins - 1)
+            if time_to_event <= self.event_time_bins[-1]:
+                time_to_event_bin = np.digitize(time_to_event,
+                                                self.event_time_bins[1:])
+                time_to_event_bin = min(time_to_event_bin, self.num_bins - 1)
+            else:
+                event_indicator = 0
+                time_to_event_bin = self.num_bins
 
         pmf, binned_pmf = self._get_item_pmf(cell_metadata, landmark_frame)
 
@@ -191,11 +211,75 @@ class SurvivalCellDataset(CellDataset):
             binned_pmf = np.round(binned_pmf, decimals=4)
             binned_pmf = np.clip(binned_pmf, a_min=0.0, a_max=1.0)
 
-            s = binned_pmf.sum()
-            if s > 0:
-                binned_pmf = binned_pmf / s
+            # s = binned_pmf.sum()
+            # if s > 0:
+            #     binned_pmf = binned_pmf / s
 
         return pmf, binned_pmf
+
+    def _load_true_variances(self) -> None:
+        file_path = self.hdf5_paths[0]
+        for cfg in ALL_CFGS:
+            if cfg.filename in Path(file_path).name:
+                cfg.load(Path(file_path).parent)
+                variances = estimate_variances(
+                    cfg.graph,
+                    cfg.hazard_calibration_func,
+                    self.event_time_bins[-1],
+                    self.full_len_frames,
+                    self.min_length,
+                    trunk_sample_size=1000,
+                    branch_smaple_size=1000,
+                    hazard_bins=self.event_time_bins,
+                    max_time_to_death=self.max_time_to_death,
+                )
+                # landmark_dist = self._sample_landmark_distribution(
+                #     n_samples=5000)
+                # variances = estimate_variances(
+                #     cfg.graph,
+                #     cfg.hazard_calibration_func,
+                #     self.event_time_bins[-1],
+                #     cfg.num_frames - self.event_time_bins[-1],
+                #     base_sample_size=200,
+                #     branch_sample_size=1000,
+                #     warm_up_steps=self.min_length,
+                #     hazard_bins=self.event_time_bins,
+                #     landmark_distribution=landmark_dist,
+                # )
+                self.total_variances = {}
+                self.unobserved_variances = {}
+                for t in ('hazard', 'pmf'):
+                    self.total_variances[t] = variances[t]['Total']
+                    self.unobserved_variances[t] = variances[t]['Unobserved']
+                return
+
+    # def _compute_variance(self, sample_size: int = 1000) -> np.ndarray:
+    #     """Per-bin variance of the true discrete-time hazard across cells, under this
+    #     dataset's own (per-cell, one random landmark) sampling.
+
+    #     This is the hazard-form mean-estimator MSE — i.e. the total variance the model
+    #     is benchmarked against — computed exactly from the cached PMFs (no branching MC).
+    #     """
+    #     vals = []
+    #     for _ in tqdm(range(sample_size),
+    #                   'Sampling cells for hazard variance'):
+    #         cell_idx = np.random.randint(len(self))
+    #         cell = self[cell_idx]
+    #         pmf = cell.binned_pmf
+    #         if pmf is None:
+    #             continue
+    #         pmf = np.asarray(pmf, dtype=float)
+
+    #         # survival to the START of each bin: S_{i-1} = 1 - sum_{j<i} pmf_j
+    #         survival_before = 1.0 - (np.cumsum(pmf) - pmf)  # exclusive cumsum
+    #         # discrete-time hazard per bin: h_i = pmf_i / S_{i-1}
+    #         hazard = np.divide(pmf,
+    #                            survival_before,
+    #                            out=np.zeros_like(pmf),
+    #                            where=survival_before > 1e-12)
+    #         vals.append(hazard)
+
+    #     return np.var(vals, axis=0)
 
 
 def survival_collate_fn(batch: list[CellSample],

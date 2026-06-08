@@ -69,18 +69,22 @@ class CellDatasetMetadata:
             setattr(self, f.name,
                     list(np.array(getattr(self, f.name), dtype=object)[mask]))
 
+    def __len__(self):
+        return len(self.file_idxs)
+
 
 class CellDataset(torch.utils.data.Dataset, ABC):
     """Abstract base class for pytorch datasets using .h5 files."""
 
     def __init__(
         self,
-        hdf5_paths: list[Path],
+        hdf5_paths: list[Path] | list[str],
         feature_names: list[str],
         min_length: int = 50,
-        means: np.ndarray | None = None,
-        stds: np.ndarray | None = None,
+        means: np.ndarray | None | list = None,
+        stds: np.ndarray | None | list = None,
         model_type: Literal['deep', 'classical'] = 'deep',
+        num_cells: int | None = None,
     ):
         """
         Pytorch dataset using .h5 files.
@@ -91,12 +95,13 @@ class CellDataset(torch.utils.data.Dataset, ABC):
             means: Optional array of feature means for normalisation.
             stds: Optional array of feature stds for normalisation.
         """
-        self.hdf5_paths = hdf5_paths
+        self.hdf5_paths = [Path(path) for path in hdf5_paths]
         self.feature_names = feature_names
         self.min_length = min_length
-        self.means = means
-        self.stds = stds
+        self.means = np.array(means) if means is not None else None
+        self.stds = np.array(stds) if stds is not None else None
         self.model_type = model_type
+        self.num_cells = num_cells
 
         self._lock = threading.Lock()
         self._files = [None] * len(hdf5_paths)
@@ -108,9 +113,14 @@ class CellDataset(torch.utils.data.Dataset, ABC):
 
         self.cell_metadata = CellDatasetMetadata()
 
+        self.total_variances = None
+        self.unobserved_variances = None
+
         self._load_features_cache()
         self._load_cell_metadata()
         self._remove_invalid_samples()
+
+        self._close_files()
 
     def _load_features_cache(self) -> None:
         """Load features from all .h5 files into memory."""
@@ -142,10 +152,21 @@ class CellDataset(torch.utils.data.Dataset, ABC):
             f = self._get_file(file_idx)
             arr = f['Cells']['Phase'][
                 feature][:]  # shape: (num_frame, num_cells)
+            num_cells = arr.shape[1]
+            if self.num_cells is not None:
+                if num_cells < self.num_cells:
+                    arr = arr[:, :num_cells]
             feature_arrays.append(arr)
 
         features_np = np.stack(feature_arrays, axis=0)
         return features_np
+
+    def _close_files(self) -> None:
+        """Close all open h5py file handles."""
+        for i, f in enumerate(self._files):
+            if f is not None:
+                f.close()
+                self._files[i] = None
 
     def _get_file(self, idx: int) -> h5py.File:
         """Get open h5py File object for the given index, opening it if not already open."""
@@ -165,6 +186,10 @@ class CellDataset(torch.utils.data.Dataset, ABC):
             cell_deaths = self._get_features_np(
                 path_idx, features=['CellDeath'])[0][0]  # shape = (num_cells)
             num_cells = len(cell_deaths)
+            if self.num_cells is not None:
+                if self.num_cells < num_cells:
+                    num_cells = self.num_cells
+            cell_deaths = cell_deaths[:num_cells]
             local_cell_idxs = np.arange(num_cells).astype(int)
 
             self.cell_metadata.file_idxs += [path_idx] * num_cells
@@ -233,9 +258,9 @@ class CellDataset(torch.utils.data.Dataset, ABC):
         features = self._features_cache[cell_metadata.file_idxs][
             ..., cell_metadata.local_cell_idxs]
 
-        start_frame = cell_metadata.start_frames
-        last_frame = cell_metadata.end_frames if np.isnan(
-            cell_metadata.death_frames) else cell_metadata.death_frames
+        # start_frame = cell_metadata.start_frames
+        # last_frame = cell_metadata.end_frames if np.isnan(
+        #     cell_metadata.death_frames) else cell_metadata.death_frames
         event_indicator = 0 if np.isnan(cell_metadata.death_frames) else 1
         valid_landmark_fames = cell_metadata.landmark_frames
 
@@ -249,6 +274,52 @@ class CellDataset(torch.utils.data.Dataset, ABC):
         features = features.T  # shape: (num_frames, num_features)
 
         return features, landmark_frame, event_indicator, cell_metadata
+
+    def _sample_landmark_distribution(self,
+                                      n_samples: int = 5000) -> np.ndarray:
+        """Return landmark frame positions sampled from this dataset's valid landmarks.
+
+        Gives an empirical distribution matching how this dataset samples landmarks,
+        used to align variance estimation with the test-set landmark distribution.
+        """
+        all_landmarks = []
+        for _ in range(n_samples):
+            cell_idx = np.random.randint(0, len(self.cell_metadata))
+            landmarks = self._get_valid_landmarks(cell_idx)
+            all_landmarks.append(np.random.choice(landmarks))
+        return all_landmarks
+
+        # all_landmarks = []
+        # for i in range(len(self.cell_metadata)):
+        #     all_landmarks.extend(self._get_valid_landmarks(i))
+        # if not all_landmarks:
+        #     return np.array([self.min_length])
+        # all_landmarks = np.array(all_landmarks)
+        # if len(all_landmarks) > n_samples:
+        #     all_landmarks = np.random.choice(all_landmarks,
+        #                                      size=n_samples,
+        #                                      replace=False)
+        # return all_landmarks
+
+    @abstractmethod
+    def _load_true_variances(self) -> None:
+        return
+
+    # @abstractmethod
+    # def _compute_total_variances(self) -> None:
+    #     return
+
+    # @abstract
+
+    def get_total_variances(self) -> float | list[float]:
+        if self.total_variances is None:
+            self._load_true_variances()
+        return self.total_variances
+
+    def get_unobserved_variances(self) -> float | list[float]:
+        if self.unobserved_variances is None:
+            self._load_true_variances()
+        return self.unobserved_variances
 
 
 def collate_fn(batch: list[CellSample],

@@ -97,13 +97,26 @@ def compute_survival_loss(
     else:
         nll, censored, uncensored = hazard_nll(outputs, t, e, bin_weights)
 
+    # Reweight the uncensored term relative to the censored term. With heavy
+    # censoring the censored loss dominates and pulls all hazards down, which
+    # front-loads the predicted PMF; uncensored_weight > 1 counteracts that.
+    nll = loss_config.uncensored_weight * uncensored + censored
+
     # Ranking
     if loss_config.ranking > 0.0:
         ranking_type = loss_config.ranking_type
+        # Ranking losses expect a PMF in [0, 1], not raw hazard logits.
+        # Convert logits -> PMF (matching SurvivalModel.predict_pmf): otherwise
+        # cumsum of unbounded logits overflows exp(...) in ranking_loss_cif.
+        h = torch.sigmoid(outputs)
+        log_s = torch.log((1 - h).clamp(min=1e-8)).cumsum(dim=1)
+        log_s_prev = torch.cat(
+            [torch.zeros_like(log_s[:, :1]), log_s[:, :-1]], dim=1)
+        pmf = h * torch.exp(log_s_prev)
         if ranking_type == 'concordance':
-            ranking = ranking_loss_concordance(outputs, t, e)
+            ranking = ranking_loss_concordance(pmf, t, e)
         elif ranking_type == 'cif':
-            ranking = ranking_loss_cif(outputs, t, e)
+            ranking = ranking_loss_cif(pmf, t, e)
         else:
             ranking = torch.tensor(0.0, device=outputs.device)
     else:

@@ -920,11 +920,11 @@ def main():
     #                            Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'comparison_plot.png',
     #                            ['No Fine Tune', 'Fine Tune'])
     my_kfold = KFold(
-        Path('PhagoPred/detectron_segmentation/models/bio_20x_j774/kfold'),
+        Path('PhagoPred/detectron_segmentation/models/bio_20x_thp1/kfold'),
         fine_tune=False)
-    # my_kfold.split_all()
-    # my_kfold.train()
-    # my_kfold.eval()
+    my_kfold.split_all()
+    my_kfold.train()
+    my_kfold.eval()
     # my_kfold.fine_tune_eval_clusters('Fine Tuned Clusters')
     # my_kfold.fine_tune_eval('Fine Tuned')
     # my_kfold.fine_tune_eval_clusters('Fine Tuned')

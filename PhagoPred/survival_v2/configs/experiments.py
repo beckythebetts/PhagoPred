@@ -7,6 +7,7 @@ from .attention import ATTENTION, AttentionCfg
 from .losses import LOSSES, LossCfg
 from .datasets import DATASETS, FEATURE_COMBOS, DatasetCfg
 from .training import TRAINING, TrainingCfg
+from .calibration import CALIBRATION, CalibrationCfg
 
 
 @dataclass
@@ -26,6 +27,7 @@ class ExperimentCfg:
     dataset: list[DatasetCfg] | DatasetCfg
     training: list[TrainingCfg] | TrainingCfg
     feature_combo: list[list[str]] | list[str]
+    calibration: list[CalibrationCfg | None] | CalibrationCfg | None = None
 
 
 def generate_experiment_grid(
@@ -51,6 +53,7 @@ def generate_experiment_grid(
     datasets = to_list(experiment_cfg.dataset)
     trainings = to_list(experiment_cfg.training)
     feature_combos = normalize_feature_combo(experiment_cfg.feature_combo)
+    calibrations = to_list(experiment_cfg.calibration)
 
     return [
         ExperimentCfg(
@@ -60,9 +63,10 @@ def generate_experiment_grid(
             dataset=dataset,
             training=training,
             feature_combo=feature_combo,
-        ) for model, attention,
-        loss, dataset, training, feature_combo in product(
-            models, attentions, losses, datasets, trainings, feature_combos)
+            calibration=calibration,
+        ) for model, attention, loss, dataset, training, feature_combo,
+        calibration in product(models, attentions, losses, datasets, trainings,
+                               feature_combos, calibrations)
     ]
 
 
@@ -87,6 +91,7 @@ def collapse_experiment_grid(
     losses = deduplicate([e.loss for e in experiments])
     datasets = deduplicate([e.dataset for e in experiments])
     trainings = deduplicate([e.training for e in experiments])
+    calibrations = deduplicate([e.calibration for e in experiments])
 
     # feature_combo per experiment is list[str]; collect unique combos
     feature_combos = deduplicate([
@@ -106,6 +111,8 @@ def collapse_experiment_grid(
         training=trainings[0] if len(trainings) == 1 else trainings,
         feature_combo=feature_combos[0]
         if len(feature_combos) == 1 else feature_combos,
+        calibration=calibrations[0]
+        if len(calibrations) == 1 else calibrations,
     )
 
 
@@ -154,7 +161,8 @@ EXPERIMENT_SUITES = {
                           DATASETS['Survival Challenging'],
                       ],
                       training=TRAINING['Standard'],
-                      feature_combo=FEATURE_COMBOS['All'])),
+                      feature_combo=FEATURE_COMBOS['All'],
+                      calibration=CALIBRATION['Vector Scaling']), ),
     'BinaryTest':
     generate_experiment_grid(
         ExperimentCfg(model=[
@@ -169,7 +177,8 @@ EXPERIMENT_SUITES = {
                           DATASETS['Binary Challenging']
                       ],
                       training=TRAINING['Standard'],
-                      feature_combo=FEATURE_COMBOS['All'])),
+                      feature_combo=FEATURE_COMBOS['All'],
+                      calibration=CALIBRATION['Platt Scaling']), ),
     'Graph Survival':
     generate_experiment_grid(
         ExperimentCfg(
@@ -179,17 +188,17 @@ EXPERIMENT_SUITES = {
                 MODELS['Random Forest'],
             ],
             attention=ATTENTION['Last'],
-            loss=LOSSES['NLL'],
+            loss=LOSSES['NLL + Ranking'],
             dataset=[
                 DATASETS['Graph Linear'],
-                DATASETS['Graph Chain'],
-                DATASETS['Graph Multiplicative'],
-                DATASETS['Graph Resetting Accumulation'],
-                DATASETS['Graph Ratio'],
+                # DATASETS['Graph Chain'],
+                # DATASETS['Graph Multiplicative'],
+                # DATASETS['Graph Resetting Accumulation'],
+                # DATASETS['Graph Ratio'],
             ],
             training=TRAINING['Standard'],
             feature_combo=['A', 'B', 'C', 'D'],
-        )),
+            calibration=CALIBRATION['Vector Scaling'])),
     'Graph Binary':
     generate_experiment_grid(
         ExperimentCfg(
@@ -204,12 +213,12 @@ EXPERIMENT_SUITES = {
                 DATASETS['Binary Graph Linear'],
                 DATASETS['Binary Graph Chain'],
                 DATASETS['Binary Graph Multiplicative'],
-                DATASETS['Binary Graph Resetting Accumulation'],
+                # DATASETS['Binary Graph Resetting Accumulation'],
                 DATASETS['Binary Graph Ratio'],
             ],
             training=TRAINING['Standard'],
             feature_combo=['A', 'B', 'C', 'D'],
-        )),
+            calibration=[CALIBRATION['Platt Scaling']])),
     'Graph Noise Survival':
     generate_experiment_grid(
         ExperimentCfg(
@@ -246,6 +255,32 @@ EXPERIMENT_SUITES = {
             training=TRAINING['Standard'],
             feature_combo=['A', 'B', 'C', 'D'],
         )),
+    'Learning Curve Survival':
+    generate_experiment_grid(
+        ExperimentCfg(
+            model=[
+                MODELS['CNN Medium'],
+                # MODELS['LSTM Medium'],
+                # MODELS['Random Forest'],
+            ],
+            attention=ATTENTION['Last'],
+            loss=[
+                LOSSES['NLL a3 + Ranking'],
+                LOSSES['NLL + Ranking'],
+                # LOSSES['NLL a10'],
+            ],
+            dataset=[
+                #   DATASETS['Graph Linear N100'],
+                # DATASETS['Graph Linear N500'],
+                # DATASETS['Graph Linear N1000'],
+                DATASETS['Graph Linear N5000'],
+            ],
+            training=TRAINING['Standard'],
+            feature_combo=['A', 'B', 'C', 'D'],
+            calibration=[
+                CALIBRATION['Vector Scaling'],
+                CALIBRATION['Temperature Scaling']
+            ])),
 }
 # EXPERIMENT_SUITES = {
 #     'quick_test':

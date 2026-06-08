@@ -1,3 +1,4 @@
+from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Union
 
@@ -11,4 +12,4 @@ class ExperimentRecord:
     experiemnt_cfg: ExperimentCfg
     results: Union[BinaryResults, SurvivalResults]
     training_history: list[dict]
-    variances: dict | None = None
+    # variances: dict | None = None

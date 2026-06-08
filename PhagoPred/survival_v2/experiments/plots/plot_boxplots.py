@@ -46,7 +46,7 @@ def _plot_box_plots_1var(all_experiments: list[ExperimentRecord],
     _sample_results = all_experiments[0].results
     metrics = [
         m.name for m in fields(_sample_results)
-        if isinstance(getattr(_sample_results, m.name), float)
+        if m.name in ('C_Index', 'Brier_Score', 'ROC_AUC', 'MSE')
     ]
     varying_param_name = list(varying_param.keys())[0]
     varying_param_values = varying_param[varying_param_name]

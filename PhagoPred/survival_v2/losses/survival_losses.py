@@ -35,11 +35,12 @@ def hazard_nll(logits, t, e, bin_weights=None):
         uncensored_loss = torch.tensor(0.0, device=logits.device)
 
     # Censored: log S(t), capped at last bin
-    cens_mask = e == 0
+    cens_mask = (e == 0) & (t > 0)  #Cesnoring at first bin is uninformative
     if cens_mask.any():
-        cens_t = t[cens_mask].clamp(max=num_bins - 1)
+        cens_t = t[cens_mask]
+        #.clamp(max=num_bins - 1)
         idx = torch.arange(cens_mask.sum(), device=logits.device)
-        log_st = log_s[cens_mask][idx, cens_t]
+        log_st = log_s[cens_mask][idx, cens_t - 1]
         censored_loss = -log_st.mean()
     else:
         censored_loss = torch.tensor(0.0, device=logits.device)
@@ -176,15 +177,19 @@ def ranking_loss_cif(pmf: torch.Tensor,
 
     # Ensure t is long for indexing
     t = t.long()
+    # Admin-censored cells carry t == num_bins (survived all bins); clamp for
+    # CIF column indexing only. Comparisons below keep the original t so those
+    # cells are still ordered as the latest times.
+    t_idx = t.clamp(max=num_bins - 1)
 
     t_i = t.unsqueeze(1).expand(-1, batch_size)
     t_j = t.unsqueeze(0).expand(batch_size, -1)
     e_i = e.unsqueeze(1).expand(-1, batch_size)
 
     # CIF at event times
-    F_ii = cif[torch.arange(batch_size, device=pmf.device), t]
+    F_ii = cif[torch.arange(batch_size, device=pmf.device), t_idx]
     F_ii = F_ii.unsqueeze(1).expand(batch_size, batch_size)
-    F_ij = cif[:, t].T
+    F_ij = cif[:, t_idx].T
 
     # Exponential penalty
     cif_comparison = torch.exp(-(F_ii - F_ij) / sigma)

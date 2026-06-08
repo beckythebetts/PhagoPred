@@ -1,12 +1,10 @@
+from __future__ import annotations
 from pathlib import Path
 import json
-import hashlib
 from datetime import datetime
 from dataclasses import asdict
 
-import h5py
 import torch
-import numpy as np
 from torch.utils.data import DataLoader
 
 # from PhagoPred.survival_v2.configs.experiment_config import (MODELS, ATTENTION,
@@ -15,9 +13,22 @@ from torch.utils.data import DataLoader
 #                                                              EXPERIMENT_SUITES,
 #                                                              FEATURE_COMBOS)
 from PhagoPred.survival_v2.configs.experiments import EXPERIMENT_SUITES, ExperimentCfg, ModelCfg, AttentionCfg, DatasetCfg
+from PhagoPred.survival_v2.configs.io import load_experiment_cfg
 from PhagoPred.survival_v2.configs.models import LSTMCfg, CNNCfg, RSFCfg
 from PhagoPred.survival_v2.configs.datasets import SurvivalDatasetCfg, BinaryDatasetCfg
+from PhagoPred.survival_v2.configs.calibration import (
+    CalibrationCfg,
+    TemperatureScalingCfg,
+    VectorScalingCfg,
+    PlattScalingCfg,
+)
+from PhagoPred.survival_v2.probability_calib import (
+    fit_temperature_scaling,
+    fit_vector_scaling,
+    fit_platt_scaling,
+)
 from PhagoPred.survival_v2.models.build import build_model
+from PhagoPred.survival_v2.models.classical_base import ClassicalSurvivalModel
 from PhagoPred.survival_v2.train.train import train
 from PhagoPred.survival_v2.evaluate import evaluate
 from PhagoPred.survival_v2.data import (
@@ -40,10 +51,50 @@ from .plots.plot_experiments import (
 log = get_logger()
 
 
+def _bins_cache_key(dataset_config: SurvivalDatasetCfg) -> str:
+    """Cache key shared across learning-curve experiments.
+
+    train_paths varies with training-set size, so it is deliberately excluded;
+    the key pins the binning-determining params plus the (fixed) val source so
+    genuinely different binnings stay separate while same-suite experiments match.
+    """
+    return (f"val={dataset_config.val_paths}|"
+            f"num_bins={dataset_config.num_bins}|"
+            f"max_ttd={dataset_config.max_time_to_death}")
+
+
+def _load_cached_bins(dataset_config: SurvivalDatasetCfg,
+                      cache_dir: Path | None) -> list | None:
+    """Return cached event-time bin edges for this config, or None."""
+    if cache_dir is None:
+        return None
+    path = Path(cache_dir) / 'bins.json'
+    if not path.exists():
+        return None
+    with path.open('r') as f:
+        return json.load(f).get(_bins_cache_key(dataset_config))
+
+
+def _store_cached_bins(dataset_config: SurvivalDatasetCfg,
+                       cache_dir: Path | None, bins: list) -> None:
+    """Persist bin edges, preserving any existing entries in the cache file."""
+    if cache_dir is None:
+        return
+    path = Path(cache_dir) / 'bins.json'
+    store = {}
+    if path.exists():
+        with path.open('r') as f:
+            store = json.load(f)
+    store[_bins_cache_key(dataset_config)] = list(bins)
+    with path.open('w') as f:
+        json.dump(store, f, indent=2)
+
+
 def build_datasets(
         dataset_config: DatasetCfg,
         feature_combo: list,
-        is_classical: bool = False) -> tuple[CellDataset, CellDataset]:
+        is_classical: bool = False,
+        cache_dir: Path | None = None) -> tuple[CellDataset, CellDataset]:
     """
     Build train and validation datasets.
 
@@ -57,7 +108,7 @@ def build_datasets(
         val_dataset: CellDataset for validation
     """
     model_type = 'classical' if is_classical else 'deep'
-
+    calibrate_dataset = None
     if isinstance(dataset_config, BinaryDatasetCfg):
 
         dataset_args = {
@@ -66,6 +117,9 @@ def build_datasets(
             'min_length': dataset_config.min_length,
             'model_type': model_type,
             'prediction_horizon': dataset_config.prediction_horizon,
+            'num_cells': dataset_config.num_cells,
+            # 'means': dataset_config.normalisation_means,
+            # 'stds': dataset_config.normalisation_stds,
         }
         train_dataset = BinaryCellDataset(
             hdf5_paths=dataset_config.train_paths, **dataset_args)
@@ -77,7 +131,15 @@ def build_datasets(
                                         stds=stds,
                                         **dataset_args)
 
-    else:
+        if dataset_config.calibrate_paths is not None:
+            calibrate_dataset = BinaryCellDataset(
+                hdf5_paths=dataset_config.calibrate_paths,
+                means=means,
+                stds=stds,
+                **dataset_args,
+            )
+
+    elif isinstance(dataset_config, SurvivalDatasetCfg):
         dataset_args = {
             # 'hdf5_paths': dataset_config['train_paths'],
             'feature_names': feature_combo,
@@ -85,36 +147,63 @@ def build_datasets(
             'model_type': model_type,
             'num_bins': dataset_config.num_bins,
             'max_time_to_death': dataset_config.max_time_to_death,
+            # 'event_time_bins': dataset_config.bins,
+            # 'means': dataset_config.normalisation_means,
+            # 'stds': dataset_config.normalisation_stds,
         }
 
-        train_dataset = SurvivalCellDataset(
-            hdf5_paths=dataset_config.train_paths, **dataset_args)
+        # Match bin edges across all experiments in a suite: reuse cached edges
+        # if present, otherwise compute from this train set and cache them. This
+        # keeps the learning-curve comparison apples-to-apples (same bins at
+        # every N) instead of recomputing size-dependent quantiles per experiment.
+        event_time_bins = _load_cached_bins(dataset_config, cache_dir)
+        if event_time_bins is not None:
+            train_dataset = SurvivalCellDataset(
+                hdf5_paths=dataset_config.train_paths,
+                event_time_bins=event_time_bins,
+                **dataset_args)
+        else:
+            train_dataset = SurvivalCellDataset(
+                hdf5_paths=dataset_config.train_paths, **dataset_args)
+            event_time_bins = train_dataset.get_bins().tolist()
+            _store_cached_bins(dataset_config, cache_dir, event_time_bins)
 
-        event_time_bins = train_dataset.get_bins()
         means, stds = train_dataset.get_normalisation_stats()
 
         val_dataset = SurvivalCellDataset(
             hdf5_paths=dataset_config.val_paths,
-            event_time_bins=event_time_bins,
             means=means,
             stds=stds,
+            event_time_bins=event_time_bins,
             **dataset_args,
         )
+        if dataset_config.calibrate_paths is not None:
+            calibrate_dataset = SurvivalCellDataset(
+                hdf5_paths=dataset_config.calibrate_paths,
+                means=means,
+                stds=stds,
+                event_time_bins=event_time_bins,
+                **dataset_args,
+            )
+
+        dataset_config.bins = list(event_time_bins)
 
     if not is_classical:
         train_dataset.apply_normalisation()
         val_dataset.apply_normalisation()
+        if calibrate_dataset is not None:
+            calibrate_dataset.apply_normalisation()
 
-    setattr(dataset_config, 'normalisation_means', means.tolist())
-    setattr(dataset_config, 'normalisation_stds', stds.tolist())
-    return train_dataset, val_dataset
+    dataset_config.normalisation_means = means.tolist()
+    dataset_config.normalisation_stds = stds.tolist()
+
+    return train_dataset, val_dataset, calibrate_dataset
 
 
 def run_single_experiment(
     experiment_config: ExperimentCfg,
     output_dir: Path,
     device='cuda' if torch.cuda.is_available() else 'cpu',
-    scenario_cfg=None,
 ) -> tuple[dict, Path]:
     """
     Run a single experiment.
@@ -140,10 +229,11 @@ def run_single_experiment(
     log.info(
         f'Building train/validatin datasets: \n\t{asdict(experiment_config.dataset)}'
     )
-    train_dataset, val_dataset = build_datasets(
+    train_dataset, val_dataset, calibrate_dataset = build_datasets(
         experiment_config.dataset,
         experiment_config.feature_combo,
-        is_classical=experiment_config.model.is_classical)
+        is_classical=experiment_config.model.is_classical,
+        cache_dir=output_dir)
 
     if isinstance(train_dataset, BinaryCellDataset):
 
@@ -156,14 +246,6 @@ def run_single_experiment(
 
         bins = train_dataset.event_time_bins
         log.info(f"Event time bins: {bins}")
-
-        load_or_compute_variances(
-            exp_dir=exp_dir,
-            suite_dir=Path(output_dir),
-            dataset_cfg=experiment_config.dataset,
-            event_time_bins=bins,
-            scenario_cfg=scenario_cfg,
-        )
 
         bin_weights = train_dataset.get_bin_weights()
         setattr(experiment_config.loss, 'bin_weights', bin_weights)
@@ -197,9 +279,19 @@ def run_single_experiment(
                     experiment_config.loss,
                     device=device)
 
+    if experiment_config.calibration is not None and experiment_config.dataset.calibrate_paths:
+        print('Fitting calibration...')
+        cal_dataset = _build_cal_dataset(experiment_config)
+        _fit_and_store_calibration(experiment_config, model, cal_dataset,
+                                   device)
+        with (exp_dir / 'config.json').open('w') as f:
+            json.dump(asdict(experiment_config), f, indent=2)
+        log.info(f'Calibration fitted: {experiment_config.calibration}')
+
     print("Evaluating model...")
     log.info('Evaluating Model')
-    evaluation_metrics = evaluate(model, val_dataset, exp_dir)
+    evaluation_metrics = evaluate(model, val_dataset, exp_dir,
+                                  experiment_config.dataset, device)
     log.info(f'Evaluation complete: \n{evaluation_metrics}')
 
     return {
@@ -207,88 +299,6 @@ def run_single_experiment(
         'history': history,
         'config': experiment_config
     }, exp_dir
-
-
-def _variance_cache_key(train_paths: list, bins: np.ndarray) -> str:
-    key = ','.join(sorted(str(p) for p in train_paths)) + '|' + ','.join(
-        str(b) for b in bins)
-    return hashlib.md5(key.encode()).hexdigest()[:16]
-
-
-def load_or_compute_variances(
-    exp_dir: Path,
-    suite_dir: Path,
-    dataset_cfg,
-    event_time_bins: np.ndarray,
-    scenario_cfg=None,
-    base_sample_size: int = 200,
-    branch_sample_size: int = 500,
-) -> dict | None:
-    """Load or compute CDF + binned hazard variances, caching at suite level.
-
-    Avoids recomputation across experiments that share the same dataset and
-    event_time_bins. CDF variance is read directly from the HDF5 (computed at
-    dataset creation). Binned hazard variance is cached in
-    suite_dir/_variance_cache/ keyed by a hash of (train_paths, bins).
-    """
-    if scenario_cfg is None:
-        return None
-
-    # CDF: already saved in HDF5 at dataset creation time
-    cdf_var = None
-    try:
-        with h5py.File(dataset_cfg.val_paths[0], 'r') as f:
-            attrs = f['Cells']['Phase']['CIFs'].attrs
-            cdf_var = {
-                'Total': np.array(attrs['Total Variance']),
-                'Unobserved': np.array(attrs['Unobserved Variance']),
-            }
-    except (KeyError, OSError):
-        log.warning('CDF variance not found in HDF5 — skipping.')
-
-    # Hazard: cached at suite level, keyed by (dataset paths, bins)
-    cache_key = _variance_cache_key(dataset_cfg.train_paths, event_time_bins)
-    cache_path = suite_dir / '_variance_cache' / f'{cache_key}.npz'
-    cache_path.parent.mkdir(exist_ok=True)
-
-    hazard_var = None
-    if cache_path.exists():
-        cached = np.load(cache_path)
-        if np.array_equal(cached['bins'], event_time_bins):
-            hazard_var = {
-                'Total': cached['total'],
-                'Unobserved': cached['unobserved']
-            }
-            log.info(f'Loaded hazard variance from cache {cache_path.name}')
-
-    if hazard_var is None:
-        from PhagoPred.survival_v2.data.graph_synthetic.generate_datasets import _estimate_variances
-        log.info('Computing binned hazard variance...')
-        var = _estimate_variances(
-            scenario_cfg.graph,
-            scenario_cfg.hazard_calibration_func,
-            max_horizon=int(event_time_bins[-1]),
-            max_base_time_steps=scenario_cfg.num_frames,
-            base_sample_size=base_sample_size,
-            branch_sample_size=branch_sample_size,
-            hazard_bins=event_time_bins,
-        )['hazard']
-        np.savez(cache_path,
-                 bins=event_time_bins,
-                 total=var['Total'],
-                 unobserved=var['Unobserved'])
-        hazard_var = var
-        log.info(f'Cached hazard variance to {cache_path.name}')
-
-    save_kwargs = dict(hazard_total=hazard_var['Total'],
-                       hazard_unobserved=hazard_var['Unobserved'],
-                       hazard_bins=event_time_bins)
-    if cdf_var is not None:
-        save_kwargs.update(cdf_total=cdf_var['Total'],
-                           cdf_unobserved=cdf_var['Unobserved'])
-    np.savez(exp_dir / 'variances.npz', **save_kwargs)
-
-    return {'hazard': hazard_var, 'cdf': cdf_var}
 
 
 def run_experiment_suite(
@@ -309,7 +319,7 @@ def run_experiment_suite(
 
     Returns:
         results: list of experiment results
-    """
+    # """
     if suite_name not in EXPERIMENT_SUITES:
         raise ValueError(f"Unknown experiment suite: {suite_name}")
 
@@ -340,7 +350,254 @@ def run_experiment_suite(
     return output_dir
 
 
-def evaluate_suite(experiment_dir: Path) -> None:
+def _build_cal_dataset(cfg: ExperimentCfg) -> CellDataset:
+    """Build the calibration dataset using normalisation stats from the config."""
+    is_classical = cfg.model.is_classical
+    model_type = 'classical' if is_classical else 'deep'
+    means = cfg.dataset.normalisation_means
+    stds = cfg.dataset.normalisation_stds
+
+    if isinstance(cfg.dataset, BinaryDatasetCfg):
+        ds = BinaryCellDataset(
+            hdf5_paths=cfg.dataset.calibrate_paths,
+            feature_names=cfg.feature_combo,
+            min_length=cfg.dataset.min_length,
+            model_type=model_type,
+            prediction_horizon=cfg.dataset.prediction_horizon,
+            means=means,
+            stds=stds,
+        )
+    elif isinstance(cfg.dataset, SurvivalDatasetCfg):
+        ds = SurvivalCellDataset(
+            hdf5_paths=cfg.dataset.calibrate_paths,
+            feature_names=cfg.feature_combo,
+            min_length=cfg.dataset.min_length,
+            model_type=model_type,
+            num_bins=cfg.dataset.num_bins,
+            max_time_to_death=cfg.dataset.max_time_to_death,
+            event_time_bins=cfg.dataset.bins,
+            means=means,
+            stds=stds,
+        )
+    else:
+        raise TypeError(f'Unknown dataset config type: {type(cfg.dataset)}')
+
+    if not is_classical:
+        ds.apply_normalisation()
+    return ds
+
+
+def _get_calibration_inputs(model,
+                            dataset: CellDataset,
+                            device: str,
+                            n_passes: int = 10):
+    """Extract logits/predictions and labels from a dataset for calibration fitting."""
+    is_classical = isinstance(model, ClassicalSurvivalModel)
+
+    if is_classical:
+        tabular = model.get_temporal_summary(dataset)
+        predictions = model._predict(tabular.temporal_summary_features)
+        if isinstance(dataset, BinaryCellDataset):
+            logits = predictions[:, 0]
+            labels = tabular.event.astype(int)
+            return logits, labels, None, None
+        else:
+            pmf = predictions
+            bins = tabular.time_to_event_bin.astype(int)
+            events = tabular.event_indicator.astype(int)
+            return pmf, None, bins, events
+    else:
+        import numpy as np
+        model.eval()
+        model = model.to(device)
+        all_outputs, all_bins, all_events, all_labels = [], [], [], []
+
+        if isinstance(dataset, BinaryCellDataset):
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=128,
+                shuffle=False,
+                collate_fn=lambda b: binary_collate_fn(b, device=device))
+            with torch.no_grad():
+                for _ in range(n_passes):
+                    for batch in loader:
+                        out = model(batch.features.to(device),
+                                    batch.length.to(device),
+                                    mask=batch.mask.to(device)
+                                    if batch.mask is not None else None)
+                        all_outputs.append(out.cpu().numpy())
+                        all_labels.append(batch.event.cpu().numpy())
+            return (np.concatenate(all_outputs).squeeze(),
+                    np.concatenate(all_labels), None, None)
+        else:
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=128,
+                shuffle=False,
+                collate_fn=lambda b: survival_collate_fn(b, device=device))
+            with torch.no_grad():
+                for _ in range(n_passes):
+                    for batch in loader:
+                        out = model(batch.features.to(device),
+                                    batch.length.to(device),
+                                    mask=batch.mask.to(device))
+                        all_outputs.append(out.cpu().numpy())
+                        all_bins.append(batch.time_to_event_bin.cpu().numpy())
+                        all_events.append(batch.event_indicator.cpu().numpy())
+            return (np.concatenate(all_outputs), None,
+                    np.concatenate(all_bins), np.concatenate(all_events))
+
+
+def _fit_and_store_calibration(cfg: ExperimentCfg, model, dataset: CellDataset,
+                               device: str) -> None:
+    """Fit calibration, store fitted params on cfg, apply to model."""
+    is_classical = isinstance(model, ClassicalSurvivalModel)
+    cal_cfg = cfg.calibration
+    logits_or_pmf, labels, bins, events = _get_calibration_inputs(
+        model, dataset, device)
+
+    if isinstance(cal_cfg, PlattScalingCfg):
+        result = fit_platt_scaling(logits_or_pmf,
+                                   labels,
+                                   from_logits=not is_classical)
+        cal_cfg.a = result.a
+        cal_cfg.b = result.b
+    elif isinstance(cal_cfg, TemperatureScalingCfg):
+        result = fit_temperature_scaling(logits_or_pmf,
+                                         bins,
+                                         events,
+                                         from_logits=not is_classical)
+        cal_cfg.T = result.T
+    elif isinstance(cal_cfg, VectorScalingCfg):
+        result = fit_vector_scaling(logits_or_pmf,
+                                    bins,
+                                    events,
+                                    from_logits=not is_classical)
+        cal_cfg.w = result.w.tolist()
+        cal_cfg.b = result.b.tolist()
+    else:
+        return
+
+    model.set_calibration(result)
+
+
+def _build_val_dataset(cfg: ExperimentCfg) -> CellDataset:
+    """Rebuild the validation dataset from a saved experiment config.
+
+    Uses the normalisation stats and bins already stored in the config,
+    so no training data is needed.
+    """
+    is_classical = cfg.model.is_classical
+    model_type = 'classical' if is_classical else 'deep'
+    means = cfg.dataset.normalisation_means
+    stds = cfg.dataset.normalisation_stds
+
+    if isinstance(cfg.dataset, BinaryDatasetCfg):
+        val_dataset = BinaryCellDataset(
+            hdf5_paths=cfg.dataset.val_paths,
+            feature_names=cfg.feature_combo,
+            min_length=cfg.dataset.min_length,
+            model_type=model_type,
+            prediction_horizon=cfg.dataset.prediction_horizon,
+            means=means,
+            stds=stds,
+        )
+    elif isinstance(cfg.dataset, SurvivalDatasetCfg):
+        val_dataset = SurvivalCellDataset(
+            hdf5_paths=cfg.dataset.val_paths,
+            feature_names=cfg.feature_combo,
+            min_length=cfg.dataset.min_length,
+            model_type=model_type,
+            num_bins=cfg.dataset.num_bins,
+            max_time_to_death=cfg.dataset.max_time_to_death,
+            event_time_bins=cfg.dataset.bins,
+            means=means,
+            stds=stds,
+        )
+    else:
+        raise TypeError(f'Unknown dataset config type: {type(cfg.dataset)}')
+
+    if not is_classical:
+        val_dataset.apply_normalisation()
+    return val_dataset
+
+
+def _load_model(cfg: ExperimentCfg, model_path: Path,
+                device: str) -> 'SurvivalModel | ClassicalSurvivalModel':
+    """Load a saved model from disk using its experiment config."""
+    from PhagoPred.survival_v2.models.classical_base import ClassicalSurvivalModel
+    num_features = len(cfg.feature_combo)
+    num_bins = cfg.dataset.num_bins
+    model = build_model(cfg.model,
+                        cfg.attention,
+                        num_features,
+                        num_bins,
+                        device,
+                        feature_names=cfg.feature_combo)
+    if isinstance(model, ClassicalSurvivalModel):
+        model = model.__class__.load(str(model_path))
+    else:
+        checkpoint = torch.load(model_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model = model.to(device)
+    return model
+
+
+def evaluate_suite(experiment_dir: Path,
+                   device: str = 'cpu',
+                   replot_only: bool = False) -> None:
+    """Re-evaluate all experiments in a suite directory without retraining.
+
+    For each experiment sub-directory:
+      - loads config.json
+      - rebuilds the validation dataset using saved normalisation stats
+      - loads the saved model weights
+      - runs evaluation and overwrites evaluation_results.json
+    Then replots the suite results.
+
+    Args:
+        experiment_dir: path to the suite directory (contains experiment_XX/ subdirs)
+        device: torch device to use for deep models
+        replot_only: if True, skip re-evaluation and just replot existing results
+    """
+    experiment_dir = Path(experiment_dir)
+    exp_dirs = list(sorted(p for p in experiment_dir.iterdir() if p.is_dir()))
+
+    for i, exp_dir in enumerate(exp_dirs):
+        print(f'=== EVALUATING EXPERIRIMENT {i+1} / {len(exp_dirs)} ===')
+        config_path = exp_dir / 'config.json'
+        model_path = exp_dir / 'model.pkl'
+
+        if not config_path.exists():
+            log.warning(f'No config.json in {exp_dir}, skipping')
+            continue
+        if not model_path.exists():
+            log.warning(f'No model.pkl in {exp_dir}, skipping')
+            continue
+
+        if replot_only:
+            continue
+
+        log.info(f'Re-evaluating {exp_dir.name}')
+        cfg = load_experiment_cfg(config_path)
+
+        val_dataset = _build_val_dataset(cfg)
+        model = _load_model(cfg, model_path, device)
+
+        if cfg.calibration is not None:
+            result = cfg.calibration.to_result()
+            if result is not None:
+                model.set_calibration(result)
+                log.info(f'Restored calibration: {cfg.calibration.name}')
+
+        evaluate(model, val_dataset, exp_dir, cfg.dataset, device)
+        log.info(f'Evaluation complete for {exp_dir.name}')
+
     plot_experiment_results(experiment_dir, ignore_params=['feature_combo'])
-    # plot_confusion_matrices(experiment_dir)
-    # plot_experiment_losses(experiment_dir)
+
+
+def test_variances(exp_dir: Path):
+    config_path = exp_dir / 'config.json'
+    cfg = load_experiment_cfg(config_path)
+    val_dataset = _build_val_dataset(cfg)
+    print(val_dataset.get_total_variances(), val_dataset._compute_variance())

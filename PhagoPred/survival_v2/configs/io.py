@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 from dataclasses import fields
 
@@ -8,6 +9,7 @@ from .attention import AttentionCfg
 from .losses import SurvivalLossCfg, BinaryLossCfg
 from .datasets import DatasetCfg, BinaryDatasetCfg, SurvivalDatasetCfg
 from .training import TrainingCfg
+from .calibration import CalibrationCfg, CALIBRATION_TYPES
 
 from .experiments import ExperimentCfg
 
@@ -46,6 +48,16 @@ def _load_loss(d: dict):
     return _load_dataclass(cls, d)
 
 
+def _load_calibration(d: dict | None) -> CalibrationCfg | None:
+    if d is None:
+        return None
+    cal_type = d.get('calibration_type', 'none')
+    if cal_type == 'none' or cal_type not in CALIBRATION_TYPES:
+        return None
+    cls = CALIBRATION_TYPES[cal_type]
+    return _load_dataclass(cls, d)
+
+
 def load_experiment_cfg(path: str) -> ExperimentCfg:
     """Load a full experimnt config from .json."""
     with path.open('r') as f:
@@ -58,4 +70,5 @@ def load_experiment_cfg(path: str) -> ExperimentCfg:
         dataset=_load_dataset(d['dataset']),
         training=_load_dataclass(TrainingCfg, d['training']),
         feature_combo=d['feature_combo'],
+        calibration=_load_calibration(d.get('calibration')),
     )

@@ -197,7 +197,7 @@ class ReLU(Expr):
 
     def __call__(self, context):
         val = self.source(context)
-        return val if val > self.thresh else 0.0
+        return np.where(val > self.thresh, val, 0.0)
 
     def partial(self, var_name, lag, context):
         if self.source(context) > self.thresh:
@@ -212,7 +212,7 @@ class Threshold(Expr):
         self.thresh = thresh
 
     def __call__(self, context):
-        return 1.0 if self.source(context) > self.thresh else 0.0
+        return np.where(self.source(context) > self.thresh, 1.0, 0.0)
 
     def partial(self, _var_name, _lag, _context):
         return 0.0

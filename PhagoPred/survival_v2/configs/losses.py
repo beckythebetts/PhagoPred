@@ -14,6 +14,10 @@ class SurvivalLossCfg(LossCfg):
     nll: float = 0.0
     nll_type: Literal['standard', 'soft_target'] = 'standard'
     soft_target_sigma: float = 0.8
+    # Relative weight on the uncensored term: total_nll = uncensored_weight *
+    # uncensored + censored. >1 counteracts the censored majority pulling
+    # hazards down (which front-loads the predicted PMF).
+    uncensored_weight: float = 1.0
     ranking: float = 0.0
     ranking_type: Literal['concordance', 'cif'] = 'concordance'
     prediction: float = 0.0
@@ -42,7 +46,7 @@ LOSSES = {
         nll=1.0,
         nll_type='standard',
         ranking=1.0,
-        ranking_type='concordance',
+        ranking_type='cif',
         name='NLL + Ranking',
     ),
     'Soft NLL + Ranking':
@@ -58,6 +62,29 @@ LOSSES = {
                     ranking=1.0,
                     prediction=0.3,
                     name='NLL + Ranking + Prediction'),
+    # Uncensored-weight sweep (counteracts censored majority / PMF front-loading)
+    'NLL a3':
+    SurvivalLossCfg(nll=1.0,
+                    nll_type='standard',
+                    uncensored_weight=3.0,
+                    name='NLL a3'),
+    'NLL a5':
+    SurvivalLossCfg(nll=1.0,
+                    nll_type='standard',
+                    uncensored_weight=5.0,
+                    name='NLL a5'),
+    'NLL a10':
+    SurvivalLossCfg(nll=1.0,
+                    nll_type='standard',
+                    uncensored_weight=10.0,
+                    name='NLL a10'),
+    'NLL a3 + Ranking':
+    SurvivalLossCfg(nll=1.0,
+                    nll_type='standard',
+                    ranking=1.0,
+                    ranking_type='cif',
+                    uncensored_weight=3.0,
+                    name='NLL a3 + Ranking'),
     'BCE':
     BinaryLossCfg('bce', name='BCE'),
     'Weighted BCE':

@@ -1,3 +1,4 @@
+from __future__ import annotations
 from pathlib import Path
 
 import torch
@@ -7,32 +8,42 @@ from sksurv.metrics import concordance_index_censored
 from sksurv.metrics import integrated_brier_score as sk_integrated_brier_score
 from sksurv.metrics import brier_score as sk_brier_score
 
-# def concordance_index(predicted_pmf: np.ndarray, true_times: np.ndarray,
-#                       event_indicators: np.ndarray, bin_edges: np.ndarray):
-#     """
-#     Compute concordance index (C-index) for survival predictions at each time bin
-#     using sksurv.
 
-#     Args
-#     ----
-#         predicted_pmf: (n, num_bins) predicted probability mass function
-#         true_times: (n,) observed times
-#         event_indicators: (n,) 1 if event, 0 if censored
-#     Returns
-#     -------
-#         c_index: float in [0, 1], 0.5 is random
-#     """
-#     bin_centres = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-#     # predicted_times = np.mean(predicted_pmf * bin_centres, axis=1)
-#     pmf_sum = predicted_pmf.sum(axis=1, keepdims=True).clip(min=1e-8)
-#     predicted_times = (predicted_)
-#     risk = -predicted_times
+def hazard_mse(
+    pred_pmf: np.ndarray,
+    true_binned_pmfs: list[np.ndarray | None],
+) -> np.ndarray | None:
+    """Per-bin hazard MSE against the true underlying PMF.
 
-#     true_times = np.array(true_times)
-#     event_indicators = np.array(event_indicators, dtype=bool)
+    Only uses samples where the true binned PMF is available (synthetic data).
+    """
+    valid = [(p, t) for p, t in zip(pred_pmf, true_binned_pmfs)
+             if t is not None]
+    if not valid:
+        return None
+    pred = np.array([p for p, _ in valid])
+    true = np.array([t for _, t in valid])
 
-#     c_index = concordance_index_censored(event_indicators, true_times, risk)[0]
-#     return c_index
+    true_cdf = np.cumsum(true, axis=1)
+    pred_cdf = np.cumsum(pred, axis=1)
+    true_sf = np.concatenate([np.ones((len(true), 1)), 1.0 - true_cdf[:, :-1]],
+                             axis=1)
+    pred_sf = np.concatenate([np.ones((len(pred), 1)), 1.0 - pred_cdf[:, :-1]],
+                             axis=1)
+    true_hazard = true / np.clip(true_sf, 1e-8, None)
+    pred_hazard = pred / np.clip(pred_sf, 1e-8, None)
+    return np.mean((pred_hazard - true_hazard)**2, axis=0)
+
+
+def pmf_mse(pred_pmf: np.ndarray,
+            true_binned_pmfs: list[np.ndarray | None]) -> np.ndarray | None:
+    valid = [(p, t) for p, t in zip(pred_pmf, true_binned_pmfs)
+             if t is not None]
+
+    pred = np.array([p for p, _ in valid])
+    true = np.array([t for _, t in valid])
+
+    return np.mean((pred - true)**2, axis=0)
 
 
 def concordance_index(predicted_pmf: np.ndarray, true_times: np.ndarray,

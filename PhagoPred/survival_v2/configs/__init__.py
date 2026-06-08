@@ -6,6 +6,13 @@ from .attention import ATTENTION
 from .losses import LOSSES, LossCfg
 from .datasets import DATASETS, FEATURE_COMBOS
 from .training import TRAINING, TrainingCfg
+from .calibration import (
+    CALIBRATION,
+    CalibrationCfg,
+    TemperatureScalingCfg,
+    VectorScalingCfg,
+    PlattScalingCfg,
+)
 from .experiments import generate_experiment_grid, collapse_experiment_grid, EXPERIMENT_SUITES, ExperimentCfg
 
 __all__ = [
@@ -15,6 +22,7 @@ __all__ = [
     'DATASETS',
     'FEATURE_COMBOS',
     'TRAINING',
+    'CALIBRATION',
     'EXPERIMENT_SUITES',
     'generate_experiment_grid',
     'collapse_experiment_grid',
@@ -22,4 +30,8 @@ __all__ = [
     'TrainingCfg',
     'LossCfg',
     'ExperimentCfg',
+    'CalibrationCfg',
+    'TemperatureScalingCfg',
+    'VectorScalingCfg',
+    'PlattScalingCfg',
 ]

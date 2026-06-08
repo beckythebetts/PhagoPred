@@ -14,11 +14,14 @@ from PhagoPred.survival_v2.utils.plots import (
     plot_cm,
     plot_brier_scores,
 )
+from PhagoPred.survival_v2.configs.datasets import DatasetCfg
 from PhagoPred.utils.tools import to_json_safe
 from PhagoPred.survival_v2.data import SurvivalCellDataset, survival_collate_fn, SurvivalCell, SurvivalCellSample
 from .metrics import (
     concordance_index,
     integrated_brier_score,
+    hazard_mse,
+    pmf_mse,
 )
 
 
@@ -35,12 +38,63 @@ class SurvivalResults:
     cm_argmax: np.ndarray
     brier_times: np.ndarray
     brier_scores: np.ndarray
+
     hazard_mse_per_bin: np.ndarray | None = None
+    pmf_mse_per_bin: np.ndarray | None = None
+
+    total_true_hazard_variance: np.ndarray | None = None
+    unobserved_true_hazard_variance: np.ndarray | None = None
+
+    total_true_pmf_variance: np.ndarray | None = None
+    unobserved_true_pmf_variance: np.ndarray | None = None
+
+
+def _variance_cache_key(dataset_cfg: DatasetCfg) -> str:
+    """Cache key from the dataset config; shared across a suite's experiments.
+
+    Keep derived/fitted fields (means, stds, bins, variances) out of the cfg's
+    repr (field(repr=False)) so this key stays stable.
+    """
+    return str(dataset_cfg)
+
+
+def _get_or_compute_variances(dataset: SurvivalCellDataset,
+                              dataset_cfg: DatasetCfg,
+                              cache_dir: Path | None) -> tuple[dict, dict]:
+    """Return (total, unobserved) variance dicts {'hazard','pmf'}, cached per suite.
+
+    Avoids re-running the Monte-Carlo variance estimate for every experiment
+    (and the previous four-calls-per-eval duplication).
+    """
+    path = Path(
+        cache_dir) / 'variances.json' if cache_dir is not None else None
+    key = _variance_cache_key(dataset_cfg)
+
+    if path is not None and path.exists():
+        with path.open('r') as f:
+            entry = json.load(f).get(key)
+        if entry is not None:
+            return entry['total'], entry['unobserved']
+
+    total = to_json_safe(dataset.get_total_variances())
+    unobserved = to_json_safe(dataset.get_unobserved_variances())
+
+    if path is not None:
+        store = {}
+        if path.exists():
+            with path.open('r') as f:
+                store = json.load(f)
+        store[key] = {'total': total, 'unobserved': unobserved}
+        with path.open('w') as f:
+            json.dump(store, f, indent=2)
+
+    return total, unobserved
 
 
 def evaluate_survival_model(model,
                             dataset: SurvivalCellDataset,
                             save_dir: Path,
+                            dataset_cfg: DatasetCfg,
                             device: str = 'cpu',
                             visulaise_predictions: int = 10,
                             batch_size: int = 128) -> SurvivalResults:
@@ -54,7 +108,7 @@ def evaluate_survival_model(model,
         visulaise_predicitons: number of predictions to visualise and save
         save_dir: directory to save visualisations
     """
-    os.mkdir(save_dir / 'plots')
+    os.makedirs(save_dir / 'plots', exist_ok=True)
 
     feature_names = dataset.feature_names
 
@@ -75,6 +129,9 @@ def evaluate_survival_model(model,
                                  dataset.event_time_bins)
     ibs, brier_times, brier_scores = integrated_brier_score(
         predictions, times, events, dataset.event_time_bins)
+
+    hazard_mean_squared_error = hazard_mse(predictions, true_binned_pmfs)
+    pmf_mean_squared_error = pmf_mse(predictions, true_binned_pmfs)
 
     # expected_times = (predictions * np.arange(model.num_bins)).sum(axis=1)
     # Only plot uncensored samples in CMs
@@ -100,7 +157,17 @@ def evaluate_survival_model(model,
     plot_brier_scores(brier_times, brier_scores,
                       save_dir / "plots" / "brier_scores.png")
 
-    hazard_mse_per_bin = _compute_hazard_mse_per_bin(predictions, true_binned_pmfs)
+    # Total (direct multi-pass) and unobserved (graph) variances, computed in
+    # the dataset's _load_true_variances and cached per data config.
+    total_variances, unobserved_variances = _get_or_compute_variances(
+        dataset, dataset_cfg, save_dir.parent)
+    total_hazard_variances = total_variances['hazard']
+    unobserved_hazard_variances = unobserved_variances['hazard']
+    total_pmf_variances = total_variances['pmf']
+    unobserved_pmf_variances = unobserved_variances['pmf']
+
+    # hazard_mse_per_bin = _compute_hazard_mse_per_bin(predictions,
+    #                                                  true_binned_pmfs)
 
     results = SurvivalResults(
         C_Index=c_indexs[-1],
@@ -113,7 +180,12 @@ def evaluate_survival_model(model,
         cm_argmax=cm_argmax,
         brier_times=brier_times,
         brier_scores=brier_scores,
-        hazard_mse_per_bin=hazard_mse_per_bin,
+        hazard_mse_per_bin=hazard_mean_squared_error,
+        pmf_mse_per_bin=pmf_mean_squared_error,
+        total_true_hazard_variance=total_hazard_variances,
+        unobserved_true_hazard_variance=unobserved_hazard_variances,
+        total_true_pmf_variance=total_pmf_variances,
+        unobserved_true_pmf_variance=unobserved_pmf_variances,
     )
 
     results_dict = to_json_safe(asdict(results))
@@ -122,29 +194,6 @@ def evaluate_survival_model(model,
         json.dump(results_dict, f)
 
     return results
-
-
-def _compute_hazard_mse_per_bin(
-    pred_pmf: np.ndarray,
-    true_binned_pmfs: list[np.ndarray | None],
-) -> np.ndarray | None:
-    """Per-bin hazard MSE against the true underlying PMF.
-
-    Only uses samples where the true binned PMF is available (synthetic data).
-    """
-    valid = [(p, t) for p, t in zip(pred_pmf, true_binned_pmfs) if t is not None]
-    if not valid:
-        return None
-    pred = np.array([p for p, _ in valid])
-    true = np.array([t for _, t in valid])
-
-    true_cdf = np.cumsum(true, axis=1)
-    pred_cdf = np.cumsum(pred, axis=1)
-    true_sf = np.concatenate([np.ones((len(true), 1)), 1.0 - true_cdf[:, :-1]], axis=1)
-    pred_sf = np.concatenate([np.ones((len(pred), 1)), 1.0 - pred_cdf[:, :-1]], axis=1)
-    true_hazard = true / np.clip(true_sf, 1e-8, None)
-    pred_hazard = pred / np.clip(pred_sf, 1e-8, None)
-    return np.mean((pred_hazard - true_hazard) ** 2, axis=0)
 
 
 def _get_deep_predictions(
@@ -231,9 +280,8 @@ def _get_classical_predictions(model: ClassicalSurvivalModel,
     all_true_times = val_data.time_to_event
     all_events = val_data.event_indicator.astype(int)
 
-    true_binned_pmfs = (list(val_data.binned_pmf)
-                        if val_data.binned_pmf is not None
-                        else [None] * len(all_pmfs))
+    true_binned_pmfs = (list(val_data.binned_pmf) if val_data.binned_pmf
+                        is not None else [None] * len(all_pmfs))
     visualised = 0
 
     for i, pmf in enumerate(all_pmfs):

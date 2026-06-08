@@ -1,3 +1,4 @@
+from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Union
@@ -11,9 +12,15 @@ class DatasetCfg:
     min_length: int
     num_bins: int
     name: str = ''
+    calibrate_paths: list[Union[Path, str]] | None = None
+    num_cells: int | None = None
 
-    normalisation_means: list[float] = field(default=None, compare=False)
-    normalisation_stds: list[float] = field(default=None, compare=False)
+    normalisation_means: list[float] = field(default=None,
+                                             compare=False,
+                                             repr=False)
+    normalisation_stds: list[float] = field(default=None,
+                                            compare=False,
+                                            repr=False)
 
 
 @dataclass
@@ -21,6 +28,12 @@ class SurvivalDatasetCfg(DatasetCfg):
     """Config to hold survival dataset information"""
     max_time_to_death: int = 0
     name: str = ''
+    bins: list[int] | None = field(default=None, compare=False)
+
+    # total_hazard_var: list[float] | None = None
+    # unobserved_hazard_var: list[float] | None = None
+    # total_pmf_var: list[float] | None = None
+    # unobserved_pmf_var: list[float] | None = None
 
 
 @dataclass
@@ -29,6 +42,9 @@ class BinaryDatasetCfg(DatasetCfg):
     prediction_horizon: int = 0
     num_bins: int = field(default=1, init=False)
     name: str = ''
+
+    # total_cdf_var: float | None = None
+    # unobserved_cdf_var: float | None = None
 
 
 DATASETS = {
@@ -77,9 +93,12 @@ DATASETS = {
     'Graph Linear':
     SurvivalDatasetCfg(
         train_paths=[
-            'PhagoPred/Datasets/graph_synthetic/linear_train.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_linear_train.h5'
         ],
-        val_paths=['PhagoPred/Datasets/graph_synthetic/linear_val.h5'],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/base_linear_val.h5'],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_cal.h5'
+        ],
         min_length=50,
         max_time_to_death=50,
         num_bins=5,
@@ -88,17 +107,88 @@ DATASETS = {
     'Binary Graph Linear':
     BinaryDatasetCfg(
         train_paths=[
-            'PhagoPred/Datasets/graph_synthetic/linear_train.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_linear_train.h5'
         ],
-        val_paths=['PhagoPred/Datasets/graph_synthetic/linear_val.h5'],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/base_linear_val.h5'],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_cal.h5'
+        ],
         min_length=50,
         prediction_horizon=25,
         name='Graph Linear',
     ),
+    # Learning-curve ablation: linear rules at varying training set sizes
+    'Graph Linear N100':
+    SurvivalDatasetCfg(
+        train_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_n100_train.h5'
+        ],
+        val_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_n100_val.h5'
+        ],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_n100_cal.h5'
+        ],
+        min_length=50,
+        max_time_to_death=50,
+        num_bins=5,
+        name='Linear N100',
+    ),
+    'Graph Linear N500':
+    SurvivalDatasetCfg(
+        train_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_n500_train.h5'
+        ],
+        val_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_n500_val.h5'
+        ],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_n500_cal.h5'
+        ],
+        min_length=50,
+        max_time_to_death=50,
+        num_bins=5,
+        name='Linear N500',
+    ),
+    'Graph Linear N1000':
+    SurvivalDatasetCfg(
+        train_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_n5000_train.h5'
+        ],
+        val_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_n5000_val.h5'
+        ],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_n5000_cal.h5'
+        ],
+        min_length=50,
+        max_time_to_death=50,
+        num_bins=5,
+        name='Linear N1000',
+    ),
+    'Graph Linear N5000':
+    SurvivalDatasetCfg(
+        train_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_n5000_train.h5'
+        ],
+        val_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_n5000_val.h5'
+        ],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_n5000_cal.h5'
+        ],
+        min_length=50,
+        max_time_to_death=50,
+        num_bins=5,
+        name='Linear N5000',
+    ),
     'Graph Chain':
     SurvivalDatasetCfg(
-        train_paths=['PhagoPred/Datasets/graph_synthetic/chain_train.h5'],
-        val_paths=['PhagoPred/Datasets/graph_synthetic/chain_val.h5'],
+        train_paths=['PhagoPred/Datasets/graph_synthetic/base_chain_train.h5'],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/base_chain_val.h5'],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_chain_cal.h5'
+        ],
         min_length=50,
         max_time_to_death=50,
         num_bins=5,
@@ -106,8 +196,11 @@ DATASETS = {
     ),
     'Binary Graph Chain':
     BinaryDatasetCfg(
-        train_paths=['PhagoPred/Datasets/graph_synthetic/chain_train.h5'],
-        val_paths=['PhagoPred/Datasets/graph_synthetic/chain_val.h5'],
+        train_paths=['PhagoPred/Datasets/graph_synthetic/base_chain_train.h5'],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/base_chain_val.h5'],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_chain_cal.h5'
+        ],
         min_length=50,
         prediction_horizon=25,
         name='Graph Chain',
@@ -115,10 +208,13 @@ DATASETS = {
     'Graph Multiplicative':
     SurvivalDatasetCfg(
         train_paths=[
-            'PhagoPred/Datasets/graph_synthetic/multiplicative_train.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_multiplicative_train.h5'
         ],
         val_paths=[
-            'PhagoPred/Datasets/graph_synthetic/multiplicative_val.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_multiplicative_val.h5'
+        ],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_multiplicative_cal.h5'
         ],
         min_length=50,
         max_time_to_death=50,
@@ -128,10 +224,13 @@ DATASETS = {
     'Binary Graph Multiplicative':
     BinaryDatasetCfg(
         train_paths=[
-            'PhagoPred/Datasets/graph_synthetic/multiplicative_train.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_multiplicative_train.h5'
         ],
         val_paths=[
-            'PhagoPred/Datasets/graph_synthetic/multiplicative_val.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_multiplicative_val.h5'
+        ],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_multiplicative_cal.h5'
         ],
         min_length=50,
         prediction_horizon=25,
@@ -140,10 +239,13 @@ DATASETS = {
     'Graph Resetting Accumulation':
     SurvivalDatasetCfg(
         train_paths=[
-            'PhagoPred/Datasets/graph_synthetic/resetting_accumulation_train.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_resetting_accumulation_train.h5'
         ],
         val_paths=[
-            'PhagoPred/Datasets/graph_synthetic/resetting_accumulation_val.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_resetting_accumulation_val.h5'
+        ],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_resetting_accumulation_cal.h5'
         ],
         min_length=50,
         max_time_to_death=50,
@@ -153,10 +255,13 @@ DATASETS = {
     'Binary Graph Resetting Accumulation':
     BinaryDatasetCfg(
         train_paths=[
-            'PhagoPred/Datasets/graph_synthetic/resetting_accumulation_train.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_resetting_accumulation_train.h5'
         ],
         val_paths=[
-            'PhagoPred/Datasets/graph_synthetic/resetting_accumulation_val.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_resetting_accumulation_val.h5'
+        ],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_resetting_accumulation_cal.h5'
         ],
         min_length=50,
         prediction_horizon=25,
@@ -164,11 +269,10 @@ DATASETS = {
     ),
     'Graph Ratio':
     SurvivalDatasetCfg(
-        train_paths=[
-            'PhagoPred/Datasets/graph_synthetic/ratio_train.h5'
-        ],
-        val_paths=[
-            'PhagoPred/Datasets/graph_synthetic/ratio_val.h5'
+        train_paths=['PhagoPred/Datasets/graph_synthetic/base_ratio_train.h5'],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/base_ratio_val.h5'],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_ratio_cal.h5'
         ],
         min_length=50,
         max_time_to_death=50,
@@ -177,11 +281,10 @@ DATASETS = {
     ),
     'Binary Graph Ratio':
     BinaryDatasetCfg(
-        train_paths=[
-            'PhagoPred/Datasets/graph_synthetic/ratio_train.h5'
-        ],
-        val_paths=[
-            'PhagoPred/Datasets/graph_synthetic/ratio_val.h5'
+        train_paths=['PhagoPred/Datasets/graph_synthetic/base_ratio_train.h5'],
+        val_paths=['PhagoPred/Datasets/graph_synthetic/base_ratio_val.h5'],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_ratio_cal.h5'
         ],
         min_length=50,
         prediction_horizon=25,
@@ -191,10 +294,13 @@ DATASETS = {
     'Graph Linear No Noise':
     SurvivalDatasetCfg(
         train_paths=[
-            'PhagoPred/Datasets/graph_synthetic/linear_no_noise_train.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_linear_no_noise_train.h5'
         ],
         val_paths=[
-            'PhagoPred/Datasets/graph_synthetic/linear_no_noise_val.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_linear_no_noise_val.h5'
+        ],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_no_noise_cal.h5'
         ],
         min_length=50,
         max_time_to_death=50,
@@ -204,10 +310,13 @@ DATASETS = {
     'Binary Graph Linear No Noise':
     BinaryDatasetCfg(
         train_paths=[
-            'PhagoPred/Datasets/graph_synthetic/linear_no_noise_train.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_linear_no_noise_train.h5'
         ],
         val_paths=[
-            'PhagoPred/Datasets/graph_synthetic/linear_no_noise_val.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_linear_no_noise_val.h5'
+        ],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_no_noise_cal.h5'
         ],
         min_length=50,
         prediction_horizon=25,
@@ -216,10 +325,13 @@ DATASETS = {
     'Graph Linear Low Noise':
     SurvivalDatasetCfg(
         train_paths=[
-            'PhagoPred/Datasets/graph_synthetic/linear_low_noise_train.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_linear_low_noise_train.h5'
         ],
         val_paths=[
-            'PhagoPred/Datasets/graph_synthetic/linear_low_noise_val.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_linear_low_noise_val.h5'
+        ],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_low_noise_cal.h5'
         ],
         min_length=50,
         max_time_to_death=50,
@@ -229,10 +341,13 @@ DATASETS = {
     'Binary Graph Linear Low Noise':
     BinaryDatasetCfg(
         train_paths=[
-            'PhagoPred/Datasets/graph_synthetic/linear_low_noise_train.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_linear_low_noise_train.h5'
         ],
         val_paths=[
-            'PhagoPred/Datasets/graph_synthetic/linear_low_noise_val.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_linear_low_noise_val.h5'
+        ],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_low_noise_cal.h5'
         ],
         min_length=50,
         prediction_horizon=25,
@@ -241,10 +356,13 @@ DATASETS = {
     'Graph Linear High Noise':
     SurvivalDatasetCfg(
         train_paths=[
-            'PhagoPred/Datasets/graph_synthetic/linear_high_noise_train.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_linear_high_noise_train.h5'
         ],
         val_paths=[
-            'PhagoPred/Datasets/graph_synthetic/linear_high_noise_val.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_linear_high_noise_val.h5'
+        ],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_high_noise_cal.h5'
         ],
         min_length=50,
         max_time_to_death=50,
@@ -254,10 +372,13 @@ DATASETS = {
     'Binary Graph Linear High Noise':
     BinaryDatasetCfg(
         train_paths=[
-            'PhagoPred/Datasets/graph_synthetic/linear_high_noise_train.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_linear_high_noise_train.h5'
         ],
         val_paths=[
-            'PhagoPred/Datasets/graph_synthetic/linear_high_noise_val.h5'
+            'PhagoPred/Datasets/graph_synthetic/base_linear_high_noise_val.h5'
+        ],
+        calibrate_paths=[
+            'PhagoPred/Datasets/graph_synthetic/base_linear_high_noise_cal.h5'
         ],
         min_length=50,
         prediction_horizon=25,
