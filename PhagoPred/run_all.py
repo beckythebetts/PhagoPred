@@ -6,6 +6,7 @@ from tqdm import tqdm
 
 from PhagoPred import SETTINGS
 from PhagoPred.detectron_segmentation import segment, fine_tune_class, eval
+from PhagoPred.cellpose_segmentation import segment as cellpose_segment
 from PhagoPred.tracking import trackpy
 from PhagoPred.display import save, plots, napari_GUI
 from PhagoPred.feature_extraction import extract_features, clean_features, features
@@ -20,62 +21,68 @@ from PhagoPred.survival_analysis.models import losses
 # from PhagoPred.survival_analysis import train, validate
 
 if __name__ == '__main__':
-    # datasets = Path('~/thor_server/24_02/').expanduser().iterdir()
+    datasets = Path(
+        '~/thor_server/MacrophageData/12_06/').expanduser().iterdir()
     # dataset
     h5_paths = [
-        "PhagoPred\\Datasets\\06_03\\D.h5",
+        Path('PhagoPred') / 'Datasets' / 'B.h5',
+        # "PhagoPred\\Datasets\\B.h5",
         # "C:\\Users\\php23rjb\\Downloads\\A.h5",
         # "C:\\Users\\php23rjb\\Downloads\\E.h5",
         # "C:\\Users\\php23rjb\\Downloads\\C.h5",
         # "C:\\Users\\php23rjb\\Downloads\\D.h5"
     ]
     for dataset in tqdm(
-            h5_paths
-            # [
-            #     # Path('PhagoPred') / 'Datasets' / 'E.h5',
-            #     # Path('~/thor_server/06_03/K').expanduser(),
-            #     Path("C:\\Users\\php23rjb\\Downloads\\C.h5")
-            # ]
+            datasets
+            # h5_paths
+            # # [
+            # #     # Path('PhagoPred') / 'Datasets' / 'E.h5',
+            # #     # Path('~/thor_server/06_03/K').expanduser(),
+            # #     Path("C:\\Users\\php23rjb\\Downloads\\C.h5")
+            # # ]
     ):
-
+        # dataset = Path(dataset)
         # if dataset.name != '10_02_26_1':
         #     continue
 
-        # if dataset.is_dir():
-        #     continue
-        # if dataset.stem not in ['C', 'D', 'E', 'F']:
-        #     continue
-        # # print(f'Processing dataset: {dataset.name}')
-        # h5_file = Path('PhagoPred') / 'Datasets' / f'{dataset.stem}.h5'
-        # shutil.move(dataset, h5_file)
-        # # hdf5_from_tiffs(dataset, h5_file, num_frames=100)
-        # # rename_group(h5_file,
-        # #              old_group_name='Images/Fluor',
-        # #              new_group_name='Images/Epi')
-        # with h5py.File(h5_file, 'r') as f:
-        #     SETTINGS.IMAGE_SIZE = f['Images'].attrs['Image size / pixels']
-        # # dataset = h5_file
-        # # # keep_only_group(dataset, ['Images'])
-        # # # repack_hdf5(dataset)
+        if not dataset.is_dir():
+            continue
+        if dataset.stem in [
+                'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+                'N', 'O'
+        ]:
+            continue
 
-        # # # # epi_background_correction(dataset=dataset)
-        # # segment.seg_dataset(dataset=dataset)
-        # # # trackpy.run_tracking(dataset=dataset)
-        # # trackpy_2_stage.run_tracking(dataset=dataset)
-        # # extract_features.extract_features(
-        # #     dataset=dataset, phase_features=[features.FirstLastFrame()])
-        # # fill_missing_cells(dataset=dataset)
-        # # extract_features.extract_features(dataset=dataset)
+        print(f'Processing dataset: {dataset.name}')
+        h5_file = Path('PhagoPred') / 'Datasets' / f'{dataset.stem}.h5'
+        hdf5_from_tiffs(dataset, h5_file)
+        rename_group(h5_file,
+                     old_group_name='Images/Fluor',
+                     new_group_name='Images/Epi')
+
+        with h5py.File(h5_file, 'r') as f:
+            SETTINGS.IMAGE_SIZE = f['Images'].attrs['Image size / pixels']
+        dataset = h5_file
+
+        segment.seg_dataset(dataset=dataset)
+        trackpy_2_stage.run_tracking(dataset=dataset)
+        extract_features.extract_features(
+            dataset=dataset, phase_features=[features.FirstLastFrame()])
+
+        fill_missing_cells(dataset=dataset)
+        extract_features.extract_features(dataset=dataset)
         # extract_features.extract_features(dataset=h5_file,
         #                                   phase_features=[
         #                                       features.Fluorescence(),
         #                                       features.ExternalFluorescence()
         #                                   ])
         # shutil.move(h5_file, dataset)
-        # shutil.move(dataset,
-        #             Path('~/thor_server/24_02/').expanduser() / dataset.name)
+        shutil.move(
+            dataset,
+            Path('~/thor_server/MacrophageData/12_06/').expanduser() /
+            dataset.name)
 
-        GUI.run(dataset=dataset)
+        # GUI.run(dataset=dataset)
         # truncate_hdf5(dataset, dataset.parent / f"truncated_{dataset.name}", start_frame = 0, end_frame=300)
 
     # trackpy.run_tracking()

@@ -379,6 +379,7 @@ def extract_features(
 
     feature_extractor = FeaturesExtraction(h5py_file=dataset)
     for feature in phase_features:
+        # if feature.derived_feature:
         feature_extractor.add_feature(feature, 'Phase')
 
     feature_extractor.set_up()

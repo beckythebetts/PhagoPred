@@ -543,11 +543,11 @@ def hdf5_from_tiffs(tiff_files_path: Path,
                     desc=
                     f"Processing channel {channel} for hdf5 file {hdf5_file.name}"
             ):
-                channel_frame_step = max_T // shape[0]
+                channel_frame_step = (max_T - 1) / (shape[0] - 1)
                 x_scale = max_X // shape[2]
                 y_scale = max_Y // shape[1]
 
-                frame_idx = i * channel_frame_step
+                frame_idx = int(round(i * channel_frame_step))
 
                 im = tifffile.imread(str(tiff_file))
                 if x_scale > 1 or y_scale > 1:

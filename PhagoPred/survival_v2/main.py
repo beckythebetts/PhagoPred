@@ -26,7 +26,7 @@ def train():
             suite_name=suite,
             output_dir='PhagoPred/survival_v2/experiments/results',
             device='cuda',
-            repeats=3,
+            repeats=1,
             shap_interpret=False)
     # _ = run_experiment_suite(
     #     suite_name='Graph Survival',
@@ -63,7 +63,7 @@ def train():
 def eval():
     evaluate_suite(
         Path(
-            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Learning Curve Survival_05062026_102742'
+            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Learning Curve Survival_15062026_145828'
         ))
     # evaluate_suite(
     #     Path(
@@ -71,10 +71,11 @@ def eval():
     #     ))
 
 
-# def interpret_suite(suite_dir: Path):
-#     for experient_dir in suite_dir.iterdir():
-#         if experient_dir.is_dir():
-#             interpret(experiment_dir)
+def interpret_suite(suite_dir: Path):
+    for experient_dir in suite_dir.iterdir():
+        # print(experient_dir)
+        if experient_dir.is_dir():
+            interpret(experient_dir)
 
 
 def view_dataset_distributions():
@@ -90,19 +91,20 @@ def view_dataset_distributions():
 def plot():
     plot_experiment_results(
         Path(
-            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Binary_29052026_232327'
+            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Learning Curve Survival_15062026_145828'
         ))
 
 
 if __name__ == '__main__':
-    # interpret(
-    #     '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Survival_30042026_140226/experiment_06'
-    # )
-    train()
+    interpret_suite(
+        Path(
+            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Learning Curve Survival_15062026_145828'
+        ), )
+    # train()
     # eval()
     # plot_experiment_results(
     #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Survival_02062026_105718'
+    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Learning Curve Survival_11062026_121151'
     #     ))
     # plot()
     # eval()

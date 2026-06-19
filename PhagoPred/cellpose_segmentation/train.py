@@ -1,18 +1,21 @@
+import json
+from pathlib import Path
+
 from cellpose import io, models, core, train
 import matplotlib.pyplot as plt
-import json
 import numpy as np
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import mask_funcs
 
 
-def cellpose_train(directory):
+def cellpose_train(directory: Path):
     use_GPU = core.use_gpu()
     io.logger_setup()
+    print(f'Loading train data from {directory / "train"}')
     images, labels, image_names, test_images, test_labels, image_names_test = io.load_train_test_data(
-        str(directory / 'train'),
-        str(directory / 'validate'),
+        str(directory / 'train' / 'data'),
+        str(directory / 'validate' / 'data'),
         image_filter='im',
         mask_filter='mask')
     model = models.CellposeModel(gpu=use_GPU, pretrained_model='cpsam')
@@ -28,11 +31,11 @@ def cellpose_train(directory):
         test_labels=test_labels,
         weight_decay=1e-4,
         SGD=True,
-        learning_rate=0.005,
+        learning_rate=1e-4,
         n_epochs=100,
         save_path=str(directory),
         model_name='model',
-        batch_size=128)
+        batch_size=2)
 
     losses_dict = {
         'Train Losses': train_losses.tolist(),
@@ -55,8 +58,20 @@ def cellpose_train(directory):
     plt.clf()
 
 
+def detectron_to_cellpose_dir_structure(dir_path: Path):
+    for im in (dir_path / 'images').iterdir():
+        mask = mask_funcs.convert_coco_file
+
+
 def main():
+
     model_directory = SETTINGS.CELLPOSE_MODEL
+    # mask_funcs.convert_coco_file(model_directory / 'train' / 'labels.json',
+    #                              model_directory / 'train' / 'images',
+    #                              model_directory / 'train' / 'data')
+    # mask_funcs.convert_coco_file(model_directory / 'validate' / 'labels.json',
+    #                              model_directory / 'validate' / 'images',
+    #                              model_directory / 'validate' / 'data')
     cellpose_train(model_directory)
 
 

@@ -19,7 +19,7 @@ class CalibrationCfg:
     fitting and saved to config.json alongside the rest of the experiment.
     """
     calibration_type: str = field(default='none', init=False)
-    name: str = ''
+    name: str = 'None'
 
     def to_result(self) -> CalibrationResult | None:
         return None
@@ -67,12 +67,14 @@ class PlattScalingCfg(CalibrationCfg):
 
 
 CALIBRATION: dict[str, CalibrationCfg | None] = {
+    'None': CalibrationCfg(),
     'Temperature Scaling': TemperatureScalingCfg(),
     'Vector Scaling': VectorScalingCfg(),
     'Platt Scaling': PlattScalingCfg(),
 }
 
 CALIBRATION_TYPES: dict[str, type[CalibrationCfg]] = {
+    'none': CalibrationCfg,
     'temperature': TemperatureScalingCfg,
     'vector': VectorScalingCfg,
     'platt': PlattScalingCfg,

@@ -1,9 +1,11 @@
 import sys
 from typing import Union
+
 sys.path.insert(0, 'detectron2')
 
 import torch, detectron2
 from detectron2.utils.logger import setup_logger
+
 setup_logger()
 from detectron2 import model_zoo
 from detectron2.engine import DefaultPredictor
@@ -30,7 +32,7 @@ from scipy import ndimage
 from PhagoPred import SETTINGS
 from PhagoPred.utils import tools
 
-os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # from detectron2.engine.defaults import DefaultPredictor
@@ -38,7 +40,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # from detectron2.data import MetadataCatalog, detection_utils as utils
 # import torch
 
+
 class NoResizePredictor:
+
     def __init__(self, cfg):
         self.cfg = cfg.clone()  # cfg can be modified by model
         self.model = build_model(self.cfg)
@@ -62,7 +66,8 @@ class NoResizePredictor:
                 the output of the model for one image only.
                 See :doc:`/tutorials/models` for details about the format.
         """
-        with torch.no_grad():  # https://github.com/sphinx-doc/sphinx/issues/4258
+        with torch.no_grad(
+        ):  # https://github.com/sphinx-doc/sphinx/issues/4258
             # Apply pre-processing to image.
             if self.input_format == "RGB":
                 # whether the model expects BGR inputs or RGB
@@ -76,7 +81,6 @@ class NoResizePredictor:
             predictions = self.model([inputs])[0]
             return predictions
 
-        
 
 def get_model(cfg_dir: Path) -> tuple[dict, detectron2.config.CfgNode]:
     """
@@ -88,28 +92,32 @@ def get_model(cfg_dir: Path) -> tuple[dict, detectron2.config.CfgNode]:
         cfg
     """
     with open(str(cfg_dir / 'train_metadata.json')) as json_file:
-      train_metadata = json.load(json_file)
+        train_metadata = json.load(json_file)
     cfg = get_cfg()
     cfg.merge_from_file(str(cfg_dir / 'config.yaml'))
     cfg.MODEL.WEIGHTS = str(cfg_dir / 'model_final.pth')
 
     return train_metadata, cfg
 
-def get_predictor(cfg) -> tuple[object, Union[DefaultPredictor, NoResizePredictor]]:
+
+def get_predictor(
+        cfg) -> tuple[object, Union[DefaultPredictor, NoResizePredictor]]:
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5   # set a custom testing threshold
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5  # set a custom testing threshold
     cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST = 0.5
     cfg.TEST.DETECTIONS_PER_IMAGE = 1000
     cfg.MODEL.DEVICE = device_str
     return cfg, NoResizePredictor(cfg)
 
-def seg_image(cfg_dir: Path, 
-              im: np.ndarray, 
-              train_metadata = None,
-              cfg = None,
-              predictor = None
-            #   categories: tuple[str, ...]
-              ) -> dict[str, np.ndarray]:
+
+def seg_image(
+        cfg_dir: Path,
+        im: np.ndarray,
+        train_metadata=None,
+        cfg=None,
+        predictor=None
+    #   categories: tuple[str, ...]
+) -> dict[str, np.ndarray]:
     """
     Segment a single image using model in cfg_dir
     Parameters:
@@ -136,12 +144,19 @@ def seg_image(cfg_dir: Path,
 
     categories = train_metadata["thing_classes"]
 
-    masks = {category: torch.zeros_like(detectron_outputs["instances"].pred_masks[0], dtype=torch.int16,
-                                                device=device) for category in categories}
+    masks = {
+        category:
+        torch.zeros_like(detectron_outputs["instances"].pred_masks[0],
+                         dtype=torch.int16,
+                         device=device)
+        for category in categories
+    }
     category_count = {category: 0 for category in categories}
-    for i, pred_class in enumerate(detectron_outputs["instances"].pred_classes):
+    for i, pred_class in enumerate(
+            detectron_outputs["instances"].pred_classes):
         class_name = train_metadata['thing_classes'][pred_class]
-        instance_mask = detectron_outputs["instances"].pred_masks[i].to(device=device)
+        instance_mask = detectron_outputs["instances"].pred_masks[i].to(
+            device=device)
 
         # ******* ADJUST FOR NON SQUARE IMAGES*********
         # if SETTINGS.REMOVE_EDGE_CELLS:
@@ -151,32 +166,36 @@ def seg_image(cfg_dir: Path,
         for category in categories:
             if class_name == category:
                 category_count[category] += 1
-                masks[category] = torch.where(instance_mask,
-                                torch.tensor(category_count[category], dtype=torch.int16),
-                                masks[category])
+                masks[category] = torch.where(
+                    instance_mask,
+                    torch.tensor(category_count[category], dtype=torch.int16),
+                    masks[category])
         # torch.cuda.empty_cache()
 
-    return {category: mask.cpu().numpy().astype(np.int16) for category, mask in masks.items()}
+    return {
+        category: mask.cpu().numpy().astype(np.int16)
+        for category, mask in masks.items()
+    }
 
-def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model', 
+
+def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
                 dataset: Path = SETTINGS.DATASET,
                 channel: str = 'Phase') -> None:
-    
     """
     Create segmentation datset and cell datset in hdf5 file. 
     Add indexed cell masks to segmentation dataset and cell_type as feature in cell dataset.
     """
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device_str)
-    
+
     train_metadata, cfg = get_model(cfg_dir)
 
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5   # set a custom testing threshold
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5  # set a custom testing threshold
     cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST = 0.8
     cfg.MODEL.DEVICE = device_str
     predictor = NoResizePredictor(cfg)
 
-    categories = train_metadata["thing_classes"]    
+    categories = train_metadata["thing_classes"]
 
     with h5py.File(dataset, 'r+') as f:
 
@@ -186,8 +205,10 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
                 del group[channel]
 
         images_ds = f['Images'][channel]
-        segmentations_ds = f.create_dataset(f'Segmentations/{channel}', shape=images_ds.shape,
-                                            maxshape=images_ds.shape, dtype='i2')
+        segmentations_ds = f.create_dataset(f'Segmentations/{channel}',
+                                            shape=images_ds.shape,
+                                            maxshape=images_ds.shape,
+                                            dtype='i2')
         cells_group = f.require_group(f'Cells/{channel}')
         cells_group.require_dataset('Confidence Score',
                                     shape=(images_ds.shape[0], 0),
@@ -196,12 +217,12 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
                                     exact=True,
                                     fillvalue=np.nan)
         for category in categories:
-            cells_group.require_dataset(category, 
-                                    shape=(images_ds.shape[0], 0),
-                                    maxshape=(images_ds.shape[0], None),
-                                    dtype=np.float32,
-                                    exact=True,
-                                    fillvalue=np.nan)
+            cells_group.require_dataset(category,
+                                        shape=(images_ds.shape[0], 0),
+                                        maxshape=(images_ds.shape[0], None),
+                                        dtype=np.float32,
+                                        exact=True,
+                                        fillvalue=np.nan)
 
         for frame_idx in tqdm(range(images_ds.shape[0]), desc='Segmenting'):
             # sys.stdout.write(f'\rSegmenting image {int(frame_idx)+1} / {f["Images"].attrs["Number of frames"]}')
@@ -209,48 +230,59 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
 
             image = images_ds[frame_idx]
 
-            detectron_outputs = predictor(np.stack([np.array(image)]*3, axis=-1))
+            detectron_outputs = predictor(
+                np.stack([np.array(image)] * 3, axis=-1))
 
-            mask = torch.full_like(detectron_outputs["instances"].pred_masks[0], -1, dtype=torch.int16,
-                                   device=device)
+            # Derive the mask shape from the image so empty detections (no instances) don't index into pred_masks[0]
+            mask = torch.full((image.shape[0], image.shape[1]),
+                              -1,
+                              dtype=torch.int16,
+                              device=device)
             # mask = np.full_like(detectron_outputs["instances"].pred_masks[0].cpu().numpy(), -1, dtype=np.int16)
-            
+
             # resize datasets if necassary
             num_instances = len(detectron_outputs['instances'].pred_classes)
             for category in categories:
-                current_max_instances = cells_group[category].shape[1]-1
+                current_max_instances = cells_group[category].shape[1] - 1
                 if num_instances > current_max_instances:
                     cells_group[category].resize(num_instances, axis=1)
-            if num_instances > cells_group['Confidence Score'].shape[1]-1:
+            if num_instances > cells_group['Confidence Score'].shape[1] - 1:
                 cells_group['Confidence Score'].resize(num_instances, axis=1)
-            
+
             instance_idx = 0
             # predicted_masks = detectron_outputs["instances"].pred_masks.cpu().numpy()
-            for i, (pred_class, score) in enumerate(zip(detectron_outputs["instances"].pred_classes, detectron_outputs["instances"].scores)):
+            for i, (pred_class, score) in enumerate(
+                    zip(detectron_outputs["instances"].pred_classes,
+                        detectron_outputs["instances"].scores)):
                 class_name = train_metadata['thing_classes'][pred_class]
-                instance_mask = detectron_outputs["instances"].pred_masks[i].to(device=device)
+                instance_mask = detectron_outputs["instances"].pred_masks[
+                    i].to(device=device)
                 # instance_mask = predicted_masks[i]
 
                 # == FILTER MASKS ==
                 if SETTINGS.REMOVE_EDGE_CELLS:
-                    if instance_mask[0, :].any() or instance_mask[-1, :].any() or instance_mask[:, 0].any() or instance_mask[:, -1].any():
+                    if instance_mask[0, :].any() or instance_mask[-1, :].any(
+                    ) or instance_mask[:, 0].any() or instance_mask[:,
+                                                                    -1].any():
                         continue
-                
+
                 # Filter out masks containing disconnected regions
                 # _, num_features = ndimage.label(instance_mask)
                 # if num_features != 1:
                 #     continue
-                
+
                 # # Filter out masks containing holes
                 # filled_mask = ndimage.binary_fill_holes(instance_mask)
                 # if not np.array_equal(filled_mask, instance_mask):
                 #     continue
-                
+
                 # Filter overlaps, keeping mask with highest confidence score (masks are already sorted by descending confidence score)
                 overlap = instance_mask & (mask >= 0)
-                overlap_fraction = overlap.sum().item() / instance_mask.sum().item()
-                if overlap_fraction > 0.5:
-                    continue
+                if instance_mask.sum().item() != 0:
+                    overlap_fraction = overlap.sum().item(
+                    ) / instance_mask.sum().item()
+                    if overlap_fraction > 0.5:
+                        continue
 
                 # Remove overlapping pixels (keep the higher-confidence mask that was placed first)
                 instance_mask = instance_mask & ~overlap
@@ -261,24 +293,31 @@ def seg_dataset(cfg_dir: Path = SETTINGS.MASK_RCNN_MODEL / 'Model',
                 # == SAVE MASKS ==
                 mask[instance_mask] = instance_idx
                 cells_group[class_name][frame_idx, instance_idx] = 1
-                cells_group['Confidence Score'][frame_idx, instance_idx] = score.cpu().numpy()
+                cells_group['Confidence Score'][
+                    frame_idx, instance_idx] = score.cpu().numpy()
                 instance_idx += 1
 
             segmentations_ds[frame_idx] = mask.cpu().numpy()
         f['Segmentations'].attrs['Model'] = str(cfg_dir.parent)
 
 
-def test_frame(dataset: Path = SETTINGS.DATASET, frame: int = 999, mask_rcnn_model: Path = SETTINGS.MASK_RCNN_MODEL) -> None:
+def test_frame(dataset: Path = SETTINGS.DATASET,
+               frame: int = 999,
+               mask_rcnn_model: Path = SETTINGS.MASK_RCNN_MODEL) -> None:
     with h5py.File(dataset, 'r') as f:
         im = f['Images']['Phase'][frame][:]
-        pred_masks = seg_image(mask_rcnn_model / 'Model', np.stack([im]*3, axis=-1))
+        pred_masks = seg_image(mask_rcnn_model / 'Model',
+                               np.stack([im] * 3, axis=-1))
         for name, mask in pred_masks.items():
-            plt.imsave(Path('temp') / f'{name}_no_clust.png', tools.show_segmentation(im, mask))
+            plt.imsave(
+                Path('temp') / f'{name}_no_clust.png',
+                tools.show_segmentation(im, mask))
+
+
 def main():
     # seg_dataset()
     test_frame()
-    
+
 
 if __name__ == '__main__':
     main()
-

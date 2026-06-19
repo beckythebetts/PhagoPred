@@ -359,25 +359,7 @@ def generate_dataset(
                       num_frames, late_entry_prob, feature_mask_prob,
                       hazard_calibration_func)
 
-    # print(f"Estimating variances")
 
-
-    # hazard_branch_var, hazard_total_var, cdf_branch_var, cdf_total_var, bernoulli_floor = graph.get_variances(
-    #     target_feature='Hazard',
-    #     max_horizon=100,
-    #     max_base_time_steps=num_frames,
-    #     hazard_calibration_func=hazard_calibration_func,
-    #     base_sample_size=200,
-    #     branch_sample_size=1000,
-    # )
-    # for file in (val_filename, train_filename):
-    #     with h5py.File(file, 'r+') as f:
-    #         attrs = f['Cells']['Phase']['HazardRates'].attrs
-    #         attrs['Total Variance'] = hazard_total_var
-    #         attrs['Unobserved Variance'] = hazard_branch_var
-    #         attrs['CDF Total Variance'] = cdf_total_var
-    #         attrs['CDF Unobserved Variance'] = cdf_branch_var
-    #         attrs['Bernoulli Floor'] = bernoulli_floor
 def estimate_variances(
     graph: CausalGraph,
     hazard_calibration_func: callable,
@@ -433,6 +415,7 @@ def estimate_variances(
         for t in range(lf, lf + horizon):
             for rule in graph.rules:
                 rule.apply_step(branch_signals, t)
+        # === NEED TO INCLUDE POST NOISE???===
 
         # Get hazard of each branch
         branch_hazards = hazard_calibration_func(branch_signals['Hazard'][lf:])
@@ -462,123 +445,6 @@ def estimate_variances(
             variances[name] = {'Total': total_var, 'Unobserved': branch_var}
 
     return variances
-
-
-# def estimate_variances(
-#     graph: CausalGraph,
-#     hazard_calibration_func: callable,
-#     max_horizon: int,
-#     max_base_time_steps: int,
-#     base_sample_size: int = 200,
-#     branch_sample_size: int = 1000,
-#     warm_up_steps: int = 200,
-#     hazard_bins: np.ndarray | None = None,
-#     landmark_distribution: np.ndarray | None = None,
-# ):
-#     """Estimate hazard and CDF variances by branching from sampled base trajectories.
-
-#     If landmark_distribution is provided, base trajectory lengths are drawn from
-#     that empirical distribution (e.g. the actual test-set landmark frames) rather
-#     than uniformly from [warm_up_steps, warm_up_steps + max_base_time_steps].
-#     This gives variance estimates that match the test-set landmark distribution exactly.
-#     """
-#     if hazard_bins is not None:
-#         assert max_horizon >= hazard_bins[-1], (
-#             f"max_horizon ({max_horizon}) must be >= hazard_bins[-1] ({hazard_bins[-1]})"
-#         )
-
-#     values = {'hazard': [], 'cdf': []}
-#     base_lengths = []
-#     base_survival = []
-#     for _ in tqdm(range(base_sample_size), desc='Estimating variances'):
-#         if landmark_distribution is not None:
-#             base_time_steps = int(np.random.choice(landmark_distribution))
-#         else:
-#             base_time_steps = np.random.randint(
-#                 warm_up_steps, warm_up_steps + max_base_time_steps)
-#         base_signals = graph.sample_graph(base_time_steps)
-#         base_hazard = hazard_calibration_func(base_signals['Hazard'])
-
-#         # Probability this freshly-generated trajectory reaches the landmark alive.
-#         base_lengths.append(base_time_steps)
-#         base_survival.append(float(np.prod(1.0 - base_hazard)))
-
-#         # Build batch signals: shape (base_time_steps + max_horizon, branch_sample_size)
-#         # All branches share the base trajectory; each gets independent noise beyond it.
-#         B = branch_sample_size
-#         batch_signals = {}
-#         for feature in graph.features:
-#             base = base_signals[feature.name]  # (base_time_steps,)
-#             extensions = np.stack(
-#                 [feature.generate_signal(max_horizon) for _ in range(B)],
-#                 axis=1,
-#             )  # (max_horizon, B)
-#             batch_signals[feature.name] = np.vstack([
-#                 np.broadcast_to(base[:, np.newaxis], (base_time_steps, B)),
-#                 extensions,
-#             ])  # (base_time_steps + max_horizon, B)
-
-#         # Apply rules over the horizon for all branches simultaneously
-#         for t in range(base_time_steps, base_time_steps + max_horizon):
-#             for rule in graph.rules:
-#                 rule.apply_step(batch_signals, t)
-
-#         # (max_horizon, B)
-#         branch_hazards = hazard_calibration_func(
-#             batch_signals['Hazard'][base_time_steps:])
-#         branch_cdfs = np.cumsum(_pmf_from_hazards(branch_hazards),
-#                                 axis=0)  # (max_horizon, B)
-
-#         if hazard_bins is not None:
-#             h = np.stack([
-#                 1.0 - np.prod(
-#                     1.0 - branch_hazards[hazard_bins[i]:hazard_bins[i + 1]],
-#                     axis=0) for i in range(len(hazard_bins) - 1)
-#             ])  # (n_bins, B)
-#         else:
-#             h = branch_hazards  # (max_horizon, B)
-
-#         values['hazard'].append(h.T)  # (B, max_horizon_or_n_bins)
-#         values['cdf'].append(branch_cdfs.T)  # (B, max_horizon)
-
-#     # Importance weights correcting the freshly-generated base trajectories to the
-#     # distribution of trajectories actually alive at the landmark.
-#     base_lengths = np.array(base_lengths)
-#     base_survival = np.array(base_survival)
-#     if landmark_distribution is not None:
-#         # Lengths already drawn from the test landmark distribution, so the length
-#         # marginal needs no correction. Reweight trajectories by survival NORMALISED
-#         # within each length (s / E[s|L]) so the weight only reshapes the trajectory
-#         # mix at fixed L and leaves the sampled length marginal untouched.
-#         weights = _within_length_survival_weights(base_lengths, base_survival)
-#     else:
-#         # Lengths drawn uniformly: the global raw survival weight simultaneously
-#         # supplies the survival-shaped length marginal and the alive-at-L conditioning.
-#         weights = base_survival
-
-#     variances = {name: {} for name in values}
-
-#     for name, vals in values.items():
-#         # Calculate variance, weighting by base survival proabability (proabability such a sample would actaully appear in test set)
-#         vals = np.array(vals)
-#         branch_var = np.average(np.var(vals, axis=1), axis=0, weights=weights)
-#         total_var = branch_var + weighted_var(
-#             np.mean(vals, axis=1), axis=0,
-#             weights=weights)  # By law of total variance
-
-#         variances[name] = {'Total': total_var, 'Unobserved': branch_var}
-
-#         # if name == 'cdf':
-#         #     # Account for sampling error to allow cor comapision with MSE
-#         #     base_av_p = np.mean(vals,
-#         #                         axis=1)  # (base_sample_size, max_horizon)
-#         #     av_p = np.average(base_av_p, axis=0, weights=branch_survival)
-#         #     death_sampling_var = av_p * (1 - av_p) - weighted_var(
-#         #         base_av_p, axis=0, weights=branch_survival)
-#         #     variances['cdf']['Total'] += death_sampling_var
-#         #     variances['cdf']['Unobserved'] += death_sampling_var
-
-#     return variances
 
 
 def _within_length_survival_weights(
@@ -627,63 +493,3 @@ def weighted_var(arr: np.ndarray,
 
     mean = np.sum(w * arr, axis=axis, keepdims=True)
     return np.sum(w * (arr - mean)**2, axis=axis)
-
-
-# def save_variances(file_names: list[Path],
-#                    graph: CausalGraph,
-#                    hazard_calibration_func: callable,
-#                    max_horizon: int,
-#                    max_base_time_steps: int,
-#                    base_sample_size: int = 200,
-#                    branch_sample_size: int = 1000,
-#                    hazard_bins: np.ndarray | None = None):
-#     variances = _estimate_variances(
-#         graph,
-#         hazard_calibration_func,
-#         max_horizon,
-#         max_base_time_steps,
-#         base_sample_size,
-#         branch_sample_size,
-#         hazard_bins=hazard_bins,
-#     )
-#     dataset_map = {'hazard': 'HazardRates', 'cdf': 'CIFs'}
-#     for file_name in file_names:
-#         with h5py.File(file_name, 'r+') as f:
-#             for name, dataset_name in dataset_map.items():
-#                 attrs = f['Cells']['Phase'][dataset_name].attrs
-#                 attrs['Total Variance'] = variances[name]['Total']
-#                 attrs['Unobserved Variance'] = variances[name]['Unobserved']
-#             if hazard_bins is not None:
-#                 f['Cells']['Phase']['HazardRates'].attrs[
-#                     'Hazard Bins'] = hazard_bins
-
-# _QUANTITY_DATASET = {'hazard': 'HazardRates', 'cdf': 'CIFs'}
-
-# def plot_variances_on_ax(
-#         file_path: Path,
-#         ax: plt.Axes,
-#         colour: str | tuple,
-#         label: str,
-#         quantity: Literal['hazard', 'cdf'] = 'hazard') -> None:
-#     """Plot Total and Unobserved variance for one quantity ('hazard' or 'cdf')."""
-#     dataset_name = _QUANTITY_DATASET[quantity]
-#     with h5py.File(file_path, 'r') as f:
-#         attrs = f['Cells']['Phase'][dataset_name].attrs
-#         total = attrs['Total Variance']
-#         unobserved = attrs['Unobserved Variance']
-#         bins = attrs.get('Hazard Bins') if quantity == 'hazard' else None
-
-#     horizons = bins[:-1] if bins is not None else np.arange(len(total))
-#     ax.plot(horizons,
-#             total,
-#             marker='.',
-#             markersize=3,
-#             linestyle='dotted',
-#             label=f'{label} Total',
-#             color=colour)
-#     ax.plot(horizons,
-#             unobserved,
-#             marker='.',
-#             markersize=3,
-#             label=f'{label} Unobserved',
-#             color=colour)

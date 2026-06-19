@@ -13,7 +13,7 @@ log = get_logger()
 def plot_confusion_matrices(
         all_experiments: list[ExperimentRecord],
         varying_params: dict,
-        cm_type: Literal['cm_expected', 'cm_argmax'],
+        cm_type: Literal['cm_expected', 'cm_argmax', 'cm_soft'],
         percentile_range: Tuple[int, int] = (0, 100),
 ):
     """PLot confusion matrices for one or two varying params"""
@@ -39,7 +39,7 @@ def _normalise_cm(cm: np.ndarray) -> np.ndarray:
 def _plot_cm_on_ax(
     ax: plt.Axes,
     experiments: list[ExperimentRecord],
-    cm_type: Literal['cm_expected', 'cm_argmax'],
+    cm_type: Literal['cm_expected', 'cm_argmax', 'cm_soft'],
     percentile_range: Tuple[int, int] = (0, 1)
 ) -> None:
     if not hasattr(experiments[0].results, cm_type):
@@ -91,7 +91,7 @@ def _plot_cm_on_ax(
 def _plt_cms_1var(
     all_experiments: list[ExperimentRecord],
     varying_param: dict,
-    cm_type: Literal['cm_expected', 'cm_argmax'],
+    cm_type: Literal['cm_expected', 'cm_argmax', 'cm_soft'],
     percentile_range: Tuple[int, int] = (0, 100)
 ) -> plt.Figure:
     """Plot confusion matrices for one varying parameter, table-style."""
@@ -128,7 +128,7 @@ def _plt_cms_1var(
 def _plot_cms_2var(
     all_experiments: list[ExperimentCfg],
     varying_params: dict,
-    cm_type: Literal['cm_expected', 'cm_argmax'],
+    cm_type: Literal['cm_expected', 'cm_argmax', 'cm_soft'],
     percentile_range: Tuple = (0, 100)
 ) -> plt.Figure:
     """Plot confusion matrices for two varying params, table-style."""

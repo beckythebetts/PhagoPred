@@ -260,12 +260,12 @@ EXPERIMENT_SUITES = {
         ExperimentCfg(
             model=[
                 MODELS['CNN Medium'],
-                # MODELS['LSTM Medium'],
+                MODELS['LSTM Medium'],
                 # MODELS['Random Forest'],
             ],
             attention=ATTENTION['Last'],
             loss=[
-                LOSSES['NLL a3 + Ranking'],
+                # LOSSES['NLL a3 + Ranking'],
                 LOSSES['NLL + Ranking'],
                 # LOSSES['NLL a10'],
             ],
@@ -273,13 +273,14 @@ EXPERIMENT_SUITES = {
                 #   DATASETS['Graph Linear N100'],
                 # DATASETS['Graph Linear N500'],
                 # DATASETS['Graph Linear N1000'],
-                DATASETS['Graph Linear N5000'],
+                DATASETS['Graph Linear'],
             ],
             training=TRAINING['Standard'],
             feature_combo=['A', 'B', 'C', 'D'],
             calibration=[
                 CALIBRATION['Vector Scaling'],
-                CALIBRATION['Temperature Scaling']
+                CALIBRATION['Temperature Scaling'],
+                CALIBRATION['None'],
             ])),
 }
 # EXPERIMENT_SUITES = {

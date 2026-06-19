@@ -34,8 +34,9 @@ except:
 # MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'mac_20x'
 
 MASK_RCNN_MODEL = Path(
-    "PhagoPred") / 'detectron_segmentation' / 'models' / '16_02_26'
-CELLPOSE_MODEL = Path("PhagoPred") / 'cellpose_segmentation' / 'Models' / 'ash'
+    "PhagoPred") / 'detectron_segmentation' / 'models' / 'bio_20x_thp1'
+CELLPOSE_MODEL = Path(
+    "PhagoPred") / 'cellpose_segmentation' / 'Models' / 'bio_20x_thp1'
 UNET_MODEL = Path("PhagoPred") / 'unet_segmentation' / 'models' / '20x_flir_8'
 TRAINING_DATA = Path("PhagoPred") / 'segmentation' / 'models' / '20x_flir_8'
 CLASSES = {'phase': 'Amoeba', 'epi': 'Yeast'}

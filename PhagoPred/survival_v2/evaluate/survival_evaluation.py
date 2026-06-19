@@ -22,6 +22,7 @@ from .metrics import (
     integrated_brier_score,
     hazard_mse,
     pmf_mse,
+    soft_confusion_matrix,
 )
 
 
@@ -36,6 +37,7 @@ class SurvivalResults:
     n_censored: int
     cm_expected: np.ndarray
     cm_argmax: np.ndarray
+    cm_soft: np.ndarray
     brier_times: np.ndarray
     brier_scores: np.ndarray
 
@@ -136,24 +138,47 @@ def evaluate_survival_model(model,
     # expected_times = (predictions * np.arange(model.num_bins)).sum(axis=1)
     # Only plot uncensored samples in CMs
 
-    pmf_sum = predictions.sum(axis=1, keepdims=True).clip(min=1e-8)
-    expected_times = (predictions / pmf_sum *
-                      np.arange(model.num_bins)).sum(axis=1)
-    argmax_times = np.argmax(predictions, axis=1)
+    # pmf_sum = predictions.sum(axis=1, keepdims=True).clip(min=1e-8)
+    # expected_times = (predictions / pmf_sum *
+    #                   np.arange(model.num_bins)).sum(axis=1)
+    # argmax_times = np.argmax(predictions, axis=1)
 
-    binned_times = binned_times[events == 1]
-    expected_times = expected_times[events == 1]
-    argmax_times = argmax_times[events == 1]
+    # binned_times = binned_times[events == 1]
+    # expected_times = expected_times[events == 1]
+    # argmax_times = argmax_times[events == 1]
 
-    cm_expected = confusion_matrix(binned_times,
-                                   expected_times.round().astype(int))
+    # cm_expected = confusion_matrix(binned_times,
+    #                                expected_times.round().astype(int))
+    # cm_argmax = confusion_matrix(binned_times,
+    #                              argmax_times.round().astype(int))
+
+    # For expected time use restricted mean_survival_time
+    # Area under survival curve up to final bin (N bins)$ = \sum_{i=0}^{N}(1 - CIF(i)$)
+    # Add final bin rperesenting left over pmf
+    cif = np.cumsum(predictions, axis=1)
+    rmst = np.sum(1 - cif, axis=1)
+    argmax_times = np.argmax(np.concatenate(
+        (predictions, 1 - np.sum(predictions, axis=1, keepdims=True)), axis=1),
+                             axis=1)
+
+    # print(rmst.round().astype(int),
+    #       argmax_times.round().astype(int), binned_times)
+
+    cm_expected = confusion_matrix(binned_times, rmst.round().astype(int))
     cm_argmax = confusion_matrix(binned_times,
                                  argmax_times.round().astype(int))
+    # Soft CM: keep the full predicted PMF instead of collapsing to one bin.
+    # Raw mass counts here; plot_cm row-normalises for display like the others.
+    cm_soft = soft_confusion_matrix(predictions, binned_times)
+
+    # num_bins = dataset.num_bins
+    # binned_times[events == 0] = num_bins
 
     plot_cm(cm_expected,
             save_dir / "plots" / "confusion_matrix_expected_times.png")
     plot_cm(cm_argmax,
             save_dir / "plots" / "confusion_matrix_argmax_times.png")
+    plot_cm(cm_soft, save_dir / "plots" / "soft_confusion_matrix.png")
     plot_brier_scores(brier_times, brier_scores,
                       save_dir / "plots" / "brier_scores.png")
 
@@ -178,6 +203,7 @@ def evaluate_survival_model(model,
         n_censored=(1 - events).sum(),
         cm_expected=cm_expected,
         cm_argmax=cm_argmax,
+        cm_soft=cm_soft,
         brier_times=brier_times,
         brier_scores=brier_scores,
         hazard_mse_per_bin=hazard_mean_squared_error,

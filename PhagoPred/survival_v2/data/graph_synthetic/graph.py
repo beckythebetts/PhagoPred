@@ -176,14 +176,17 @@ class CausalGraph:
 
         return G
 
-    def sample_graph(self, time_steps: int = None) -> dict[str, np.ndarray]:
+    def sample_graph(self,
+                     time_steps: int = None,
+                     signals: dict | None = None) -> dict[str, np.ndarray]:
         """Simulate feature trajectories according to the graph's rules."""
         if time_steps is None:
             time_steps = self.time_steps
-        signals = {
-            feature.name: feature.generate_signal(time_steps)
-            for feature in self.features
-        }
+        if signals is None:
+            signals = {
+                feature.name: feature.generate_signal(time_steps)
+                for feature in self.features
+            }
 
         for t in range(time_steps):
             for rule in self.rules:

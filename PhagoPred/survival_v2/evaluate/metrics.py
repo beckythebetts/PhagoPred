@@ -46,6 +46,64 @@ def pmf_mse(pred_pmf: np.ndarray,
     return np.mean((pred - true)**2, axis=0)
 
 
+def soft_confusion_matrix(pred_pmf: np.ndarray,
+                          true_bins: np.ndarray) -> np.ndarray:
+    final_bin_pmf = (1.0 - pred_pmf.sum(axis=1, keepdims=True))
+    pmf = np.concatenate([pred_pmf, final_bin_pmf], axis=1)
+
+    num_bins = pmf.shape[1]
+    cm = np.zeros((num_bins, num_bins))
+    np.add.at(cm, true_bins, pmf)
+
+    cm = cm / cm.sum(axis=1, keepdims=True).clip(min=1e-8)
+
+    return cm
+
+
+# def soft_confusion_matrix(pred_pmf: np.ndarray,
+#                           true_bins: np.ndarray,
+#                           events: np.ndarray,
+#                           num_bins: int,
+#                           normalize: str | None = 'true') -> np.ndarray:
+#     """Probabilistic confusion matrix that preserves the full predicted PMF.
+
+#     Unlike the argmax/RMST confusion matrices, the prediction is never collapsed
+#     to a single bin. A final bin holding the leftover mass
+#     (1 - sum(pmf), i.e. the probability of surviving past the horizon) is
+#     appended so the predicted axis matches the argmax CM. Row ``t`` is the summed
+#     predicted distribution over the uncensored samples whose true event bin is
+#     ``t``; with ``normalize='true'`` each row is the average predicted PMF for
+#     those samples, so the diagonal is the mean mass placed on the correct bin.
+
+#     Args
+#     ----
+#         pred_pmf: (n, num_bins) predicted PMFs.
+#         true_bins: (n,) true event/censoring bin indices.
+#         events: (n,) event indicators (1=event, 0=censored).
+#         num_bins: number of event time bins (before the leftover bin).
+#         normalize: 'true' (row), 'pred' (column) or None (raw mass counts).
+
+#     Returns
+#     -------
+#         (num_bins + 1, num_bins + 1) soft confusion matrix.
+#     """
+#     # Only uncensored samples have a known true event bin.
+#     mask = events == 1
+#     leftover = (1.0 - pred_pmf.sum(axis=1, keepdims=True)).clip(min=0.0)
+#     pmf = np.concatenate([pred_pmf, leftover], axis=1)[mask]
+#     true = true_bins[mask].astype(int).clip(0, num_bins)
+
+#     size = num_bins + 1
+#     cm = np.zeros((size, size))
+#     np.add.at(cm, true, pmf)  # cm[true_bin, :] += predicted PMF
+
+#     if normalize == 'true':
+#         cm /= cm.sum(axis=1, keepdims=True).clip(min=1e-8)
+#     elif normalize == 'pred':
+#         cm /= cm.sum(axis=0, keepdims=True).clip(min=1e-8)
+#     return cm
+
+
 def concordance_index(predicted_pmf: np.ndarray, true_times: np.ndarray,
                       event_indicators: np.ndarray,
                       bin_edges: np.ndarray) -> np.ndarray:

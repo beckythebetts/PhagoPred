@@ -94,10 +94,15 @@ class SurvivalCellDataset(CellDataset):
         bins[-1] = self.max_time_to_death + 1
         self.event_time_bins = bins
 
+    def _get_equal_bins(self) -> None:
+        self.event_time_bins = np.linspace(0, self.max_time_to_death,
+                                           self.num_bins + 1).astype(int)
+
     def get_bins(self) -> np.ndarray:
         """Return event time bins."""
         if self.event_time_bins is None:
-            self._compute_bins()
+            # self._compute_bins()
+            self._get_equal_bins()
         return self.event_time_bins
 
     def get_bin_weights(self, num_samples: int = 1000) -> list:
@@ -246,40 +251,48 @@ class SurvivalCellDataset(CellDataset):
                 #     hazard_bins=self.event_time_bins,
                 #     landmark_distribution=landmark_dist,
                 # )
+                # Total variance from this dataset's own (cell, landmark)
+                # sampling — the mean-estimator MSE the model is benchmarked
+                # against, over the same population as evaluation. The generative
+                # MC is kept only for the unobserved (irreducible) component.
+                sampled_total = self._sample_total_variance()
                 self.total_variances = {}
                 self.unobserved_variances = {}
                 for t in ('hazard', 'pmf'):
-                    self.total_variances[t] = variances[t]['Total']
+                    self.total_variances[t] = sampled_total[t]
                     self.unobserved_variances[t] = variances[t]['Unobserved']
                 return
 
-    # def _compute_variance(self, sample_size: int = 1000) -> np.ndarray:
-    #     """Per-bin variance of the true discrete-time hazard across cells, under this
-    #     dataset's own (per-cell, one random landmark) sampling.
+    def _sample_total_variance(self,
+                               sample_size: int = 20000
+                               ) -> dict[str, np.ndarray]:
+        """Per-bin total variance of the true binned PMF and discrete-time hazard
+        across this dataset's own (per-cell, one random landmark) sampling.
 
-    #     This is the hazard-form mean-estimator MSE — i.e. the total variance the model
-    #     is benchmarked against — computed exactly from the cached PMFs (no branching MC).
-    #     """
-    #     vals = []
-    #     for _ in tqdm(range(sample_size),
-    #                   'Sampling cells for hazard variance'):
-    #         cell_idx = np.random.randint(len(self))
-    #         cell = self[cell_idx]
-    #         pmf = cell.binned_pmf
-    #         if pmf is None:
-    #             continue
-    #         pmf = np.asarray(pmf, dtype=float)
+        This is the mean-estimator MSE the model is benchmarked against, computed
+        exactly from the cached PMFs (no branching MC) over the same
+        (cell, landmark) distribution used at evaluation.
+        """
+        pmfs, hazards = [], []
+        for _ in tqdm(range(sample_size), 'Sampling cells for total variance'):
+            cell_idx = np.random.randint(len(self))
+            cell = self[cell_idx]
+            pmf = cell.binned_pmf
+            if pmf is None:
+                continue
+            pmf = np.asarray(pmf, dtype=float)
 
-    #         # survival to the START of each bin: S_{i-1} = 1 - sum_{j<i} pmf_j
-    #         survival_before = 1.0 - (np.cumsum(pmf) - pmf)  # exclusive cumsum
-    #         # discrete-time hazard per bin: h_i = pmf_i / S_{i-1}
-    #         hazard = np.divide(pmf,
-    #                            survival_before,
-    #                            out=np.zeros_like(pmf),
-    #                            where=survival_before > 1e-12)
-    #         vals.append(hazard)
+            # survival to the START of each bin: S_{i-1} = 1 - sum_{j<i} pmf_j
+            survival_before = 1.0 - (np.cumsum(pmf) - pmf)  # exclusive cumsum
+            # discrete-time hazard per bin: h_i = pmf_i / S_{i-1}
+            hazard = np.divide(pmf,
+                               survival_before,
+                               out=np.zeros_like(pmf),
+                               where=survival_before > 1e-12)
+            pmfs.append(pmf)
+            hazards.append(hazard)
 
-    #     return np.var(vals, axis=0)
+        return {'pmf': np.var(pmfs, axis=0), 'hazard': np.var(hazards, axis=0)}
 
 
 def survival_collate_fn(batch: list[CellSample],

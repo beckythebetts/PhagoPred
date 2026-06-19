@@ -24,15 +24,13 @@ TRAINING = {
                 gamma=0.9,
                 name='Quick'),
     'Standard':
-    TrainingCfg(
-        num_epochs=50,
-        batch_size=256,
-        lr=
-        1e-3,  # was 1e-4 but never applied; 1e-3 = prior effective LR (Adam default)
-        scheduler='step',
-        step_size=10,
-        gamma=0.7,
-        name='Standard'),
+    TrainingCfg(num_epochs=150,
+                batch_size=256,
+                lr=1e-3,
+                scheduler='step',
+                step_size=10,
+                gamma=0.99,
+                name='Standard'),
     'Long':
     TrainingCfg(num_epochs=300,
                 batch_size=256,

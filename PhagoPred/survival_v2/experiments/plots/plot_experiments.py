@@ -93,6 +93,9 @@ def plot_experiment_results(experiments_dir: Path,
                        experiments_dir / 'brier_scores.png')
         _plot_and_save(plot_c_idxs_scores, all_experiemnts, varying_params,
                        experiments_dir / 'concordance_idxs.png')
+        _plot_and_save(partial(plot_confusion_matrices, cm_type='cm_soft'),
+                       all_experiemnts, varying_params,
+                       experiments_dir / 'confusion_matrix_soft.png')
 
     _plot_and_save(plot_variance_mse, all_experiemnts, varying_params,
                    experiments_dir / 'variance_mse.png')

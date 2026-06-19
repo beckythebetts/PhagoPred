@@ -161,7 +161,7 @@ def _plot_box_plots_2var_single(all_experiments: list[ExperimentRecord],
                     **_BOXPLOT_PROPS,
                 )
 
-        x_labels = [v.name for v in x_vals]
+        x_labels = [v.name if v is not None else 'None' for v in x_vals]
         axs[i].set_xticks(x)
         axs[i].set_xticklabels(x_labels, rotation=0, ha='center')
         axs[i].set_xlabel(x_param.replace('_', ' ').capitalize(), fontsize=12)
@@ -176,7 +176,7 @@ def _plot_box_plots_2var_single(all_experiments: list[ExperimentRecord],
     handles = [
         Patch(facecolor=cmap(k),
               edgecolor='black',
-              label=val.name,
+              label=val.name if val is not None else 'None',
               linewidth=1.5) for k, val in enumerate(color_vals)
     ]
     axs[-1].legend(

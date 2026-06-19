@@ -1,11 +1,24 @@
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from qtpy.QtWidgets import (QToolBar, QLineEdit, QAction, QDialog, QLabel, QProgressBar, QApplication, QMainWindow, QPushButton, QHBoxLayout, QVBoxLayout, QWidget, QInputDialog,
-                            QFormLayout,
-                            QSpinBox,
-                            QDialogButtonBox,
-                            QMessageBox,
-                            QStatusBar,
-                            )
+from qtpy.QtWidgets import (
+    QToolBar,
+    QLineEdit,
+    QAction,
+    QDialog,
+    QLabel,
+    QProgressBar,
+    QApplication,
+    QMainWindow,
+    QPushButton,
+    QHBoxLayout,
+    QVBoxLayout,
+    QWidget,
+    QInputDialog,
+    QFormLayout,
+    QSpinBox,
+    QDialogButtonBox,
+    QMessageBox,
+    QStatusBar,
+)
 
 from qtpy.QtCore import Qt, QTimer, QThread, Signal
 import matplotlib.pyplot as plt
@@ -25,6 +38,7 @@ import os
 
 
 class LoadingBarDialog(QDialog):
+
     def __init__(self, max_value, message="Loading..."):
         super().__init__()
         self.setWindowTitle("Please wait")
@@ -52,7 +66,9 @@ class LoadingBarDialog(QDialog):
             self.label.setText(message)
         QApplication.processEvents()  # Important: refresh UI
 
+
 class FrameSliceDialog(QDialog):
+
     def __init__(self, start=0, end=100, interval=1, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Load Frame Slice")
@@ -84,19 +100,18 @@ class FrameSliceDialog(QDialog):
         layout.addLayout(form_layout)
 
         # OK / Cancel buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok
+                                   | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
         layout.addWidget(buttons)
 
     def get_values(self):
-        return (
-            self.start_input.value(),
-            self.end_input.value(),
-            self.interval_input.value()
-        )
-    
+        return (self.start_input.value(), self.end_input.value(),
+                self.interval_input.value())
+
+
 class CellToolBar(QToolBar):
 
     def __init__(self, parent=None):
@@ -106,7 +121,8 @@ class CellToolBar(QToolBar):
         # Button for next cell
         self.next_cell_action = QAction('Next Cell', self)
         self.next_cell_action.setStatusTip("Go to next cell")
-        self.next_cell_action.triggered.connect(self.parent.next_cell)  # Call main window method
+        self.next_cell_action.triggered.connect(
+            self.parent.next_cell)  # Call main window method
 
         self.addAction(self.next_cell_action)
 
@@ -118,7 +134,8 @@ class CellToolBar(QToolBar):
 
         # Text box for entering cell index
         self.cell_index_edit = QLineEdit()
-        self.cell_index_edit.setFixedWidth(40)  # Optional: fix width for neatness
+        self.cell_index_edit.setFixedWidth(
+            40)  # Optional: fix width for neatness
         self.cell_index_edit.setPlaceholderText("Enter index")
         self.cell_index_edit.setAlignment(Qt.AlignCenter)
         self.cell_index_edit.returnPressed.connect(self.load_cell_from_text)
@@ -134,7 +151,9 @@ class CellToolBar(QToolBar):
             # Handle invalid input gracefully (e.g., ignore or show a message)
             pass
 
+
 class AllCellToolBar(QToolBar):
+
     def __init__(self, parent=None):
 
         super().__init__()
@@ -145,11 +164,13 @@ class AllCellToolBar(QToolBar):
         self.addAction(self.toggle_outline_action)
 
         self.load_slice_action = (QAction("Load Frames"))
-        self.load_slice_action.triggered.connect(self.parent.load_frame_slice_dialog)
+        self.load_slice_action.triggered.connect(
+            self.parent.load_frame_slice_dialog)
         self.addAction(self.load_slice_action)
 
 
 class AllCellsViewer(QMainWindow):
+
     def __init__(self):
         super().__init__()
         self.setStatusBar(QStatusBar())
@@ -181,7 +202,7 @@ class AllCellsViewer(QMainWindow):
         hdf5_file = SETTINGS.DATASET
 
         with h5py.File(hdf5_file, 'r') as f:
-   
+
             phase_data = f['Images']['Phase']
             mask_data = f['Segmentations']['Phase']
             X_centers = f['Cells']['Phase']['X']
@@ -191,32 +212,38 @@ class AllCellsViewer(QMainWindow):
                 self.start_frame = 0
             if self.end_frame is None:
                 self.end_frame = phase_data.shape[0]
-            
+
             # ========TESTING=============
             # Load per-cell metadata (you need to create these arrays beforehand and save to HDF5)
-            first_appearance = f['Cells']['Phase']['First Frame'][0]  # shape: (num_cells,)
-            last_appearance = f['Cells']['Phase']['Last Frame'][0]    # shape: (num_cells,)
+            first_appearance = f['Cells']['Phase']['First Frame'][
+                0]  # shape: (num_cells,)
+            last_appearance = f['Cells']['Phase']['Last Frame'][
+                0]  # shape: (num_cells,)
 
             num_cells = first_appearance.shape[0]
             last_known_masks = {}  # Cache: cell_id → binary mask
 
             filled_masks = []  # New mask list with outlines filled
-            display_frames = np.arange(start=self.start_frame, stop=self.end_frame, step=self.interval)
-            
-            loading_bar = LoadingBarDialog(len(display_frames), message="Loading images...")
+            display_frames = np.arange(start=self.start_frame,
+                                       stop=self.end_frame,
+                                       step=self.interval)
+
+            loading_bar = LoadingBarDialog(len(display_frames),
+                                           message="Loading images...")
             loading_bar.show()
-            
+
             images = []
             labels = []
-            masks = [] 
+            masks = []
 
             points = []
 
             text = {
-                'string': '{track_id}',         # match the property name exactly
+                'string': '{track_id}',  # match the property name exactly
                 'size': 12,
                 'anchor': 'center',
-                'translation': [0, 0, 0],          # you can keep this or tweak to shift text
+                'translation': [0, 0,
+                                0],  # you can keep this or tweak to shift text
                 'color': "m",
             }
 
@@ -230,71 +257,73 @@ class AllCellsViewer(QMainWindow):
 
                 # For each cell ID
                 for cell_id in range(num_cells):
-                    
-                    
+
                     # If it's not present in this frame's mask
                     if cell_id not in present_ids:
-                        if first_appearance[cell_id] <= frame <= last_appearance[cell_id]:
+                        if first_appearance[
+                                cell_id] <= frame <= last_appearance[cell_id]:
                             # Try to use last known mask
                             if cell_id in last_known_masks:
                                 reused_mask = last_known_masks[cell_id]
 
                                 # Overlay reused mask outline (without overwriting actual label)
                                 # You could skip adding it to the full mask and instead visualize separately
-                                filled_mask = np.where(reused_mask, cell_id, filled_mask)
+                                filled_mask = np.where(reused_mask, cell_id,
+                                                       filled_mask)
                     else:
                         # Update last known mask for this cell
                         last_known_masks[cell_id] = (mask == cell_id)
-                    
+
                     x = X_centers[frame, cell_id]
                     y = Y_centers[frame, cell_id]
 
                     if np.isnan(x) or np.isnan(y):
                         continue
 
-                    points.append([i, x, y])  # Note: napari points are (frame, y, x)
+                    points.append([i, x,
+                                   y])  # Note: napari points are (frame, y, x)
                     labels.append(str(cell_id))
 
                 filled_masks.append(filled_mask)
-            # =============TESTING END=================
-            # display_frames = np.arange(start=self.start_frame, stop=self.end_frame, step=self.interval)
+                # =============TESTING END=================
+                # display_frames = np.arange(start=self.start_frame, stop=self.end_frame, step=self.interval)
 
-            # loading_bar = LoadingBarDialog(len(display_frames), message="Loading images...")
-            # loading_bar.show()
+                # loading_bar = LoadingBarDialog(len(display_frames), message="Loading images...")
+                # loading_bar.show()
 
-            # images = []
-            # labels = []
-            # masks = [] 
+                # images = []
+                # labels = []
+                # masks = []
 
-            # points = []
+                # points = []
 
-            # text = {
-            #     'string': '{track_id}',         # match the property name exactly
-            #     'size': 12,
-            #     'anchor': 'center',
-            #     'translation': [0, 0, 0],          # you can keep this or tweak to shift text
-            #     'color': "m",
-            # }
+                # text = {
+                #     'string': '{track_id}',         # match the property name exactly
+                #     'size': 12,
+                #     'anchor': 'center',
+                #     'translation': [0, 0, 0],          # you can keep this or tweak to shift text
+                #     'color': "m",
+                # }
 
-            # for i, frame in enumerate(display_frames):
-            #     phase_im = phase_data[frame]
-            #     images.append(phase_im)
+                # for i, frame in enumerate(display_frames):
+                #     phase_im = phase_data[frame]
+                #     images.append(phase_im)
 
-            #     mask = mask_data[frame]
-            #     masks.append(mask)
+                #     mask = mask_data[frame]
+                #     masks.append(mask)
 
-            #     # === Gather points for this frame ===
-            #     track_ids = np.where(~np.isnan(X_centers[frame]))[0]
+                #     # === Gather points for this frame ===
+                #     track_ids = np.where(~np.isnan(X_centers[frame]))[0]
 
-            #     for cell_idx in track_ids:
-            #         x = X_centers[frame, cell_idx]
-            #         y = Y_centers[frame, cell_idx]
+                #     for cell_idx in track_ids:
+                #         x = X_centers[frame, cell_idx]
+                #         y = Y_centers[frame, cell_idx]
 
-            #         if np.isnan(x) or np.isnan(y):
-            #             continue
+                #         if np.isnan(x) or np.isnan(y):
+                #             continue
 
-            #         points.append([i, x, y])  # Note: napari points are (frame, y, x)
-            #         labels.append(str(cell_idx))
+                #         points.append([i, x, y])  # Note: napari points are (frame, y, x)
+                #         labels.append(str(cell_idx))
 
                 loading_bar.update_progress(i)
 
@@ -305,7 +334,7 @@ class AllCellsViewer(QMainWindow):
             self.viewer.add_image(images, name="Phase Images")
 
             #swap 0 and -1 so bakground is displayed transparent
-            masks = np.where(masks == 0 , -1, np.where(masks == -1, 0, masks))
+            masks = np.where(masks == 0, -1, np.where(masks == -1, 0, masks))
             self.labels_layer = self.viewer.add_labels(
                 masks.astype(np.uint16),
                 name="Cell Masks",
@@ -336,16 +365,16 @@ class AllCellsViewer(QMainWindow):
             self.labels_layer.visible = not self.labels_layer.visible
 
     def load_frame_slice_dialog(self):
-        dialog = FrameSliceDialog(
-        start=self.start_frame,
-        end=self.end_frame,
-        interval=self.interval,
-        parent=self
-        )
+        dialog = FrameSliceDialog(start=self.start_frame,
+                                  end=self.end_frame,
+                                  interval=self.interval,
+                                  parent=self)
         if dialog.exec_() == QDialog.Accepted:
             start, end, interval = dialog.get_values()
             if start >= end:
-                QMessageBox.warning(self, "Invalid Input", "Start frame must be less than end frame.")
+                QMessageBox.warning(
+                    self, "Invalid Input",
+                    "Start frame must be less than end frame.")
                 return
 
             self.start_frame = start
@@ -354,24 +383,27 @@ class AllCellsViewer(QMainWindow):
 
             self.viewer.layers.clear()
             self.load_images()
+
     def setup_frame_display(self):
 
         def update_frame_label(event=None):
             # event gives you current indices along all dims, for time usually dim=0
             current_frame = self.viewer.dims.current_step[0]
-            actual_frame = self.start_frame + (current_frame*self.interval)  # Adjust for your offset
+            actual_frame = self.start_frame + (current_frame * self.interval
+                                               )  # Adjust for your offset
             self.statusBar().showMessage(f"Current frame: {actual_frame}")
 
         self.viewer.dims.events.current_step.connect(update_frame_label)
         update_frame_label()
 
 
-
 class CellLoaderThread(QThread):
     progress = Signal(int)
-    finished = Signal(np.ndarray, np.ndarray, np.ndarray)  # phase_data, epi_data, cell_outline
+    finished = Signal(np.ndarray, np.ndarray,
+                      np.ndarray)  # phase_data, epi_data, cell_outline
 
-    def __init__(self, cell_idx, first_frame, last_frame, frame_size, hdf5_file):
+    def __init__(self, cell_idx, first_frame, last_frame, frame_size,
+                 hdf5_file):
         super().__init__()
         self.cell_idx = cell_idx
         self.first_frame = first_frame
@@ -381,26 +413,36 @@ class CellLoaderThread(QThread):
 
     def run(self):
         try:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            device = torch.device(
+                "cuda" if torch.cuda.is_available() else "cpu")
             n_frames = self.last_frame - self.first_frame
 
             phase_data = np.empty((n_frames, self.frame_size, self.frame_size))
             epi_data = np.empty((n_frames, self.frame_size, self.frame_size))
-            mask = np.empty((n_frames, self.frame_size, self.frame_size), dtype=np.int32)
+            mask = np.empty((n_frames, self.frame_size, self.frame_size),
+                            dtype=np.int32)
 
             with h5py.File(self.hdf5_file, 'r') as f:
-                x_centres = f['Cells']['Phase']['X'][self.first_frame:self.last_frame, self.cell_idx]
-                y_centres = f['Cells']['Phase']['Y'][self.first_frame:self.last_frame, self.cell_idx]
-                x_centres, y_centres = tools.fill_nans(x_centres), tools.fill_nans(y_centres)
+                x_centres = f['Cells']['Phase']['X'][
+                    self.first_frame:self.last_frame, self.cell_idx]
+                y_centres = f['Cells']['Phase']['Y'][
+                    self.first_frame:self.last_frame, self.cell_idx]
+                x_centres, y_centres = tools.fill_nans(
+                    x_centres), tools.fill_nans(y_centres)
 
                 for idx in range(n_frames):
                     frame_idx = self.first_frame + idx
                     xmin, xmax, ymin, ymax = mask_funcs.get_crop_indices(
-                        (y_centres[idx], x_centres[idx]), self.frame_size, SETTINGS.IMAGE_SIZE
-                    )
-                    phase_data[idx] =  f['Images']['Phase'][frame_idx, ymin:ymax, xmin:xmax]
-                    epi_data[idx] = f['Images']['Epi'][frame_idx, ymin:ymax, xmin:xmax]
-                    mask[idx] = f['Segmentations']['Phase'][frame_idx, ymin:ymax, xmin:xmax]
+                        (y_centres[idx], x_centres[idx]), self.frame_size,
+                        SETTINGS.IMAGE_SIZE)
+                    phase_data[idx] = f['Images']['Phase'][frame_idx,
+                                                           ymin:ymax,
+                                                           xmin:xmax]
+                    epi_data[idx] = f['Images']['Epi'][frame_idx, ymin:ymax,
+                                                       xmin:xmax]
+                    mask[idx] = f['Segmentations']['Phase'][frame_idx,
+                                                            ymin:ymax,
+                                                            xmin:xmax]
                     self.progress.emit(idx + 1)
 
             cell_mask = (mask == self.cell_idx)
@@ -408,7 +450,9 @@ class CellLoaderThread(QThread):
             if not cell_mask.any():
                 cell_outline = np.zeros_like(mask[0])
             else:
-                cell_outline = mask_funcs.mask_outline(torch.tensor(cell_mask).byte().to(device), thickness=2).cpu().numpy()
+                cell_outline = mask_funcs.mask_outline(
+                    torch.tensor(cell_mask).byte().to(device),
+                    thickness=2).cpu().numpy()
 
             # epi_data = tools.threshold_image(epi_data)
 
@@ -419,12 +463,11 @@ class CellLoaderThread(QThread):
             traceback.print_exc()
 
 
-
 class CellViewer(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        
+
         self.setMinimumSize(300, 300)
         self.resize(1000, 300)
 
@@ -437,37 +480,37 @@ class CellViewer(QMainWindow):
         self.epi_data = None
         self.cell_outline = None
 
-        self.feature_names=[
+        self.feature_names = [
             # 'Confidence Score',
-                # 'Total Fluorescence', 
-                # 'Fluorescence Distance Mean', 
-                # 'Fluorescence Distance Variance',
-                'Area',
-                'Circularity',
-                'Perimeter',
-                # 'Displacement',
-                # 'Speed',
-                # 'UMAP 1',
-                # 'UMAP 2',
-                # 'Mode 0',
-                # 'Mode 1',
-                # 'Mode 2',
-                # 'Mode 3',
-                # 'Speed',
-                # 'Phagocytes within 100 pixels',
-                # 'Phagocytes within 250 pixels',
-                # 'Phagocytes within 500 pixels',
-                # 'Skeleton Length', 
-                # 'Skeleton Branch Points', 
-                # 'Skeleton End Points', 
-                # 'Skeleton Branch Length Mean', 
-                # 'Skeleton Branch Length Std',
-                # 'Skeleton Branch Length Max'
-                # 'X',
-                # 'Y',
-                # 'CellDeath'
+            # 'Total Fluorescence',
+            # 'Fluorescence Distance Mean',
+            # 'Fluorescence Distance Variance',
+            'Area',
+            'Circularity',
+            'Perimeter',
+            # 'Displacement',
+            # 'Speed',
+            # 'UMAP 1',
+            # 'UMAP 2',
+            # 'Mode 0',
+            # 'Mode 1',
+            # 'Mode 2',
+            # 'Mode 3',
+            # 'Speed',
+            # 'Phagocytes within 100 pixels',
+            # 'Phagocytes within 250 pixels',
+            # 'Phagocytes within 500 pixels',
+            # 'Skeleton Length',
+            # 'Skeleton Branch Points',
+            # 'Skeleton End Points',
+            # 'Skeleton Branch Length Mean',
+            # 'Skeleton Branch Length Std',
+            # 'Skeleton Branch Length Max'
+            # 'X',
+            # 'Y',
+            # 'CellDeath'
         ]
-        
+
         # Central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -488,36 +531,37 @@ class CellViewer(QMainWindow):
         layout.addWidget(self.plot_widget)
         self.setup_frame_display()
 
-        self.viewer.dims.events.current_step.connect(self.update_vertical_lines)
-
-        
+        self.viewer.dims.events.current_step.connect(
+            self.update_vertical_lines)
 
     def load_cell(self):
         hdf5_file = SETTINGS.DATASET
 
         with h5py.File(hdf5_file, 'r') as f:
             # self.first_frame, self.last_frame = tools.get_cell_end_frames(self.cell_idx, f)
-            self.first_frame = f['Cells']['Phase']['First Frame'][0, self.cell_idx]
-            self.last_frame = f['Cells']['Phase']['Last Frame'][0, self.cell_idx]
-            self.first_frame, self.last_frame = int(self.first_frame), int(self.last_frame)
+            self.first_frame = f['Cells']['Phase']['First Frame'][
+                0, self.cell_idx]
+            self.last_frame = f['Cells']['Phase']['Last Frame'][0,
+                                                                self.cell_idx]
+            self.first_frame, self.last_frame = int(self.first_frame), int(
+                self.last_frame)
 
         # Show loading dialog with number of frames to load
         n_frames = self.last_frame - self.first_frame
-        self.loading_dialog = LoadingBarDialog(n_frames, 'Loading cell images...')
+        self.loading_dialog = LoadingBarDialog(n_frames,
+                                               'Loading cell images...')
         self.loading_dialog.show()
 
         # Start loader thread
-        self.loader_thread = CellLoaderThread(
-            cell_idx=self.cell_idx,
-            first_frame=self.first_frame,
-            last_frame=self.last_frame,
-            frame_size=self.frame_size,
-            hdf5_file=hdf5_file
-        )
-        self.loader_thread.progress.connect(self.loading_dialog.update_progress)
+        self.loader_thread = CellLoaderThread(cell_idx=self.cell_idx,
+                                              first_frame=self.first_frame,
+                                              last_frame=self.last_frame,
+                                              frame_size=self.frame_size,
+                                              hdf5_file=hdf5_file)
+        self.loader_thread.progress.connect(
+            self.loading_dialog.update_progress)
         self.loader_thread.finished.connect(self.on_load_finished)
         self.loader_thread.start()
-
 
     def on_load_finished(self, phase_data, epi_data, cell_outline):
         self.phase_data = phase_data
@@ -527,12 +571,20 @@ class CellViewer(QMainWindow):
         self.viewer.layers.clear()
 
         self.viewer.add_image(self.phase_data, name='Phase')
-        self.viewer.add_image(self.epi_data, name='Epi', blending='additive', colormap='red', opacity=0.5)
-        self.viewer.add_image((self.cell_outline * 255).astype(np.uint8), name='Outline', colormap='yellow', opacity=0.8, blending='additive')
+        if self.epi_data is not None:
+            self.viewer.add_image(self.epi_data,
+                                  name='Epi',
+                                  blending='additive',
+                                  colormap='red',
+                                  opacity=0.5)
+        self.viewer.add_image((self.cell_outline * 255).astype(np.uint8),
+                              name='Outline',
+                              colormap='yellow',
+                              opacity=0.8,
+                              blending='additive')
         self.viewer.dims.set_current_step(0, 0)
 
         self.loading_dialog.close()
-
 
         hdf5_file = SETTINGS.DATASET
         with h5py.File(hdf5_file, 'r') as f:
@@ -542,7 +594,8 @@ class CellViewer(QMainWindow):
                 cell_death_str = 'Alive'
             else:
                 cell_death_str = f'Cell Death at frame {int(cell_death)}'
-        self.setWindowTitle(f"Cell Viewer - Cell {self.cell_idx}, {cell_death_str}")
+        self.setWindowTitle(
+            f"Cell Viewer - Cell {self.cell_idx}, {cell_death_str}")
         self.add_vertical_lines_to_plots()
 
     def get_feature_plot_widget(self) -> None:
@@ -564,30 +617,33 @@ class CellViewer(QMainWindow):
             layout.addWidget(plot_widget)
             self.plot_widgets.append(plot_widget)
 
-        self.plot_widget = widget 
+        self.plot_widget = widget
         self.add_vertical_lines_to_plots()
 
     def update_feature_plots(self, f: h5py.File):
-        self.loading_dialog = LoadingBarDialog(max_value=len(self.feature_names), message='Updating plots...')
+        self.loading_dialog = LoadingBarDialog(max_value=len(
+            self.feature_names),
+                                               message='Updating plots...')
         self.loading_dialog.show()
         for i, feature_name in enumerate(self.feature_names):
-            y_data = f['Cells']['Phase'][feature_name][self.first_frame:self.last_frame, self.cell_idx]
+            y_data = f['Cells']['Phase'][feature_name][
+                self.first_frame:self.last_frame, self.cell_idx]
             x_data = np.arange(self.first_frame, self.last_frame)
 
             plot_item = self.plot_widgets[i].getPlotItem()
             plot_item.clear()
             plot_item.plot(x_data, y_data, pen=pg.mkPen(color='k'))
-            self.loading_dialog.update_progress(i+1)
+            self.loading_dialog.update_progress(i + 1)
         self.loading_dialog.close()
         self.align_feature_plots()
-    
+
     def align_feature_plots(self):
         x_min, x_max = self.first_frame, self.last_frame
 
         for plot_widget in self.plot_widgets:
             plot_widget.setXRange(x_min, x_max, padding=0)
             plot_widget.enableAutoRange(enable=False, axis='x')
-        
+
         # Link all x axes to the first plot
         for plot_widget in self.plot_widgets[1:]:
             plot_widget.setXLink(self.plot_widgets[0])
@@ -595,7 +651,7 @@ class CellViewer(QMainWindow):
         # Hide x-axis on all but the last plot for cleaner look
         for plot_widget in self.plot_widgets[:-1]:
             plot_widget.showAxis('bottom', False)
-        
+
         # Adjust margins (optional)
         for plot_widget in self.plot_widgets:
             plot_widget.getPlotItem().layout.setContentsMargins(5, 5, 5, 0)
@@ -614,14 +670,16 @@ class CellViewer(QMainWindow):
             self.statusBar().showMessage(f"Current frame: {actual_frame}")
 
         self.viewer.dims.events.current_step.connect(update_frame_label)
-        
+
         # Initialize the label immediately
         update_frame_label(None)
 
     def add_vertical_lines_to_plots(self):
         self.vlines = []
         for plot_widget in self.plot_widgets:
-            vline = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen('r', width=2))
+            vline = pg.InfiniteLine(pos=0,
+                                    angle=90,
+                                    pen=pg.mkPen('r', width=2))
             plot_widget.addItem(vline)
             self.vlines.append(vline)
 
@@ -643,7 +701,7 @@ class CellViewer(QMainWindow):
                 self.showMaximized()
         super().keyPressEvent(event)
 
-    
+
 def main():
     app = QApplication(sys.argv)
 
@@ -654,6 +712,6 @@ def main():
 
     sys.exit(app.exec_())
 
+
 if __name__ == "__main__":
     main()
-

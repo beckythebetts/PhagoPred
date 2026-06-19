@@ -52,8 +52,8 @@ def _load_calibration(d: dict | None) -> CalibrationCfg | None:
     if d is None:
         return None
     cal_type = d.get('calibration_type', 'none')
-    if cal_type == 'none' or cal_type not in CALIBRATION_TYPES:
-        return None
+    # if cal_type == 'none' or cal_type not in CALIBRATION_TYPES:
+    #     cal_type =
     cls = CALIBRATION_TYPES[cal_type]
     return _load_dataclass(cls, d)
 

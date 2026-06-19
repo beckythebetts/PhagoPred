@@ -50,7 +50,7 @@ def train(
         else:
             scheduler = None
 
-        history = train_deep(
+        history, best_model = train_deep(
             model,
             train_loader,
             val_loader,
@@ -63,11 +63,12 @@ def train(
 
         torch.save(
             {
-                'model_state_dict': model.state_dict(),
+                'model_state_dict': best_model,
                 'normalization_means': train_loader.dataset.means,
                 'normalization_stds': train_loader.dataset.stds,
             }, save_dir / 'model.pkl')
 
+        history = to_json_safe(history)
         with (save_dir / 'training_history.json').open('w') as f:
             json.dump(history, f)
 

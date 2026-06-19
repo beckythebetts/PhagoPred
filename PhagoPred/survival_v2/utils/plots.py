@@ -176,7 +176,13 @@ def plot_cm(cm, save_path) -> None:
     cm_normalised = cm.astype(float) / cm.sum(axis=1, keepdims=True)
 
     plt.figure(figsize=(8, 6))
-    sns.heatmap(cm_normalised, annot=True, fmt=".2f", cmap="Blues", cbar=True)
+    sns.heatmap(cm_normalised,
+                annot=True,
+                fmt=".2f",
+                cmap="Blues",
+                cbar=True,
+                vmin=0,
+                vmax=1)
     plt.xlabel("Predicted Time Bin")
     plt.ylabel("True Time Bin")
     plt.title("Confusion Matrix of Predicted vs True Time-to-Event Bins")

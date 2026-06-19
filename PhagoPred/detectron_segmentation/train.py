@@ -1,5 +1,6 @@
 # detectron imports
 import sys
+
 sys.path.insert(0, 'detectron2')
 
 from detectron2.engine import DefaultPredictor
@@ -48,18 +49,22 @@ from PhagoPred import SETTINGS
 
 TORCH_VERSION = ".".join(torch.__version__.split(".")[:2])
 CUDA_VERSION = torch.__version__.split("+")[-1]
-os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 
 torch.cuda.empty_cache()
 
+
 class LossEvalHook(HookBase):
+
     def __init__(self, eval_period, model, data_loader):
         self._model = model
         self._period = eval_period
         self._data_loader = data_loader
+
     def before_train(self):
         # Run loss eval once before training starts
         self._do_loss_eval()
+
     def _do_loss_eval(self):
         # Copying inference_on_dataset from evaluator.py
         total = len(self._data_loader)
@@ -79,13 +84,14 @@ class LossEvalHook(HookBase):
             iters_after_start = idx + 1 - num_warmup * int(idx >= num_warmup)
             seconds_per_img = total_compute_time / iters_after_start
             if idx >= num_warmup * 2 or seconds_per_img > 5:
-                total_seconds_per_img = (time.perf_counter() - start_time) / iters_after_start
-                eta = datetime.timedelta(seconds=int(total_seconds_per_img * (total - idx - 1)))
+                total_seconds_per_img = (time.perf_counter() -
+                                         start_time) / iters_after_start
+                eta = datetime.timedelta(seconds=int(total_seconds_per_img *
+                                                     (total - idx - 1)))
                 log_every_n_seconds(
                     logging.INFO,
-                    "Loss on Validation  done {}/{}. {:.4f} s / img. ETA={}".format(
-                        idx + 1, total, seconds_per_img, str(eta)
-                    ),
+                    "Loss on Validation  done {}/{}. {:.4f} s / img. ETA={}".
+                    format(idx + 1, total, seconds_per_img, str(eta)),
                     n=5,
                 )
             loss_batch = self._get_loss(inputs)
@@ -100,7 +106,8 @@ class LossEvalHook(HookBase):
         # How loss is calculated on train_loop
         metrics_dict = self._model(data)
         metrics_dict = {
-            k: v.detach().cpu().item() if isinstance(v, torch.Tensor) else float(v)
+            k: v.detach().cpu().item()
+            if isinstance(v, torch.Tensor) else float(v)
             for k, v in metrics_dict.items()
         }
         total_losses_reduced = sum(loss for loss in metrics_dict.values())
@@ -129,8 +136,6 @@ class MyTrainer(DefaultTrainer):
     #         )
     #     ))
     #     return hooks
-    
-
 
     # @classmethod
     # def build_train_loader(cls, cfg):
@@ -148,22 +153,28 @@ class MyTrainer(DefaultTrainer):
     def build_train_loader(cls, cfg):
         """Set mapper as no resize mapper,"""
         return build_detection_train_loader(cfg, mapper=no_resize_mapper)
-    
+
     @classmethod
     def build_test_loader(cls, cfg, dataset_name):
         # if dataset_name is None:
         #     dataset_name = cfg.DATASETS.TEST[0]
-        return build_detection_test_loader(cfg, 
-                                           dataset_name,
-                                        #    mapper=DatasetMapper(cfg, is_train=False),
-                                           mapper=no_resize_mapper,
-                                           )
-        
+        return build_detection_test_loader(
+            cfg,
+            dataset_name,
+            #    mapper=DatasetMapper(cfg, is_train=False),
+            mapper=no_resize_mapper,
+        )
+
     @classmethod
     def build_evaluator(cls, cfg, dataset_name, output_folder=None):
         if output_folder is None:
             output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
-        return COCOEvaluator(dataset_name, cfg, True, output_folder, max_dets_per_image=1000)
+        return COCOEvaluator(dataset_name,
+                             cfg,
+                             True,
+                             output_folder,
+                             max_dets_per_image=1000)
+
 
 def no_resize_mapper(dataset_dict):
     """
@@ -180,7 +191,7 @@ def no_resize_mapper(dataset_dict):
     #                         T.RandomFlip(prob=0.5, horizontal=False, vertical=True),
     #                            ])
     augs = T.AugmentationList([])
-    
+
     aug_input = T.AugInput(image)
 
     h, w = aug_input.image.shape[:2]
@@ -195,9 +206,11 @@ def no_resize_mapper(dataset_dict):
             utils.transform_instance_annotations(obj, transforms, (h, w))
             for obj in dataset_dict.pop("annotations")
         ]
-        dataset_dict["instances"] = utils.annotations_to_instances(annos, (h, w))
+        dataset_dict["instances"] = utils.annotations_to_instances(
+            annos, (h, w))
 
     return dataset_dict
+
 
 def soft_dice_loss(pred_logits, target_masks, eps=1e-6):
     """
@@ -220,6 +233,7 @@ def label_smoothing_bce_loss(pred_logits, target_masks, smoothing=0.05):
 
 
 class DiceLSMaskHead(MaskRCNNConvUpsampleHead):
+
     def loss(self, pred_mask_logits, instances: list[Instances]):
         """
         pred_mask_logits: (N, num_classes, H, W)
@@ -230,14 +244,16 @@ class DiceLSMaskHead(MaskRCNNConvUpsampleHead):
         for inst in instances:
             gt_classes.append(inst.gt_classes)
             # Crop and resize GT masks to match pred size
-            resized = inst.gt_masks.crop_and_resize(inst.proposal_boxes.tensor, pred_mask_logits.shape[-2:])
+            resized = inst.gt_masks.crop_and_resize(
+                inst.proposal_boxes.tensor, pred_mask_logits.shape[-2:])
             gt_masks.append(resized)
 
         gt_masks = torch.cat(gt_masks, dim=0)  # (N, 1, H, W)
         gt_classes = torch.cat(gt_classes, dim=0)  # (N,)
 
         # Select predicted masks corresponding to GT classes
-        pred_masks = pred_mask_logits[torch.arange(len(gt_classes)), gt_classes]  # (N, H, W)
+        pred_masks = pred_mask_logits[torch.arange(len(gt_classes)),
+                                      gt_classes]  # (N, H, W)
 
         gt_masks = gt_masks.squeeze(1)  # (N, H, W)
 
@@ -246,8 +262,8 @@ class DiceLSMaskHead(MaskRCNNConvUpsampleHead):
         ls_bce = label_smoothing_bce_loss(pred_masks, gt_masks)
         loss = 0.5 * dice + 0.5 * ls_bce
 
-        return {"loss_mask": 0.3*loss}
-    
+        return {"loss_mask": 0.3 * loss}
+
 
 def train(directory=SETTINGS.MASK_RCNN_MODEL):
 
@@ -257,8 +273,12 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
 
     dataset_dir = directory / 'Training_Data'
     config_directory = directory / 'Model'
-    register_coco_instances("my_dataset_train", {}, str(dataset_dir / 'train' / 'labels.json'), str(dataset_dir / 'train' / 'images'))
-    register_coco_instances("my_dataset_val", {},str(dataset_dir / 'validate' / 'labels.json'), str(dataset_dir / 'validate' / 'images'))
+    register_coco_instances("my_dataset_train", {},
+                            str(dataset_dir / 'train' / 'labels.json'),
+                            str(dataset_dir / 'train' / 'images'))
+    register_coco_instances("my_dataset_val", {},
+                            str(dataset_dir / 'validate' / 'labels.json'),
+                            str(dataset_dir / 'validate' / 'images'))
 
     train_metadata = MetadataCatalog.get("my_dataset_train")
     train_dataset_dicts = DatasetCatalog.get("my_dataset_train")
@@ -270,9 +290,6 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
     with open(str(config_directory / "train_metadata.json"), 'w') as json_file:
         json.dump(train_metadata.as_dict(), json_file)
 
-
-
-
     cfg = get_cfg()
 
     #custom loss function
@@ -281,47 +298,51 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
 
     cfg.MODEL.DEVICE = "cuda"
     cfg.OUTPUT_DIR = str(config_directory)
-    cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_C4_3x.yaml"))
-    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-InstanceSegmentation/mask_rcnn_R_50_C4_3x.yaml")
-    cfg.DATASETS.TRAIN = ("my_dataset_train",)
-    cfg.DATASETS.TEST = ("my_dataset_val",)
+    cfg.merge_from_file(
+        model_zoo.get_config_file(
+            "COCO-InstanceSegmentation/mask_rcnn_R_50_C4_3x.yaml"))
+    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(
+        "COCO-InstanceSegmentation/mask_rcnn_R_50_C4_3x.yaml")
+    cfg.DATASETS.TRAIN = ("my_dataset_train", )
+    cfg.DATASETS.TEST = ("my_dataset_val", )
     cfg.DATALOADER.NUM_WORKERS = 1
     cfg.SOLVER.IMS_PER_BATCH = 1
-    cfg.SOLVER.BASE_LR = 0.00025 
-    cfg.SOLVER.MAX_ITER = 1000 
-    cfg.SOLVER.STEPS = []  
+    cfg.SOLVER.BASE_LR = 0.00025
+    cfg.SOLVER.MAX_ITER = 1000
+    cfg.SOLVER.STEPS = []
     cfg.SOLVER.WEIGHT_DECAY = 1e-4
     cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 1024
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = 2
     # cfg.MODEL.BACKBONE.FREEZE_AT = 5
-    cfg.TEST.DETECTIONS_PER_IMAGE = 1000 
+    cfg.TEST.DETECTIONS_PER_IMAGE = 1000
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
     cfg.SOLVER.AMP.ENABLED = True
     cfg.MODEL.ROI_MASK_HEAD.POOLER_RESOLUTION = 14  # default 14 for FPN
     # The output mask resolution is 2x pooler_resolution = 28 by default
 
-
-    cfg.MODEL.RPN.PRE_NMS_TOPK_TRAIN = 12000   # default 12000, fine
-    cfg.MODEL.RPN.POST_NMS_TOPK_TRAIN = 2000   # default 2000, fine
-    cfg.MODEL.RPN.PRE_NMS_TOPK_TEST = 6000     # default 6000
-    cfg.MODEL.RPN.POST_NMS_TOPK_TEST = 1000    # default 1000
-    cfg.MODEL.RPN.NMS_THRESH = 0.8             # default 0.7
+    cfg.MODEL.RPN.PRE_NMS_TOPK_TRAIN = 12000  # default 12000, fine
+    cfg.MODEL.RPN.POST_NMS_TOPK_TRAIN = 2000  # default 2000, fine
+    cfg.MODEL.RPN.PRE_NMS_TOPK_TEST = 6000  # default 6000
+    cfg.MODEL.RPN.POST_NMS_TOPK_TEST = 1000  # default 1000
+    cfg.MODEL.RPN.NMS_THRESH = 0.8  # default 0.7
 
     # The default settings apply some size augmenations to the images. I've found this decreases performance so this section makes sure all images are the same size
     with open(dataset_dir / 'train' / 'labels.json', 'r') as f:
         train_coco = json.load(f)
-    min_size = min(train_coco['images'][0]['height'], train_coco['images'][0]['width'])
-    max_size = max(train_coco['images'][0]['height'], train_coco['images'][0]['width'])
-    cfg.INPUT.MIN_SIZE_TRAIN = (min_size,)
+    min_size = min(train_coco['images'][0]['height'],
+                   train_coco['images'][0]['width'])
+    max_size = max(train_coco['images'][0]['height'],
+                   train_coco['images'][0]['width'])
+    cfg.INPUT.MIN_SIZE_TRAIN = (min_size, )
     cfg.INPUT.MAX_SIZE_TRAIN = max_size
     cfg.INPUT.MIN_SIZE_TRAIN_SAMPLING = "choice"
 
-    cfg.INPUT.MIN_SIZE_TEST = min_size 
-    cfg.INPUT.MAX_SIZE_TEST = max_size 
+    cfg.INPUT.MIN_SIZE_TEST = min_size
+    cfg.INPUT.MAX_SIZE_TEST = max_size
 
     cfg.TEST.AUG = cfg.TEST.AUG if "AUG" in cfg.TEST else {}
-    cfg.TEST.AUG["MAX_SIZE"] = max_size 
-    cfg.TEST.AUG["MIN_SIZES"] = [min_size] 
+    cfg.TEST.AUG["MAX_SIZE"] = max_size
+    cfg.TEST.AUG["MIN_SIZES"] = [min_size]
 
     cfg.TEST.EVAL_PERIOD = 10000
 
@@ -336,22 +357,30 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
         yaml.dump(cfg, file)
 
     plot_loss(config_directory)
-    
+
 
 def plot_loss(cfg_dir):
+
     def load_json_arr(json_path):
         lines = []
         with open(json_path, 'r') as f:
             for line in f:
                 lines.append(json.loads(line))
         return lines
-    
+
     experiment_metrics = load_json_arr(cfg_dir / 'metrics.json')
     plt.rcParams["font.family"] = 'serif'
-    plt.scatter([x['iteration'] for x in experiment_metrics if 'total_loss' in x], [x['total_loss'] for x in experiment_metrics if 'total_loss' in x], color='navy')
+    plt.scatter(
+        [x['iteration'] for x in experiment_metrics if 'total_loss' in x],
+        [x['total_loss'] for x in experiment_metrics if 'total_loss' in x],
+        color='navy')
     plt.scatter(
         [x['iteration'] for x in experiment_metrics if 'validation_loss' in x],
-        [x['validation_loss'] for x in experiment_metrics if 'validation_loss' in x], color='red')
+        [
+            x['validation_loss']
+            for x in experiment_metrics if 'validation_loss' in x
+        ],
+        color='red')
     plt.legend(['Training Loss', 'Validation Loss'], loc='upper left')
     plt.savefig(cfg_dir / 'loss_plot.png')
     plt.clf()
@@ -360,6 +389,7 @@ def plot_loss(cfg_dir):
 def main():
     train()
     # plot_loss(Path("PhagoPred/detectron_segmentation/models/27_05_mac/Model"))
+
 
 if __name__ == '__main__':
     main()

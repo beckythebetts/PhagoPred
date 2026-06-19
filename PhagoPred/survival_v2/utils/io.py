@@ -142,8 +142,17 @@ def load_dataset(
         dataset = SurvivalCellDataset(
             num_bins=dcfg.num_bins,
             max_time_to_death=dcfg.max_time_to_death,
+            event_time_bins=dcfg.bins,
             **common,
         )
+        # Bin edges are computed at train time and persisted to config.json.
+        # Without them every sample's time_to_event_bin is None, which breaks
+        # collation. Fall back to equal-width bins for older configs missing them.
+        if dcfg.bins is None:
+            log.warning(
+                "config.json has no event_time_bins; falling back to "
+                "equal-width bins. Predictions may not match training.")
+            dataset.get_bins()
 
     if not is_classical:
         dataset.apply_normalisation()

@@ -44,6 +44,8 @@ def to_json_safe(obj: Dict) -> Dict:
         return obj.item()  # converts np.float32 → float
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
+    elif isinstance(obj, torch.Tensor):
+        return obj.detach.cpu().tolist()
     else:
         return obj
 

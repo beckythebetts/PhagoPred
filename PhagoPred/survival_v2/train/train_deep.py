@@ -1,6 +1,7 @@
 from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
+from copy import deepcopy
 
 import torch
 
@@ -109,10 +110,14 @@ def train_deep(
     device: str,
     verbose: bool = True,
     validate_every: int = 1,
-) -> dict:
+) -> tuple[dict, dict]:
     """Train a pytrch binary/survival model"""
     model = model.to(device)
     history = []
+
+    best_val = None
+    best_model = deepcopy(model.state_dict())
+
     progress_bar = tqdm(range(1, num_epochs +
                               1), desc="Training") if verbose else range(
                                   1, num_epochs + 1)
@@ -126,6 +131,12 @@ def train_deep(
                                     loss_cfg,
                                     optimiser,
                                     training=False)
+            val = validate_losses['total']
+            if best_val is None:
+                best_val = val
+            if val < best_val:
+                best_val = val
+                best_model = deepcopy(model.state_dict())
 
         log.info(
             f'Epoch {epoch_idx}\n\ttrain losses: {train_losses}\n\tvalidate losses: {validate_losses}'
@@ -152,4 +163,9 @@ def train_deep(
                 int(train_losses.get('min_events_per_batch', 0)),
             })
 
-    return history
+    # Restore the best-validation weights into the in-place model so the
+    # caller's `model` object matches `best_model` (and the saved state dict),
+    # even when it is reused for evaluation without reloading from disk.
+    model.load_state_dict(best_model)
+
+    return history, best_model

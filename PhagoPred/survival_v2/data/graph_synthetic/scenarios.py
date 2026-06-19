@@ -9,7 +9,7 @@ from . import base_funcs, noise_funcs
 import h5py
 
 from .generate_datasets import generate_dataset, calibrate_hazard, load_hazard_func, estimate_variances
-from .predictability import compute_h_var
+# from .predictability import compute_h_var  # unused; compute_h_var is currently commented out in predictability.py
 from .graph import Feature, CausalGraph
 from .rules import (
     Rule,
@@ -68,9 +68,9 @@ class ScenarioCfg:
     missingness_cfg: MissingnessCfg = MissingnessCfg()
 
     target_death_fraction: float = 0.5
-    train_num_cells: int = 1000
+    train_num_cells: int = 5000
     val_num_cells: int = 1000
-    cal_num_cells: int = 200
+    cal_num_cells: int = 1000
     num_frames: int = 500
 
     hazard_calibration_func: callable | None = None
@@ -343,26 +343,26 @@ ALL_CFGS: list[ScenarioCfg] = [
                 noise_cfg=_low_noise,
                 missingness_cfg=_low_missingness),
     # Learning-curve ablation: linear rules at varying training set sizes
-    ScenarioCfg('base_linear_n100',
-                rules=_linear,
-                noise_cfg=_low_noise,
-                missingness_cfg=_low_missingness,
-                train_num_cells=100),
-    ScenarioCfg('base_linear_n500',
-                rules=_linear,
-                noise_cfg=_low_noise,
-                missingness_cfg=_low_missingness,
-                train_num_cells=500),
-    ScenarioCfg('base_linear_n1000',
-                rules=_linear,
-                noise_cfg=_low_noise,
-                missingness_cfg=_low_missingness,
-                train_num_cells=1000),
-    ScenarioCfg('base_linear_n5000',
-                rules=_linear,
-                noise_cfg=_low_noise,
-                missingness_cfg=_low_missingness,
-                train_num_cells=5000),
+    # ScenarioCfg('base_linear_n100',
+    #             rules=_linear,
+    #             noise_cfg=_low_noise,
+    #             missingness_cfg=_low_missingness,
+    #             train_num_cells=100),
+    # ScenarioCfg('base_linear_n500',
+    #             rules=_linear,
+    #             noise_cfg=_low_noise,
+    #             missingness_cfg=_low_missingness,
+    #             train_num_cells=500),
+    # ScenarioCfg('base_linear_n1000',
+    #             rules=_linear,
+    #             noise_cfg=_low_noise,
+    #             missingness_cfg=_low_missingness,
+    #             train_num_cells=1000),
+    # ScenarioCfg('base_linear_n5000',
+    #             rules=_linear,
+    #             noise_cfg=_low_noise,
+    #             missingness_cfg=_low_missingness,
+    #             train_num_cells=5000),
     ScenarioCfg('base_chain',
                 rules=_chain,
                 noise_cfg=_low_noise,
