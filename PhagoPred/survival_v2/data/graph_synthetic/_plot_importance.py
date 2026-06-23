@@ -1,17 +1,22 @@
-"""Quick visualisation: run generate_sample_with_ground_truth on a few cells
-and plot per-sample temporal-feature importance heatmaps."""
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 from PhagoPred.survival_v2.data.graph_synthetic.scenarios import ALL_CFGS
-from PhagoPred.survival_v2.data.graph_synthetic.feature_importance import (
-    generate_sample_with_ground_truth)
+from PhagoPred.survival_v2.data.graph_synthetic.analytic_estimates import (
+    generate_sample_with_feature_importance,
+    generate_sample_with_feature_importance_batched,
+    sampleWithImportances,
+    importances,
+)
+
+# def plot_importances_on_ax(results: sampleWithImportances, ax: plt.Axes, type: Li) -> None:
 
 
 def main():
-    np.random.seed(1)
+    # np.random.seed(1)
     cfg = ALL_CFGS[
         0]  # base_linear: A(lag25)+B(lag50)+C(lag100) -> Hazard; D inert
     graph = cfg.graph
@@ -26,22 +31,23 @@ def main():
     hz = cfg.hazard_calibration_func
     print(f"using delta={hz.delta:.3f}")
 
-    n_samples = 4
-    results = []
+    n_samples = 10
+    results: list[sampleWithImportances] = []
     while len(results) < n_samples:
-        r = generate_sample_with_ground_truth(
+        print(f'Attempting to genertae sample {len(results)+1}...')
+        r = generate_sample_with_feature_importance_batched(
             graph,
             hz,
             horizon=horizon,
             max_sequence_length=max_len,
             min_sequence_length=120,
-            samples_per_node=8,
+            num_permutations=500,
             hazard_bins=bins,
         )
         if r is not None:
             results.append(r)
 
-    feature_names = results[0]['feature_names']
+    feature_names = list(results[0].base_signals.keys())
     n_feats = len(feature_names)
 
     fig, axes = plt.subplots(n_samples,
@@ -49,24 +55,32 @@ def main():
                              figsize=(11, 2.4 * n_samples),
                              squeeze=False)
     for ax, r in zip(axes[:, 0], results):
-        prim = r['primary_quantity']
-        imp = r['importance_scalar'][prim]  # (n_feats, lf)
-        lf = r['landmark_frame']
-        vmax = np.quantile(imp, 0.99) or imp.max() or 1.0
-        im = ax.imshow(imp,
-                       aspect='auto',
-                       origin='lower',
-                       cmap='magma',
-                       extent=[0, lf, -0.5, n_feats - 0.5],
-                       vmin=0.0,
-                       vmax=vmax)
+        # cdf_imp = r.sample_importances.cdf[
+        #     :,
+        #     -1:,
+        # ].squeeze()  #[features, horizon time steps, lf times teps]
+        imp = r.sample_importances
+        lf = r.landmark_frame
+        # prim = r['primary_quantity']
+        # imp = r['importance_scalar'][prim]  # (n_feats, lf)
+        # lf = r['landmark_frame']
+        # vmax = np.quantile(imp, 0.99) or imp.max() or 1.0
+        im = ax.imshow(
+            imp,
+            aspect='auto',
+            origin='lower',
+            cmap='magma',
+            extent=[0, lf, -0.5, n_feats - 0.5],
+            #    vmin=0.0,
+            #    vmax=vmax
+        )
         ax.set_yticks(range(n_feats))
         ax.set_yticklabels(feature_names)
         ax.set_xlabel('time step (frame)')
-        df = r['death_frame']
+        df = r.death_frame
         ax.set_title(
-            f"lf={lf}  death={'censored' if df is None else int(df)}  "
-            f"(importance on {prim}, mean over bins)",
+            f"lf={lf}  death={'censored' if df is None else int(df)}  ",
+            # f"(importance on {prim}, mean over bins)",
             fontsize=9)
         ax.axvline(lf, color='cyan', ls='--', lw=1)
         fig.colorbar(im, ax=ax, fraction=0.025, pad=0.01)

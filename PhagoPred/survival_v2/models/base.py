@@ -57,7 +57,8 @@ class SurvivalModel(nn.Module, ABC):
 
     def set_calibration(
         self,
-        result: TemperatureScalingResult | VectorScalingResult | PlattScalingResult,
+        result: TemperatureScalingResult | VectorScalingResult
+        | PlattScalingResult,
     ) -> None:
         self.calibration = result
 
@@ -72,8 +73,12 @@ class SurvivalModel(nn.Module, ABC):
         if isinstance(self.calibration, TemperatureScalingResult):
             return outputs / self.calibration.T
         if isinstance(self.calibration, VectorScalingResult):
-            w = torch.tensor(self.calibration.w, dtype=outputs.dtype, device=outputs.device)
-            b = torch.tensor(self.calibration.b, dtype=outputs.dtype, device=outputs.device)
+            w = torch.tensor(self.calibration.w,
+                             dtype=outputs.dtype,
+                             device=outputs.device)
+            b = torch.tensor(self.calibration.b,
+                             dtype=outputs.dtype,
+                             device=outputs.device)
             return outputs * w + b
         if isinstance(self.calibration, PlattScalingResult):
             return outputs * self.calibration.a + self.calibration.b
@@ -100,11 +105,6 @@ class SurvivalModel(nn.Module, ABC):
         """
         pass
 
-    # def predict_pmf(self, outputs: torch.Tensor) -> torch.Tensor:
-    #     """Convert raw outputs to probability mass function."""
-    #     assert outputs.shape[
-    #         1] == self.num_bins, "Output shape does not match num_bins"
-    #     return torch.nn.functional.softmax(outputs, dim=1)
     def predict_pmf(self, outputs: torch.Tensor) -> torch.Tensor:
         """Compute hazard for each time bin, then cacluate pmf from hazards"""
         outputs = self._calibrate_logits(outputs)
@@ -136,6 +136,27 @@ class SurvivalModel(nn.Module, ABC):
         pmf = self.predict_pmf(outputs)
         time_bins = torch.arange(self.num_bins, device=pmf.device).float()
         return (pmf * time_bins).sum(dim=1)
+
+    def predict_restricted_survival_time(
+            self, outputs: torch.Tensor,
+            time_bins: np.ndarray) -> torch.Tensor:
+        """Predict the restricted mean survival time (RMST) up to the horizon.
+
+        RMST = area under the survival step-function from 0 to tau, where tau
+        is the last element of time_bins.  Each interval [t_i, t_{i+1}]
+        contributes S(t_i) * (t_{i+1} - t_i).
+        """
+        survival = self.predict_survival(outputs)  # (batch, num_bins)
+
+        t = torch.tensor(time_bins,
+                         dtype=survival.dtype,
+                         device=survival.device)
+        # widths of each interval: last bin ends at tau = time_bins[-1]
+        widths = torch.diff(t,
+                            append=t[-1:] +
+                            (t[-1] - t[-2] if len(t) > 1 else t[-1]))
+        # widths shape: (num_bins,) — broadcast over batch
+        return (survival * widths).sum(dim=1)
 
     def predict_binary(self, outputs: torch.Tensor) -> torch.Tensor:
         """Predict binary outcome (event within time horizon) from raw outputs.

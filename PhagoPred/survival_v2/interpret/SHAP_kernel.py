@@ -67,6 +67,7 @@ class MaskWrapperBase:
         target_bin: Optional[int] = None,
         mask_value: float = 0.0,
         device: str = "cpu",
+        time_bins: Optional[np.ndarray] = None,
     ):
         self.model = model
         self.model.eval()
@@ -76,6 +77,7 @@ class MaskWrapperBase:
         self.output_type = output_type
         self.target_bin = target_bin
         self.mask_value = mask_value
+        self.time_bins = time_bins
 
     def __call__(self, masks: np.ndarray) -> np.ndarray:
         """Apply masks and return model predictions."""
@@ -105,6 +107,9 @@ class MaskWrapperBase:
     def _extract_output(self, logits: torch.Tensor) -> torch.Tensor:
         """Extract the appropriate scalar output from model logits."""
         if self.output_type == "expected_time":
+            if self.time_bins is not None:
+                return self.model.predict_restricted_survival_time(
+                    logits, self.time_bins)
             return self.model.predict_expected_time(logits)
         elif self.output_type == "binary":
             return self.model.predict_binary(logits)
@@ -271,6 +276,7 @@ class KernelSHAP:
         show_progress: bool = True,
         importance_type: Literal["temporal", "feature",
                                  "temporal_feature"] = "temporal",
+        time_bins: Optional[np.ndarray] = None,
     ) -> tuple[np.ndarray, np.ndarray, float]:
         """Compute SHAP values for either temporal segments, features, or both.
         Args:
@@ -302,6 +308,7 @@ class KernelSHAP:
             target_bin=target_bin,
             mask_value=mask_value,
             device=self.device,
+            time_bins=time_bins,
         )
 
         if importance_type == "feature":
@@ -351,6 +358,7 @@ class KernelSHAP:
         compute_feature: bool = True,
         compute_temporal_feature: bool = True,
         show_progress: bool = True,
+        time_bins: Optional[np.ndarray] = None,
     ) -> KernelSHAPResults:
         """
         Full SHAP analysis for a single sample.
@@ -370,6 +378,9 @@ class KernelSHAP:
             compute_feature: Whether to compute feature importance
             compute_temporal_feature: Whether to compute temporal-feature importance
             show_progress: Whether to show progress
+            time_bins: Actual time values for each bin, used to compute RMST
+                when output_type="expected_time". If None, falls back to
+                predict_expected_time.
 
         Returns:
             KernelSHAPResults with all computed values
@@ -381,7 +392,7 @@ class KernelSHAP:
                 print("Computing temporal importance...")
             temporal_shap, temporal_baseline, boundaries = self.compute_importance(
                 x, lengths, num_segments, nsamples_temporal, output_type,
-                target_bin, mask_value, show_progress, 'temporal')
+                target_bin, mask_value, show_progress, 'temporal', time_bins)
             results.temporal_shap_values = temporal_shap.reshape(1, -1)
             results.temporal_importance = np.abs(temporal_shap)
             results.segment_boundaries = boundaries
@@ -392,7 +403,7 @@ class KernelSHAP:
                 print("Computing feature importance...")
             feature_shap, feature_baseline, _ = self.compute_importance(
                 x, lengths, num_segments, nsamples_feature, output_type,
-                target_bin, mask_value, show_progress, 'feature')
+                target_bin, mask_value, show_progress, 'feature', time_bins)
             results.feature_shap_values = feature_shap.reshape(1, -1)
             results.feature_importance = np.abs(feature_shap)
             results.feature_baseline = feature_baseline
@@ -409,7 +420,7 @@ class KernelSHAP:
             temporal_feature_shap, temporal_feature_baseline, boundaries = self.compute_importance(
                 x, lengths, num_segments, nsamples_temporal_feature,
                 output_type, target_bin, mask_value, show_progress,
-                'temporal_feature')
+                'temporal_feature', time_bins)
             temporal_feature_shap_2d = temporal_feature_shap.reshape(
                 num_segments, -1)
             results.temporal_feature_shap_values = temporal_feature_shap_2d.reshape(
@@ -437,6 +448,7 @@ class KernelSHAP:
         compute_feature: bool = True,
         compute_temporal_feature: bool = True,
         max_len: int = 1000,
+        time_bins: Optional[np.ndarray] = None,
     ) -> KernelSHAPResults:
         """
         Analyse multiple samples and aggregate results.
@@ -457,6 +469,8 @@ class KernelSHAP:
             compute_feature: Whether to compute feature importance
             compute_temporal_feature: Whether to compute temporal-feature importance
             max_len: Maximum sequence length
+            time_bins: Actual time values for each bin, used to compute RMST
+                when output_type="expected_time".
 
         Returns:
             KernelSHAPResults with aggregated importance values
@@ -501,6 +515,7 @@ class KernelSHAP:
                 compute_feature=compute_feature,
                 compute_temporal_feature=compute_temporal_feature,
                 show_progress=False,
+                time_bins=time_bins,
             )
 
             if compute_temporal:
