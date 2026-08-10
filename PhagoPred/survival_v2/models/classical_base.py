@@ -15,9 +15,11 @@ from PhagoPred.survival_v2.probability_calib import (
     TemperatureScalingResult,
     VectorScalingResult,
     PlattScalingResult,
+    IsotonicScalingResult,
     apply_temperature_scaling,
     apply_vector_scaling,
     apply_platt_scaling,
+    apply_isotonic_scaling,
 )
 
 
@@ -61,11 +63,12 @@ class ClassicalSurvivalModel(ABC):
         self._is_fitted = False
         self.model = None
         self.test_data = None
-        self.calibration: TemperatureScalingResult | VectorScalingResult | PlattScalingResult | None = None
+        self.calibration: TemperatureScalingResult | VectorScalingResult | PlattScalingResult | IsotonicScalingResult | None = None
 
     def set_calibration(
         self,
-        result: TemperatureScalingResult | VectorScalingResult | PlattScalingResult,
+        result: TemperatureScalingResult | VectorScalingResult
+        | PlattScalingResult | IsotonicScalingResult,
     ) -> None:
         self.calibration = result
 
@@ -105,10 +108,16 @@ class ClassicalSurvivalModel(ABC):
         if self.binary:
             predictions = predictions[:, 0]
             if self.calibration is not None:
-                logits = np.log(
-                    np.clip(predictions, 1e-8, 1.0) /
-                    np.clip(1.0 - predictions, 1e-8, 1.0))
-                predictions = apply_platt_scaling(logits, self.calibration)
+                if isinstance(self.calibration, IsotonicScalingResult):
+                    # Isotonic maps probability -> probability directly.
+                    predictions = apply_isotonic_scaling(predictions,
+                                                         self.calibration,
+                                                         from_logits=False)
+                else:
+                    logits = np.log(
+                        np.clip(predictions, 1e-8, 1.0) /
+                        np.clip(1.0 - predictions, 1e-8, 1.0))
+                    predictions = apply_platt_scaling(logits, self.calibration)
         else:
             if self.calibration is not None:
                 log_pmf = np.log(np.clip(predictions, 1e-8, 1.0))

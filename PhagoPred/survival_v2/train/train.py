@@ -64,8 +64,8 @@ def train(
         torch.save(
             {
                 'model_state_dict': best_model,
-                'normalization_means': train_loader.dataset.means,
-                'normalization_stds': train_loader.dataset.stds,
+                'normalisation_means': train_loader.dataset.means,
+                'normalisation_stds': train_loader.dataset.stds,
             }, save_dir / 'model.pkl')
 
         history = to_json_safe(history)

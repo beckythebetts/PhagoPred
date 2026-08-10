@@ -191,21 +191,22 @@ EXPERIMENT_SUITES = {
             loss=LOSSES['NLL + Ranking'],
             dataset=[
                 DATASETS['Graph Linear'],
-                # DATASETS['Graph Chain'],
-                # DATASETS['Graph Multiplicative'],
+                DATASETS['Graph Chain'],
+                DATASETS['Graph Multiplicative'],
                 # DATASETS['Graph Resetting Accumulation'],
                 # DATASETS['Graph Ratio'],
+                DATASETS['Graph Autocorr'],
             ],
             training=TRAINING['Standard'],
             feature_combo=['A', 'B', 'C', 'D'],
-            calibration=CALIBRATION['Vector Scaling'])),
+            calibration=CALIBRATION['Temperature Scaling'])),
     'Graph Binary':
     generate_experiment_grid(
         ExperimentCfg(
             model=[
                 MODELS['CNN Medium'],
                 MODELS['LSTM Medium'],
-                MODELS['Random Forest'],
+                # MODELS['Random Forest'],
             ],
             attention=ATTENTION['Last'],
             loss=LOSSES['Weighted BCE'],
@@ -213,12 +214,16 @@ EXPERIMENT_SUITES = {
                 DATASETS['Binary Graph Linear'],
                 DATASETS['Binary Graph Chain'],
                 DATASETS['Binary Graph Multiplicative'],
-                # DATASETS['Binary Graph Resetting Accumulation'],
-                DATASETS['Binary Graph Ratio'],
+                # # DATASETS['Binary Graph Resetting Accumulation'],
+                # DATASETS['Binary Graph Ratio'],
+                # DATASETS['Binary Graph Autocorr'],
             ],
             training=TRAINING['Standard'],
             feature_combo=['A', 'B', 'C', 'D'],
-            calibration=[CALIBRATION['Platt Scaling']])),
+            calibration=[
+                CALIBRATION['Platt Scaling'],
+                # CALIBRATION['Isotonic Scaling'],
+            ])),
     'Graph Noise Survival':
     generate_experiment_grid(
         ExperimentCfg(
@@ -242,8 +247,8 @@ EXPERIMENT_SUITES = {
         ExperimentCfg(
             model=[
                 MODELS['CNN Medium'],
-                MODELS['LSTM Medium'],
-                MODELS['Random Forest'],
+                # MODELS['LSTM Medium'],
+                # MODELS['Random Forest'],
             ],
             attention=ATTENTION['Last'],
             loss=LOSSES['Weighted BCE'],
@@ -260,7 +265,7 @@ EXPERIMENT_SUITES = {
         ExperimentCfg(
             model=[
                 MODELS['CNN Medium'],
-                MODELS['LSTM Medium'],
+                # MODELS['LSTM Medium'],
                 # MODELS['Random Forest'],
             ],
             attention=ATTENTION['Last'],
@@ -281,6 +286,47 @@ EXPERIMENT_SUITES = {
                 CALIBRATION['Vector Scaling'],
                 CALIBRATION['Temperature Scaling'],
                 CALIBRATION['None'],
+            ])),
+    # Compare scenario types (linear vs linear chain vs nonlinear chain),
+    # all at high autocorrelation.
+    'Graph Scenario Types Binary':
+    generate_experiment_grid(
+        ExperimentCfg(
+            model=[
+                MODELS['CNN Medium'],
+                MODELS['LSTM Medium'],
+            ],
+            attention=ATTENTION['Last'],
+            loss=LOSSES['Weighted BCE'],
+            dataset=[
+                DATASETS['Binary Graph Linear High AR'],
+                DATASETS['Binary Graph Linear Chain High AR'],
+                DATASETS['Binary Graph Nonlinear Chain High AR'],
+            ],
+            training=TRAINING['Standard'],
+            feature_combo=['A', 'B', 'C', 'D'],
+            calibration=[
+                CALIBRATION['Platt Scaling'],
+            ])),
+    # Compare nonlinear chain scenario at different autocorrelation levels.
+    'Graph Nonlinear Chain AR Binary':
+    generate_experiment_grid(
+        ExperimentCfg(
+            model=[
+                MODELS['CNN Medium'],
+                MODELS['LSTM Medium'],
+            ],
+            attention=ATTENTION['Last'],
+            loss=LOSSES['Weighted BCE'],
+            dataset=[
+                DATASETS['Binary Graph Nonlinear Chain Low AR'],
+                DATASETS['Binary Graph Nonlinear Chain Med AR'],
+                DATASETS['Binary Graph Nonlinear Chain High AR'],
+            ],
+            training=TRAINING['Standard'],
+            feature_combo=['A', 'B', 'C', 'D'],
+            calibration=[
+                CALIBRATION['Platt Scaling'],
             ])),
 }
 # EXPERIMENT_SUITES = {

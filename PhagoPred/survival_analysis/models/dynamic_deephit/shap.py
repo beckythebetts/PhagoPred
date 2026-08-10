@@ -10,6 +10,7 @@ from PhagoPred.survival_analysis.data.dataset import CellDataset
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+
 def shap_deep_hit(model, X_background, X_test, num_bins=None, device='cpu'):
     """
     Compute SHAP values for a DeepHit model across multiple time bins.
@@ -48,16 +49,21 @@ def shap_deep_hit(model, X_background, X_test, num_bins=None, device='cpu'):
 
     return shap_values_all
 
+
 def plot_shap_heatmap(shap_values_all, feature_names=None):
     """
     Plot SHAP values as a heatmap (time bins x features)
     shap_values_all: list of [num_test, num_features], one per time bin
     """
     # Average across samples
-    shap_array = np.mean(np.stack(shap_values_all, axis=0), axis=1)  # [num_bins, num_features]
+    shap_array = np.mean(np.stack(shap_values_all, axis=0),
+                         axis=1)  # [num_bins, num_features]
 
-    plt.figure(figsize=(12,6))
-    plt.imshow(shap_array.T, aspect='auto', cmap='bwr', interpolation='nearest')
+    plt.figure(figsize=(12, 6))
+    plt.imshow(shap_array.T,
+               aspect='auto',
+               cmap='bwr',
+               interpolation='nearest')
     plt.colorbar(label='Mean SHAP value')
     plt.xlabel('Time bin')
     plt.ylabel('Feature')
@@ -66,33 +72,36 @@ def plot_shap_heatmap(shap_values_all, feature_names=None):
     plt.title('SHAP values across time bins')
     plt.show()
 
+
 if __name__ == '__main__':
-    model_dir = Path('/home/ubuntu/PhagoPred/PhagoPred/survival_analysis/models/dynamic_deephit/test_run')
-    hdf5_paths = [Path('PhagoPred')/'Datasets'/'synthetic.h5']
-    
+    model_dir = Path(
+        '/home/ubuntu/PhagoPred/PhagoPred/survival_analysis/models/dynamic_deephit/test_run'
+    )
+    hdf5_paths = [Path('PhagoPred') / 'Datasets' / 'synthetic.h5']
+
     with open(model_dir / 'model_params.json', 'r') as f:
         model_params = json.load(f)
 
     model_ = model.DynamicDeepHit
     features = model_params['features']
     model_ = model_(**model_params)
-    model_.load_state_dict(torch.load(model_dir / 'model.pth', map_location=device))
-    
-    normalisation_means = model_params['normalization_means']
-    normalization_stds = model_params['normalization_stds']
+    model_.load_state_dict(
+        torch.load(model_dir / 'model.pth', map_location=device))
+
+    normalisation_means = model_params['normalisation_means']
+    normalisation_stds = model_params['normalisation_stds']
     dataset = CellDataset(
         hdf5_paths=hdf5_paths,
         features=features,
         means=np.array(normalisation_means),
-        stds=np.array(normalization_stds),
+        stds=np.array(normalisation_stds),
         num_bins=model_params['output_size'],
         event_time_bins=np.array(model_params['event_time_bins']),
         uncensored_only=False,
         min_length=100,
         max_time_to_death=200,
     )
-    
-    
+
     shap_values_all = shap_deep_hit(model_, )
-    feature_names = ['age','sex','blood_pressure','cholesterol']  # example
+    feature_names = ['age', 'sex', 'blood_pressure', 'cholesterol']  # example
     plot_shap_heatmap(shap_values_all, feature_names)

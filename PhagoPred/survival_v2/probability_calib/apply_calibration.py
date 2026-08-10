@@ -32,6 +32,26 @@ class PlattScalingResult(CalibrationResult):
     b: float
 
 
+@dataclass
+class IsotonicScalingResult(CalibrationResult):
+    """Fitted monotone (non-parametric) probability map for binary output.
+
+    Stored as the interpolation knots of an sklearn IsotonicRegression so the
+    map can be applied (and reconstructed from config) without re-fitting or
+    importing sklearn at inference time.
+    """
+    x_thresholds: np.ndarray  # (K,) ascending raw probabilities (interp knots)
+    y_thresholds: np.ndarray  # (K,) calibrated probabilities at each knot
+
+    def apply(self, probs: np.ndarray) -> np.ndarray:
+        """Map raw probabilities to calibrated ones by piecewise-linear interp.
+
+        Reproduces ``IsotonicRegression.predict`` with ``out_of_bounds='clip'``:
+        np.interp clamps to the endpoint values outside the fitted range.
+        """
+        return np.interp(probs, self.x_thresholds, self.y_thresholds)
+
+
 #===SURVIVAL===
 
 
@@ -210,8 +230,8 @@ def fit_platt_scaling(
         from_logits: if False, converts probabilities to log-odds first
     """
     if not from_logits:
-        logits = np.log(np.clip(logits, 1e-8, 1.0) /
-                        np.clip(1 - logits, 1e-8, 1.0))
+        logits = np.log(
+            np.clip(logits, 1e-8, 1.0) / np.clip(1 - logits, 1e-8, 1.0))
     logits_t = torch.tensor(logits, dtype=torch.float32).squeeze()
     labels_t = torch.tensor(labels, dtype=torch.float32).squeeze()
 
@@ -240,3 +260,50 @@ def apply_platt_scaling(
 ) -> np.ndarray:
     """Return calibrated probability from logits using fitted a and b."""
     return 1.0 / (1.0 + np.exp(-(result.a * logits + result.b)))
+
+
+def fit_isotonic_scaling(
+    logits: np.ndarray,
+    labels: np.ndarray,
+    from_logits: bool = True,
+) -> IsotonicScalingResult:
+    """Fit isotonic (monotone, non-parametric) calibration for binary output.
+
+    Unlike Platt scaling (a 2-parameter affine on the logit), isotonic
+    regression fits a free monotone step function from the model's score to the
+    empirical event rate. It does not compress the tails the way a global affine
+    does, so it can correct systematic under-/over-confidence at the extremes —
+    at the cost of needing more calibration data to stay stable.
+
+    Args:
+        logits: (N,) raw pre-sigmoid model outputs (deep models), or
+                predicted probabilities (classical models, set from_logits=False)
+        labels: (N,) binary labels (0 or 1)
+        from_logits: if True, ``logits`` are squashed with a sigmoid to [0, 1]
+                     before fitting; if False they are already probabilities.
+                     (Isotonic is monotone-invariant, so this only sets the
+                     domain the knots are stored in.)
+    """
+    from sklearn.isotonic import IsotonicRegression
+
+    scores = np.asarray(logits, dtype=np.float64).squeeze()
+    labels = np.asarray(labels, dtype=np.float64).squeeze()
+    probs = 1.0 / (1.0 + np.exp(-scores)) if from_logits else scores
+
+    iso = IsotonicRegression(out_of_bounds='clip', y_min=0.0, y_max=1.0)
+    iso.fit(probs, labels)
+    return IsotonicScalingResult(
+        x_thresholds=np.asarray(iso.X_thresholds_, dtype=np.float64),
+        y_thresholds=np.asarray(iso.y_thresholds_, dtype=np.float64),
+    )
+
+
+def apply_isotonic_scaling(
+    logits: np.ndarray,
+    result: IsotonicScalingResult,
+    from_logits: bool = True,
+) -> np.ndarray:
+    """Return calibrated probability from logits/probs using fitted isotonic map."""
+    scores = np.asarray(logits, dtype=np.float64)
+    probs = 1.0 / (1.0 + np.exp(-scores)) if from_logits else scores
+    return result.apply(probs)

@@ -287,10 +287,13 @@ def _plt_survival_1_var(
         axs[i].set_title(f'{var_name} = {var_val.name}',
                          fontsize=14,
                          fontweight='bold')
+        axs[i].set_xlabel('Prediction frames')
+        axs[i].set_ylabel('Squared error')
+        bins = experiments[0].experiemnt_cfg.dataset.bins[1:]
         if gathered is None:
             continue
         has_data = True
-        _plot_vars_on_ax(axs[i], *gathered)
+        _plot_vars_on_ax(axs[i], *gathered, y_vals=bins)
 
     if not has_data:
         plt.close(fig)
@@ -333,11 +336,14 @@ def _plt_survival_2_var(
                 fontsize=12,
                 fontweight='bold',
             )
+            ax.set_xlabel('Prediction frames')
+            ax.set_ylabel('Squared error')
             gathered = _gather_metric(experiments, metric)
+            bins = experiments[0].experiemnt_cfg.dataset.bins[1:]
             if gathered is None:
                 continue
             has_data = True
-            _plot_vars_on_ax(ax, *gathered)
+            _plot_vars_on_ax(ax, *gathered, y_vals=bins)
 
     if not has_data:
         plt.close(fig)
@@ -350,9 +356,11 @@ def _plt_survival_2_var(
     return fig
 
 
-def _plot_vars_on_ax(ax: plt.Axes, true: list[np.ndarray],
+def _plot_vars_on_ax(ax: plt.Axes,
+                     true: list[np.ndarray],
                      unobserved: list[np.ndarray],
-                     mse: list[np.ndarray]) -> None:
+                     mse: list[np.ndarray],
+                     y_vals: np.ndarray | None = None) -> None:
 
     def _get_mean_std(x: list[np.ndarray]):
         return np.mean(x, axis=0), np.std(x, axis=0)
@@ -361,14 +369,14 @@ def _plot_vars_on_ax(ax: plt.Axes, true: list[np.ndarray],
     unobserved_mean, unobserved_std = _get_mean_std(unobserved)
     mean_mse, unobserved_mse = _get_mean_std(mse)
 
-    num_bins = len(true_mean)
-
-    # log.info('True mean shape: ')
+    if y_vals is None:
+        # num_bins = len(true_mean)
+        y_vals = np.arange(len(true_mean))
 
     def _plot(means: np.ndarray, stds: np.ndarray, colour: tuple | str,
               linestyle: str, label: str):
         ax.plot(
-            np.arange(num_bins),
+            y_vals,
             means,
             color=colour,
             marker=' ',
@@ -376,7 +384,7 @@ def _plot_vars_on_ax(ax: plt.Axes, true: list[np.ndarray],
             linestyle=linestyle,
             label=label)
         ax.fill_between(
-            np.arange(num_bins),
+            y_vals,
             means - stds,
             means + stds,
             color=colour,

@@ -36,7 +36,8 @@ except:
 MASK_RCNN_MODEL = Path(
     "PhagoPred") / 'detectron_segmentation' / 'models' / 'bio_20x_thp1'
 CELLPOSE_MODEL = Path(
-    "PhagoPred") / 'cellpose_segmentation' / 'Models' / 'bio_20x_thp1'
+    '/home/ubuntu/PhagoPred/PhagoPred/cellpose_segmentation/Models/bio_20x_thp1_clahe_withrescale'
+)
 UNET_MODEL = Path("PhagoPred") / 'unet_segmentation' / 'models' / '20x_flir_8'
 TRAINING_DATA = Path("PhagoPred") / 'segmentation' / 'models' / '20x_flir_8'
 CLASSES = {'phase': 'Amoeba', 'epi': 'Yeast'}
@@ -53,7 +54,7 @@ THRESHOLD = 250
 MAXIMUM_DISTANCE_THRESHOLD = 60
 FRAME_MEMORY = 3
 CLEAN_TRACKS = True
-MINIMUM_TRACK_LENGTH = 5
+MINIMUM_TRACK_LENGTH = 50
 
 VIEW_TRACKS = True  # Save labelled tracked images
 NUM_FRAMES_TO_VIEW = 50  # Set as None to view all (slow)

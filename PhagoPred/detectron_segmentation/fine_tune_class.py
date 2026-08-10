@@ -59,6 +59,7 @@ from detectron2.modeling.roi_heads import ROI_HEADS_REGISTRY
 
 from PhagoPred.utils import tools, mask_funcs
 from PhagoPred.detectron_segmentation import train
+from PhagoPred.detectron_segmentation.config import add_validation_config
 from PhagoPred import SETTINGS
 
 
@@ -565,6 +566,7 @@ def fine_tune(directory=SETTINGS.MASK_RCNN_MODEL):
     train_metadata = MetadataCatalog.get("my_dataset_train")
     
     cfg = get_cfg()
+    add_validation_config(cfg)  # config.yaml carries a VALIDATION node
     cfg.merge_from_file(str(directory / 'Model' / 'config.yaml'))
     cfg.OUTPUT_DIR = str(directory / 'Model')
     cfg.MODEL.WEIGHTS = str(directory / 'Model' / 'model_final.pth')

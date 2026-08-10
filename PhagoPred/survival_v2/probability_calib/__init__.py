@@ -3,12 +3,15 @@ from .apply_calibration import (
     TemperatureScalingResult,
     VectorScalingResult,
     PlattScalingResult,
+    IsotonicScalingResult,
     fit_temperature_scaling,
     fit_vector_scaling,
     fit_platt_scaling,
+    fit_isotonic_scaling,
     apply_temperature_scaling,
     apply_vector_scaling,
     apply_platt_scaling,
+    apply_isotonic_scaling,
 )
 
 __all__ = [
@@ -16,10 +19,13 @@ __all__ = [
     'TemperatureScalingResult',
     'VectorScalingResult',
     'PlattScalingResult',
+    'IsotonicScalingResult',
     'fit_temperature_scaling',
     'fit_vector_scaling',
     'fit_platt_scaling',
+    'fit_isotonic_scaling',
     'apply_temperature_scaling',
     'apply_vector_scaling',
     'apply_platt_scaling',
+    'apply_isotonic_scaling',
 ]

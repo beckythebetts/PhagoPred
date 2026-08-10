@@ -90,33 +90,161 @@ def calibrate_hazard(
     n_calib: int = 200,
     max_iter: int = 50,
     tol: float = 0.02,
+    step_init: float = 10.0,
+    step_growth: float = 2.0,
+    step_max: float = 1e6,
 ) -> OffsetSigmoid:
-    """Iteratively find a scalar offset when applying sigmoid to hazard rates
-    so that approximately target_death_fraction of cells die within their window."""
-    offset = 0.0
-    step = 10.0
-    for i in range(max_iter):
-        observed = _observe_death_fraction(
-            graph,
-            start_frames,
-            end_frames,
-            offset=offset,
-            n_samples=n_calib,
-        )
-        print(f"  Calibration iter {i + 1}: offset={offset:.4f}, "
-              f"observed={observed:.3f}, target={target_death_fraction:.3f}")
-        if abs(observed - target_death_fraction) <= tol:
-            break
-        if observed < 1e-6:
-            offset -= step
-        elif observed >= 1 - 1e-6:
-            offset += step
-        else:
-            offset = offset + math.log(
-                1 / (1 - (1 - target_death_fraction)**(1 / num_frames)) -
-                1) - math.log(1 / (1 - (1 - observed)**(1 / num_frames)) - 1)
+    """Find a scalar sigmoid offset so that ~target_death_fraction of cells die
+    within their window, via geometric bracketing then bisection.
 
-    return OffsetSigmoid(delta=offset)
+    ``observed(offset)`` is monotone *decreasing* (larger offset -> smaller
+    hazard -> fewer deaths).  The previous analytical log-odds update assumed a
+    constant per-frame hazard, which badly underestimates the required offset
+    when the hazard signal is spiky (the true response is nearly flat), so it
+    crawled.  Instead we bracket the target by growing the search step
+    geometrically, then bisect the bracket.  This is robust to a flat response
+    and to the Monte-Carlo noise in ``observed``, and if the target is
+    unreachable (a floor above/below it) the bracketing phase says so rather
+    than iterating forever.  The offset giving the closest observed death
+    fraction is tracked and returned, so a sensible result comes back even if
+    ``tol`` is never met exactly."""
+    iters = 0
+    best_offset = 0.0
+    best_err = float('inf')
+
+    def evaluate(offset: float, phase: str) -> float:
+        nonlocal iters, best_offset, best_err
+        obs = _observe_death_fraction(graph,
+                                      start_frames,
+                                      end_frames,
+                                      offset=offset,
+                                      n_samples=n_calib)
+        err = abs(obs - target_death_fraction)
+        if err < best_err:
+            best_err = err
+            best_offset = offset
+        iters += 1
+        print(f"  Calibration iter {iters} [{phase}]: offset={offset:.4f}, "
+              f"observed={obs:.3f}, target={target_death_fraction:.3f}, "
+              f"best_err={best_err:.3f}")
+        return obs
+
+    # --- Phase 1: bracket the target -----------------------------------
+    # Seek lo with observed(lo) >= target and hi with observed(hi) <= target.
+    offset = 0.0
+    obs = evaluate(offset, "bracket")
+    if best_err <= tol:
+        return OffsetSigmoid(delta=best_offset)
+
+    step = step_init
+    lo = hi = None
+    if obs > target_death_fraction:
+        # Too many deaths -> raise offset until observed drops to/below target.
+        lo, lo_obs = offset, obs
+        while iters < max_iter:
+            offset += step
+            obs = evaluate(offset, "bracket")
+            if best_err <= tol:
+                return OffsetSigmoid(delta=best_offset)
+            if obs <= target_death_fraction:
+                hi = offset
+                break
+            lo, lo_obs = offset, obs
+            step = min(step * step_growth, step_max)
+        if hi is None:
+            print(f"  Calibration warning: target {target_death_fraction:.3f} "
+                  f"unreachable; observed floored at {lo_obs:.3f} by "
+                  f"offset {lo:.4f}. Returning best offset.")
+            return OffsetSigmoid(delta=best_offset)
+    else:
+        # Too few deaths -> lower offset until observed rises to/above target.
+        hi, hi_obs = offset, obs
+        while iters < max_iter:
+            offset -= step
+            obs = evaluate(offset, "bracket")
+            if best_err <= tol:
+                return OffsetSigmoid(delta=best_offset)
+            if obs >= target_death_fraction:
+                lo = offset
+                break
+            hi, hi_obs = offset, obs
+            step = min(step * step_growth, step_max)
+        if lo is None:
+            print(f"  Calibration warning: target {target_death_fraction:.3f} "
+                  f"unreachable; observed capped at {hi_obs:.3f} by "
+                  f"offset {hi:.4f}. Returning best offset.")
+            return OffsetSigmoid(delta=best_offset)
+
+    # --- Phase 2: bisection --------------------------------------------
+    # Invariant: lo < hi and observed(lo) >= target >= observed(hi).
+    while iters < max_iter:
+        mid = 0.5 * (lo + hi)
+        obs = evaluate(mid, "bisect")
+        if best_err <= tol:
+            break
+        if obs > target_death_fraction:
+            lo = mid
+        else:
+            hi = mid
+
+    return OffsetSigmoid(delta=best_offset)
+
+
+# --- Old analytical calibration (kept for reference; superseded by the
+#     bracketing/bisection version above, which handles flat responses) ---
+# def calibrate_hazard(
+#     graph: CausalGraph,
+#     num_frames: int,
+#     start_frames: np.ndarray,
+#     end_frames: np.ndarray,
+#     target_death_fraction: float,
+#     n_calib: int = 200,
+#     max_iter: int = 50,
+#     tol: float = 0.02,
+#     step_init: float = 10.0,
+#     step_growth: float = 2.0,
+#     step_max: float = 1e6,
+# ) -> OffsetSigmoid:
+#     """Iteratively find a scalar offset when applying sigmoid to hazard rates
+#     so that approximately target_death_fraction of cells die within their window.
+#
+#     In the saturated regions (every sample lives or every sample dies) the
+#     analytical log-odds update carries no gradient information, so the offset is
+#     walked in a fixed direction by ``step``.  ``step`` is grown by
+#     ``step_growth`` (up to ``step_max``) each time we push the same way -- i.e.
+#     while we keep closing on the target -- so flat regions are escaped quickly,
+#     and reset back to ``step_init`` whenever the direction flips (we overshot)."""
+#     offset = 0.0
+#     step = step_init
+#     prev_dir = 0
+#     for i in range(max_iter):
+#         observed = _observe_death_fraction(
+#             graph,
+#             start_frames,
+#             end_frames,
+#             offset=offset,
+#             n_samples=n_calib,
+#         )
+#         print(f"  Calibration iter {i + 1}: offset={offset:.4f}, "
+#               f"observed={observed:.3f}, target={target_death_fraction:.3f}, "
+#               f"step={step:.4f}")
+#         if abs(observed - target_death_fraction) <= tol:
+#             break
+#         if observed < 1e-6 or observed >= 1 - 1e-6:
+#             direction = -1 if observed < 1e-6 else 1
+#             if direction == prev_dir:
+#                 step = min(step * step_growth, step_max)
+#             else:
+#                 step = step_init
+#             offset += direction * step
+#             prev_dir = direction
+#         else:
+#             prev_dir = 0
+#             offset = offset + math.log(
+#                 1 / (1 - (1 - target_death_fraction)**(1 / num_frames)) -
+#                 1) - math.log(1 / (1 - (1 - observed)**(1 / num_frames)) - 1)
+#
+#     return OffsetSigmoid(delta=offset)
 
 
 def _generate_cells(

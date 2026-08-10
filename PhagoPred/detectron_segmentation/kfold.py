@@ -58,11 +58,16 @@ def make_coco_subset(orig_coco, ims):
 
 class KFold:
 
-    def __init__(self, directory, fine_tune: bool = False):
+    def __init__(self,
+                 directory,
+                 fine_tune: bool = False,
+                 use_best: bool = True):
         self.directory = directory
         self.ims = sorted([im for im in (self.directory / 'images').iterdir()])
         self.coco = directory / 'labels.json'
         self.fine_tune = fine_tune
+        # Evaluate the lowest validation loss checkpoint rather than the last one
+        self.weights_name = 'model_best.pth' if use_best else 'model_final.pth'
         with open(self.coco, 'r') as f:
             self.categories = [
                 category['name'] for category in json.load(f)["categories"]
@@ -175,10 +180,10 @@ class KFold:
         else:
             for file in self.directory.glob('*model_*'):
                 # if 'model_3' not in file.name:
-                train(directory=file)
+                train(directory=file, use_validation=True)
                 unregister_coco_instances('my_dataset_train')
                 unregister_coco_instances('my_dataset_val')
-                evaluator(directory=file)
+                evaluator(directory=file, weights_name=self.weights_name)
                 unregister_coco_instances('my_dataset_train')
                 unregister_coco_instances('my_dataset_val')
 
@@ -193,7 +198,8 @@ class KFold:
             for file in self.directory.glob('model_*'):
                 evaluator = Evaluator(file / 'Training_Data',
                                       file / 'Model',
-                                      eval_mode='metrics')
+                                      eval_mode='metrics',
+                                      weights_name=self.weights_name)
                 evaluator.eval()
             # for im_name in (file / 'Fine_Tuning_Data' / 'validate' / 'images').iterdir():
             #     im = plt.imread(im_name)
@@ -704,7 +710,7 @@ class KFold:
             label = category
         results = []
         for dir in self.directory.glob('*model*'):
-            for file in (dir).glob(f"*{category}_results.txt"):
+            for file in (dir / 'Evaluation').glob(f"*{category}_results.txt"):
                 results.append(pd.read_csv(file, sep='\t', index_col=0))
         results = pd.concat(results, axis=0)
         means, stds = results.groupby(level=0).mean(), results.groupby(
@@ -723,6 +729,7 @@ class KFold:
             ax.set_xlabel('IOU Threshold')
             ax.set_ylabel(metric)
             ax.grid(True)
+            ax.set_ylim(0, 1.05)
 
     def getAP(self, file):
         try:
@@ -819,24 +826,16 @@ def merge_jsons(directory):
         json_0 = directory / 'labels.json'
 
 
-# def plot_comparison(kfold_dict, save_as):
-#     colours = ['red', 'navy']
-#     plt.rcParams["font.family"] = 'serif'
-#     fig, axs = plt.subplots(1, 3, figsize=(12, 4))
-#     for (name, kfold), colour in zip(kfold_dict.items(), colours):
-#         kfold.plot_multiple(name, axs, colour)
-#     plt.legend()
-#     plt.savefig(save_as)
-
-
 def plot_comparison(kfols_dict, save_as, category):
     colours = ['red', 'navy']
     plt.rcParams["font.family"] = 'serif'
     fig, axs = plt.subplots(1, 3, figsize=(12, 4))
     for (name, kfold), colour in zip(kfols_dict.items(), colours):
+        kfold: KFold
         kfold.plot_category(category, axs, colour, label=name)
     plt.legend()
-    plt.suptitle(f'Comparison of {category} category')
+    plt.tight_layout()
+    # plt.suptitle(f'Comparison of {category} category')
     plt.savefig(save_as)
 
 
@@ -910,18 +909,8 @@ def compare_prec_recall_curves(directories: list, save_as: Path,
     plt.savefig(save_as)
 
 
-def main():
-    faulthandler.enable()
-    # merge_jsons(Path('PhagoPred')/ 'detectron_segmentation' / 'models' / '16_02_26' / 'Training_Data' / 'train')
-    # compare_prec_recall_curves([
-    #     Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_no_fine_tune_16_10',
-    #     Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_fine_tune_16_10'
-    # ],
-    #                            Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'comparison_plot.png',
-    #                            ['No Fine Tune', 'Fine Tune'])
-    my_kfold = KFold(
-        Path('PhagoPred/detectron_segmentation/models/bio_20x_thp1/kfold'),
-        fine_tune=False)
+def run_kfold(directory: Path) -> None:
+    my_kfold = KFold(directory, fine_tune=False)
     my_kfold.split_all()
     my_kfold.train()
     my_kfold.eval()
@@ -931,20 +920,36 @@ def main():
     # my_kfold.train()
     # my_kfold.eval()
     # my_kfold.plot()
-    for cat in ['all', 'Macrophage', 'Dead Macrophage']:
+    for cat in ['Macrophage']:
         my_kfold.plot_metrics_vs_iou(category=cat)
 
-    # my_kfold.plot_results()
-    # my_kfold.eval_feature(feature_func=mask_funcs.get_perimeters_over_areas, feature_name='perim_over_area', n_groups=3)
-    # my_kfold.features_scatter_plot(feature_func=mask_funcs.get_perimeters_over_areas, feature_name='perimeter/area')
 
-    # plot_comparison(
-    #     {'$L_{mask}$ x 0.3': KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_low_mask_loss'),
-    #      '$L_{mask}$ x 1.0': KFold(Path('PhagoPred') / 'detectron_segmentation' / 'models' / '27_05_mac' / 'kfold_custom_loss')},
-    #      save_as=Path('temp') / 'comparison.png',
-    #      category='all')
+def main():
+    faulthandler.enable()
+    # for direcotry in (
+    #         Path(
+    #             '/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/bio_20x_thp1/kfold'
+    #         ),
+    #         Path(
+    #             '/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/bio_20x_thp1_clahe/kfold'
+    #         )):
+    #     run_kfold(direcotry)
 
-    # my_kfold.plot_av_loss(output_path=Path('temp') / 'av_loss_plot.png')
+    plot_comparison(
+        {
+            'No CLAHE':
+            KFold(
+                Path(
+                    '/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/bio_20x_thp1/kfold'
+                )),
+            'CLAHE':
+            KFold(
+                Path(
+                    '/home/ubuntu/PhagoPred/PhagoPred/detectron_segmentation/models/bio_20x_thp1_clahe/kfold'
+                ))
+        },
+        save_as=Path('temp/detectron_results.png'),
+        category='all')
 
 
 if __name__ == '__main__':

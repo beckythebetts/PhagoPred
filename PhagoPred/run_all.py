@@ -22,7 +22,7 @@ from PhagoPred.survival_analysis.models import losses
 
 if __name__ == '__main__':
     datasets = Path(
-        '~/thor_server/MacrophageData/12_06/').expanduser().iterdir()
+        '~/thor_server/MacrophageData/24_07/').expanduser().iterdir()
     # dataset
     h5_paths = [
         Path('PhagoPred') / 'Datasets' / 'B.h5',
@@ -44,18 +44,19 @@ if __name__ == '__main__':
         # dataset = Path(dataset)
         # if dataset.name != '10_02_26_1':
         #     continue
-
+        if dataset.name == 'Test':
+            continue
         if not dataset.is_dir():
             continue
-        if dataset.stem in [
-                'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-                'N', 'O'
-        ]:
-            continue
+        # if dataset.stem in [
+        #         'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+        #         'N', 'O'
+        # ]:
+        #     continue
 
         print(f'Processing dataset: {dataset.name}')
         h5_file = Path('PhagoPred') / 'Datasets' / f'{dataset.stem}.h5'
-        hdf5_from_tiffs(dataset, h5_file)
+        hdf5_from_tiffs(dataset, h5_file, frame_steps={'Phase': 3, 'Fluor': 1})
         rename_group(h5_file,
                      old_group_name='Images/Fluor',
                      new_group_name='Images/Epi')
@@ -64,7 +65,8 @@ if __name__ == '__main__':
             SETTINGS.IMAGE_SIZE = f['Images'].attrs['Image size / pixels']
         dataset = h5_file
 
-        segment.seg_dataset(dataset=dataset)
+        # segment.seg_dataset(dataset=dataset)
+        cellpose_segment.seg_dataset(dataset)
         trackpy_2_stage.run_tracking(dataset=dataset)
         extract_features.extract_features(
             dataset=dataset, phase_features=[features.FirstLastFrame()])
@@ -79,7 +81,7 @@ if __name__ == '__main__':
         # shutil.move(h5_file, dataset)
         shutil.move(
             dataset,
-            Path('~/thor_server/MacrophageData/12_06/').expanduser() /
+            Path('~/thor_server/MacrophageData/24_07/').expanduser() /
             dataset.name)
 
         # GUI.run(dataset=dataset)

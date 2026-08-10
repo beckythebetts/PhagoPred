@@ -10,6 +10,7 @@ from PhagoPred.survival_v2.probability_calib import (
     TemperatureScalingResult,
     VectorScalingResult,
     PlattScalingResult,
+    IsotonicScalingResult,
 )
 
 log = get_logger()
@@ -53,12 +54,12 @@ class SurvivalModel(nn.Module, ABC):
     def __init__(self, num_bins: int):
         super().__init__()
         self.num_bins = num_bins
-        self.calibration: TemperatureScalingResult | VectorScalingResult | PlattScalingResult | None = None
+        self.calibration: TemperatureScalingResult | VectorScalingResult | PlattScalingResult | IsotonicScalingResult | None = None
 
     def set_calibration(
         self,
         result: TemperatureScalingResult | VectorScalingResult
-        | PlattScalingResult,
+        | PlattScalingResult | IsotonicScalingResult,
     ) -> None:
         self.calibration = result
 
@@ -160,8 +161,37 @@ class SurvivalModel(nn.Module, ABC):
 
     def predict_binary(self, outputs: torch.Tensor) -> torch.Tensor:
         """Predict binary outcome (event within time horizon) from raw outputs.
-        Sigmoid applied
+
+        Parametric calibration (temperature/vector/Platt) transforms the logit
+        and then a sigmoid is applied. Isotonic calibration instead maps the
+        sigmoid probability directly through a fitted monotone function, so it
+        bypasses the affine-logit path.
         """
         assert self.num_bins == 1, "Binary prediction only valid for num_bins=1"
+        if isinstance(self.calibration, IsotonicScalingResult):
+            return self._apply_isotonic(torch.sigmoid(outputs))
         outputs = self._calibrate_logits(outputs)
         return torch.nn.functional.sigmoid(outputs)
+
+    def _apply_isotonic(self, probs: torch.Tensor) -> torch.Tensor:
+        """Piecewise-linear monotone map matching the fitted IsotonicScalingResult.
+
+        Reproduces sklearn's ``predict`` with ``out_of_bounds='clip'`` (linear
+        interpolation between the fitted knots, clamped to the endpoints) while
+        keeping everything on ``probs``'s device/dtype.
+        """
+        cal = self.calibration
+        xs = torch.as_tensor(cal.x_thresholds,
+                             dtype=probs.dtype,
+                             device=probs.device)
+        ys = torch.as_tensor(cal.y_thresholds,
+                             dtype=probs.dtype,
+                             device=probs.device)
+        if xs.numel() == 1:  # degenerate fit collapsed to a constant
+            return torch.full_like(probs, float(ys[0]))
+        p = probs.clamp(xs[0], xs[-1])
+        idx = torch.searchsorted(xs, p, right=True).clamp(1, xs.numel() - 1)
+        x0, x1 = xs[idx - 1], xs[idx]
+        y0, y1 = ys[idx - 1], ys[idx]
+        slope = (y1 - y0) / (x1 - x0).clamp_min(1e-12)
+        return y0 + slope * (p - x0)

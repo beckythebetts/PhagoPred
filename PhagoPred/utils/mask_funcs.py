@@ -79,7 +79,7 @@ def coco_to_masks(coco_file: Union[Path, str],
 
     im_id = None
     for image in coco_json['images']:
-        if image['file_name'] == im_name.name:
+        if image['file_name'] == im_name:
             im_id = image['id']
             height = image['height']
             width = image['width']
@@ -121,7 +121,6 @@ def coco_to_masks(coco_file: Union[Path, str],
                     category_id]
 
             else:
-                # If segmentation is RLE (not handled here), you could add support later
                 raise NotImplementedError("RLE segmentation not supported yet")
 
     id_to_name = {cat['id']: cat['name'] for cat in coco_json['categories']}

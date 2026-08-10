@@ -371,7 +371,7 @@ def extract_features(
         features.Perimeter(),
         features.Circularity(),
         features.Skeleton(),
-        features.CellDeath(),
+        # features.CellDeath(),
         features.FirstLastFrame(),
         # features.ExternalFluorescence(),
         # features.Fluorescence(),
@@ -387,15 +387,16 @@ def extract_features(
 
 
 def main():
+    pass
     # cell_death_hyperparamter_search(true_deaths_txt='/home/ubuntu/PhagoPred/temp/03_10_deaths.txt')
-    cell_death_hyperparameter_search(
-        dataset=SETTINGS.DATASET,
-        true_deaths_txt='/home/ubuntu/PhagoPred/temp/03_10_deaths.txt',
-        save_csv=True,
-        csv_path='/home/ubuntu/PhagoPred/temp/death_hyperparamters.txt')
-    plot_hyperparam_heatmaps(
-        '/home/ubuntu/PhagoPred/temp/death_hyperparamters.txt',
-        '/home/ubuntu/PhagoPred/temp/death_hyperparamters')
+    # cell_death_hyperparameter_search(
+    #     dataset=SETTINGS.DATASET,
+    #     true_deaths_txt='/home/ubuntu/PhagoPred/temp/03_10_deaths.txt',
+    #     save_csv=True,
+    #     csv_path='/home/ubuntu/PhagoPred/temp/death_hyperparamters.txt')
+    # plot_hyperparam_heatmaps(
+    #     '/home/ubuntu/PhagoPred/temp/death_hyperparamters.txt',
+    #     '/home/ubuntu/PhagoPred/temp/death_hyperparamters')
     # extract_features(phase_features=[features.CellDeath()])
     # with h5py.File('PhagoPred/Datasets/16_09_1.h5', 'r') as f:
     #     print(np.nanmax(f['Cells']['Phase']['Circularity'][:]))

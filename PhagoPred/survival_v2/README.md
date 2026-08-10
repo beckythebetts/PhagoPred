@@ -310,7 +310,7 @@ Models are evaluated using:
 2. **Use concordance-based ranking**: If you need ranking loss, use `ranking_type='concordance'`
 3. **Choose attention wisely**: Start with `vector` or `fc` before trying `multihead`
 4. **Monitor overfitting**: Use validation loss for early stopping
-5. **Normalize features**: The dataset automatically computes normalization stats
+5. **Normalize features**: The dataset automatically computes normalisation stats
 
 ## Example Workflow
 

@@ -21,11 +21,13 @@ from PhagoPred.survival_v2.configs.calibration import (
     TemperatureScalingCfg,
     VectorScalingCfg,
     PlattScalingCfg,
+    IsotonicScalingCfg,
 )
 from PhagoPred.survival_v2.probability_calib import (
     fit_temperature_scaling,
     fit_vector_scaling,
     fit_platt_scaling,
+    fit_isotonic_scaling,
 )
 from PhagoPred.survival_v2.models.build import build_model
 from PhagoPred.survival_v2.models.classical_base import ClassicalSurvivalModel
@@ -462,6 +464,15 @@ def _fit_and_store_calibration(cfg: ExperimentCfg, model, dataset: CellDataset,
                                    from_logits=not is_classical)
         cal_cfg.a = result.a
         cal_cfg.b = result.b
+    elif isinstance(cal_cfg, IsotonicScalingCfg):
+        if labels is None:
+            raise ValueError(
+                "Isotonic calibration is binary-only; got a survival dataset.")
+        result = fit_isotonic_scaling(logits_or_pmf,
+                                      labels,
+                                      from_logits=not is_classical)
+        cal_cfg.x_thresholds = result.x_thresholds.tolist()
+        cal_cfg.y_thresholds = result.y_thresholds.tolist()
     elif isinstance(cal_cfg, TemperatureScalingCfg):
         result = fit_temperature_scaling(logits_or_pmf,
                                          bins,

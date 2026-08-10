@@ -46,6 +46,7 @@ import json
 
 from PhagoPred.utils import tools
 from PhagoPred import SETTINGS
+from PhagoPred.detectron_segmentation.config import add_validation_config
 
 TORCH_VERSION = ".".join(torch.__version__.split(".")[:2])
 CUDA_VERSION = torch.__version__.split("+")[-1]
@@ -56,16 +57,27 @@ torch.cuda.empty_cache()
 
 class LossEvalHook(HookBase):
 
-    def __init__(self, eval_period, model, data_loader):
+    def __init__(self,
+                 eval_period,
+                 model,
+                 data_loader,
+                 save_best=False,
+                 checkpoint_name="model_best"):
         self._model = model
         self._period = eval_period
         self._data_loader = data_loader
+        self._save_best = save_best
+        self._checkpoint_name = checkpoint_name
+
+        self.best_loss = np.inf
+        self.best_iter = None
 
     def before_train(self):
-        # Run loss eval once before training starts
-        self._do_loss_eval()
+        # Run loss eval once before training starts. update_best=False so the
+        # pretrained weights can't be checkpointed as the 'best' model.
+        self._do_loss_eval(update_best=False)
 
-    def _do_loss_eval(self):
+    def _do_loss_eval(self, update_best=True):
         # Copying inference_on_dataset from evaluator.py
         total = len(self._data_loader)
         num_warmup = min(5, total - 1)
@@ -96,22 +108,38 @@ class LossEvalHook(HookBase):
                 )
             loss_batch = self._get_loss(inputs)
             losses.append(loss_batch)
-        mean_loss = np.mean(losses)
+        mean_loss = float(np.mean(losses))
         self.trainer.storage.put_scalar('validation_loss', mean_loss)
+
+        if update_best and mean_loss < self.best_loss:
+            self.best_loss = mean_loss
+            self.best_iter = self.trainer.iter
+            if self._save_best and comm.is_main_process():
+                # Writes <checkpoint_name>.pth into cfg.OUTPUT_DIR
+                self.trainer.checkpointer.save(self._checkpoint_name,
+                                               iteration=self.best_iter,
+                                               validation_loss=mean_loss)
+                # child of "detectron2" so setup_logger's handler picks it up
+                logging.getLogger("detectron2.validation").info(
+                    "New best validation loss {:.4f} at iteration {}, saved to {}.pth"
+                    .format(self.best_loss, self.best_iter,
+                            self._checkpoint_name))
         comm.synchronize()
 
         return losses
 
     def _get_loss(self, data):
         # How loss is calculated on train_loop
-        metrics_dict = self._model(data)
-        metrics_dict = {
-            k: v.detach().cpu().item()
-            if isinstance(v, torch.Tensor) else float(v)
-            for k, v in metrics_dict.items()
-        }
-        total_losses_reduced = sum(loss for loss in metrics_dict.values())
-        return total_losses_reduced
+        with torch.no_grad():
+            metrics_dict = self._model(data)
+            metrics_dict = {
+                k:
+                v.detach().cpu().item()
+                if isinstance(v, torch.Tensor) else float(v)
+                for k, v in metrics_dict.items()
+            }
+            total_losses_reduced = sum(loss for loss in metrics_dict.values())
+            return total_losses_reduced
 
     def after_step(self):
         next_iter = self.trainer.iter + 1
@@ -123,19 +151,29 @@ class LossEvalHook(HookBase):
 
 class MyTrainer(DefaultTrainer):
 
-    # def build_hooks(self):
-    #     hooks = super().build_hooks()
-    #     hooks.insert(-1, LossEvalHook(
-    #         self.cfg.TEST.EVAL_PERIOD,
-    #         self.model,
-    #         build_detection_test_loader(
-    #             self.cfg,
-    #             self.cfg.DATASETS.TEST[0],
-    #             # DatasetMapper(self.cfg, True)
-    #             mapper=no_resize_mapper,
-    #         )
-    #     ))
-    #     return hooks
+    def build_hooks(self):
+        hooks = super().build_hooks()
+        # Configs built elsewhere (e.g. fine_tune_class) never call
+        # add_validation_config, so a missing VALIDATION node means "off" and
+        # those trainers keep inserting their own hook.
+        validation = self.cfg.get("VALIDATION", None)
+        if validation is None or not validation.ENABLED:
+            return hooks
+        hooks.insert(
+            -1,
+            LossEvalHook(
+                validation.PERIOD,
+                self.model,
+                build_detection_test_loader(
+                    self.cfg,
+                    self.cfg.DATASETS.TEST[0],
+                    # DatasetMapper(self.cfg, True)
+                    mapper=no_resize_mapper,
+                ),
+                save_best=validation.SAVE_BEST,
+                checkpoint_name=validation.BEST_NAME,
+            ))
+        return hooks
 
     # @classmethod
     # def build_train_loader(cls, cfg):
@@ -265,7 +303,7 @@ class DiceLSMaskHead(MaskRCNNConvUpsampleHead):
         return {"loss_mask": 0.3 * loss}
 
 
-def train(directory=SETTINGS.MASK_RCNN_MODEL):
+def train(directory=SETTINGS.MASK_RCNN_MODEL, use_validation: bool = False):
 
     # if "DiceLSMaskHead" not in ROI_MASK_HEAD_REGISTRY._obj_map:
     #     ROI_MASK_HEAD_REGISTRY.register(DiceLSMaskHead)
@@ -291,6 +329,7 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
         json.dump(train_metadata.as_dict(), json_file)
 
     cfg = get_cfg()
+    add_validation_config(cfg)
 
     #custom loss function
 
@@ -344,7 +383,16 @@ def train(directory=SETTINGS.MASK_RCNN_MODEL):
     cfg.TEST.AUG["MAX_SIZE"] = max_size
     cfg.TEST.AUG["MIN_SIZES"] = [min_size]
 
-    cfg.TEST.EVAL_PERIOD = 10000
+    cfg.VALIDATION.ENABLED = use_validation
+    cfg.VALIDATION.PERIOD = 200
+    cfg.VALIDATION.SAVE_BEST = True
+
+    # cfg.TEST.EVAL_PERIOD drives detectron2's own COCO EvalHook, not the
+    # validation loss; keep it matched to the validation period as before.
+    if cfg.VALIDATION.ENABLED:
+        cfg.TEST.EVAL_PERIOD = cfg.VALIDATION.PERIOD
+    else:
+        cfg.TEST.EVAL_PERIOD = cfg.SOLVER.MAX_ITER + 1
 
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
     trainer = MyTrainer(cfg)

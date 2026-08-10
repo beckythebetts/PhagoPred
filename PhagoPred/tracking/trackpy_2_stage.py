@@ -11,6 +11,7 @@ from PhagoPred.feature_extraction import extract_features, features
 
 
 class TrackerWithTrackpy2Stage:
+
     def __init__(self, file_path, channel='Phase'):
         self.file = file_path
         self.channel = channel
@@ -27,19 +28,30 @@ class TrackerWithTrackpy2Stage:
         with h5py.File(self.file, 'r') as f:
             coords = []
             num_frames = f[self.masks_ds].shape[0]
-            for frame in tqdm(range(num_frames), desc='Gathering cell coords: '):
+            for frame in tqdm(range(num_frames),
+                              desc='Gathering cell coords: '):
                 X = f[f'{self.cells_group}/X'][frame]
                 Y = f[f'{self.cells_group}/Y'][frame]
                 areas = f[f'{self.cells_group}/Area'][frame]
 
-                valid_idxs = np.nonzero(~np.isnan(X) & ~np.isnan(Y) & (areas > self.min_cell_size))[0]
+                valid_idxs = np.nonzero(~np.isnan(X) & ~np.isnan(Y)
+                                        & (areas > self.min_cell_size))[0]
 
                 for idx in valid_idxs:
-                    coords.append({'frame': frame, 'x': X[idx], 'y': Y[idx], 'cell_index': idx})
+                    coords.append({
+                        'frame': frame,
+                        'x': X[idx],
+                        'y': Y[idx],
+                        'cell_index': idx
+                    })
 
         return coords, num_frames
 
-    def track(self, search_range=10, memory=3, stage2_search_range=None, stage2_memory=None):
+    def track(self,
+              search_range=10,
+              memory=3,
+              stage2_search_range=None,
+              stage2_memory=None):
         """
         Two-stage tracking:
           Stage 1: Link with small search_range to build reliable short tracklets.
@@ -61,13 +73,17 @@ class TrackerWithTrackpy2Stage:
         coords = pd.DataFrame(coords)
 
         # --- Stage 1: fine-grained linking with small search_range ---
-        print(f'\nStage 1: Linking with search_range={search_range}, memory={memory}')
+        print(
+            f'\nStage 1: Linking with search_range={search_range}, memory={memory}'
+        )
         df = tp.link_df(coords, search_range=search_range, memory=memory)
         n_tracklets = df['particle'].nunique()
         print(f'Stage 1 produced {n_tracklets} tracklets')
 
         # --- Stage 2: link tracklets using their endpoint positions ---
-        print(f'\nStage 2: Linking tracklets with search_range={stage2_search_range}, memory={stage2_memory}')
+        print(
+            f'\nStage 2: Linking tracklets with search_range={stage2_search_range}, memory={stage2_memory}'
+        )
         df = self._link_tracklets(df, stage2_search_range, stage2_memory)
         n_tracks = df['particle'].nunique()
         print(f'Stage 2 merged into {n_tracks} tracks')
@@ -83,8 +99,10 @@ class TrackerWithTrackpy2Stage:
             self.track_id_map[row.frame, row.cell_index] = row.particle
 
         with h5py.File(self.file, 'r+') as f:
-            f['Segmentations']['Phase'].attrs['Tracking search range'] = search_range
-            f['Segmentations']['Phase'].attrs['Tracking search range stage 2'] = stage2_search_range
+            f['Segmentations']['Phase'].attrs[
+                'Tracking search range'] = search_range
+            f['Segmentations']['Phase'].attrs[
+                'Tracking search range stage 2'] = stage2_search_range
             f['Segmentations']['Phase'].attrs['Tracking memory'] = memory
 
     def _link_tracklets(self, df, max_dist, max_time_gap):
@@ -98,16 +116,22 @@ class TrackerWithTrackpy2Stage:
             first_frame=('frame', 'min'),
             last_frame=('frame', 'max'),
         )
-        first_rows = df.loc[df.groupby('particle')['frame'].idxmin()].set_index('particle')
-        last_rows = df.loc[df.groupby('particle')['frame'].idxmax()].set_index('particle')
+        first_rows = df.loc[df.groupby('particle')
+                            ['frame'].idxmin()].set_index('particle')
+        last_rows = df.loc[df.groupby('particle')['frame'].idxmax()].set_index(
+            'particle')
 
         all_tracklet_ids = info.index.values
         start_frames = info['first_frame'].values
         end_frames = info['last_frame'].values
-        start_coords = np.column_stack([first_rows.loc[info.index, 'x'].values,
-                                         first_rows.loc[info.index, 'y'].values])
-        end_coords = np.column_stack([last_rows.loc[info.index, 'x'].values,
-                                       last_rows.loc[info.index, 'y'].values])
+        start_coords = np.column_stack([
+            first_rows.loc[info.index, 'x'].values, first_rows.loc[info.index,
+                                                                   'y'].values
+        ])
+        end_coords = np.column_stack([
+            last_rows.loc[info.index, 'x'].values, last_rows.loc[info.index,
+                                                                 'y'].values
+        ])
 
         # Use KDTree on start_coords to find spatial neighbours for each end_coord
         # max possible distance is max_dist * max_time_gap (distance scales with time gap)
@@ -117,7 +141,8 @@ class TrackerWithTrackpy2Stage:
         # Collect valid (end_idx, start_idx, distance) pairs
         candidate_pairs = []
         for i, end_coord in enumerate(end_coords):
-            nearby_j_indices = start_tree.query_ball_point(end_coord, r=spatial_radius)
+            nearby_j_indices = start_tree.query_ball_point(end_coord,
+                                                           r=spatial_radius)
             for j in nearby_j_indices:
                 time_gap = start_frames[j] - end_frames[i]
                 if time_gap <= 0 or time_gap >= max_time_gap:
@@ -151,8 +176,10 @@ class TrackerWithTrackpy2Stage:
         row_ind, col_ind = row_ind[valid], col_ind[valid]
 
         # Map back to tracklet IDs
-        merge_from = all_tracklet_ids[unique_ends[row_ind]]   # end tracklets (earlier)
-        merge_into = all_tracklet_ids[unique_starts[col_ind]]  # start tracklets (later)
+        merge_from = all_tracklet_ids[
+            unique_ends[row_ind]]  # end tracklets (earlier)
+        merge_into = all_tracklet_ids[
+            unique_starts[col_ind]]  # start tracklets (later)
 
         # Build merge mapping: later tracklet -> earlier tracklet
         merge_map = dict(zip(merge_into, merge_from))
@@ -168,7 +195,10 @@ class TrackerWithTrackpy2Stage:
 
         # Re-number consecutively
         unique_ids = df['particle'].unique()
-        remap = {old_id: new_id for new_id, old_id in enumerate(sorted(unique_ids))}
+        remap = {
+            old_id: new_id
+            for new_id, old_id in enumerate(sorted(unique_ids))
+        }
         df['particle'] = df['particle'].map(remap)
 
         return df
@@ -177,31 +207,45 @@ class TrackerWithTrackpy2Stage:
         with h5py.File(self.file, 'r+') as f:
 
             print('\nUpdating datasets with track ID map...\n')
-            # Resize cells datasets if necessary
+            # Resize cells datasets if necessary. Must cover both the raw
+            # segmentation index space (read below via valid_cell_idxs) and the
+            # track id space (written below); either can be the larger of the two.
+            # Datasets narrower than the raw index space exist when a segmenter
+            # leaves a feature unfilled (e.g. cellpose never writes
+            # 'Confidence Score'), and short movies can yield fewer tracks than
+            # the peak number of cells in a frame.
+            required_width = max(self.max_track_id + 1,
+                                 self.track_id_map.shape[1])
             for feature_data in f[self.cells_group].values():
-                if self.max_track_id + 1 > feature_data.shape[1]:
-                    feature_data.resize(self.max_track_id + 1, axis=1)
+                if required_width > feature_data.shape[1]:
+                    feature_data.resize(required_width, axis=1)
 
             for frame, track_id_map in enumerate(tqdm(self.track_id_map)):
                 mask = f[self.masks_ds][frame][:]
                 # Replace mask indices with track IDs, keep -1 for background
-                f[self.masks_ds][frame] = np.where(mask == -1, -1, track_id_map[mask])
+                f[self.masks_ds][frame] = np.where(mask == -1, -1,
+                                                   track_id_map[mask])
 
                 valid_cell_idxs = np.nonzero(track_id_map >= 0)[0]
                 valid_track_id_map = track_id_map[valid_cell_idxs]
 
                 for feature_name, feature_data in f[self.cells_group].items():
                     feature_vals = feature_data[frame][valid_cell_idxs]
-                    reindexed_feature_data = np.full(self.max_track_id + 1, np.nan)
+                    reindexed_feature_data = np.full(self.max_track_id + 1,
+                                                     np.nan)
                     reindexed_feature_data[valid_track_id_map] = feature_vals
-                    f[self.cells_group][feature_name][frame, :len(reindexed_feature_data)] = reindexed_feature_data
+                    f[self.cells_group][feature_name][frame, :len(
+                        reindexed_feature_data)] = reindexed_feature_data
 
             for feature_data in f[self.cells_group].values():
                 feature_data.resize(self.max_track_id + 1, axis=1)
 
-    def remove_short_tracks(self, min_track_length: int = SETTINGS.MINIMUM_TRACK_LENGTH) -> None:
+    def remove_short_tracks(
+            self,
+            min_track_length: int = SETTINGS.MINIMUM_TRACK_LENGTH) -> None:
         """Remove any tracks with less than {min_track_length} instances"""
-        track_ids, counts = np.unique(self.track_id_map[self.track_id_map >= 0], return_counts=True)
+        track_ids, counts = np.unique(
+            self.track_id_map[self.track_id_map >= 0], return_counts=True)
         short_track_ids = track_ids[counts <= min_track_length]
 
         mask = np.isin(self.track_id_map, short_track_ids)
@@ -214,7 +258,7 @@ class TrackerWithTrackpy2Stage:
         track_ids = np.unique(self.track_id_map[valid_mask])
         new_track_ids = np.arange(len(track_ids))
 
-        id_map = -np.ones(track_ids.max()+1, dtype=int)
+        id_map = -np.ones(track_ids.max() + 1, dtype=int)
         id_map[track_ids] = new_track_ids
 
         self.track_id_map = np.where(valid_mask, id_map[self.track_id_map], -1)
@@ -225,7 +269,8 @@ class TrackerWithTrackpy2Stage:
         """
         Add each cells centroid cooridnates and areas to cells dataset
         """
-        self.feature_extractor.add_feature(features.Coords(), cell_type=self.channel)
+        self.feature_extractor.add_feature(features.Coords(),
+                                           cell_type=self.channel)
         self.feature_extractor.set_up()
         self.feature_extractor.extract_features(crop=False)
 
@@ -243,8 +288,10 @@ def run_tracking(dataset=SETTINGS.DATASET):
     tracker.remove_short_tracks(SETTINGS.MINIMUM_TRACK_LENGTH)
     tracker.apply_track_id_map()
 
+
 def main():
     run_tracking()
+
 
 if __name__ == "__main__":
     main()

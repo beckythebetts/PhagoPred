@@ -161,14 +161,25 @@ class RandomSurvivalForestModel(ClassicalSurvivalModel):
             return probs[:, np.newaxis]
 
         else:
-            survival_funcs = self.model.predict_survival_function(
-                input_features, return_array=True)
-            print(input_features.shape, survival_funcs.shape)
-            # P(T=t) = S(t-1) - S(t)
-            pmf = survival_funcs[:, :-1] - survival_funcs[:, 1:]
-            pmf = np.concatenate(
-                (1 - survival_funcs[:, 0][:, np.newaxis], pmf), axis=1)
-            return pmf  #(n_smaples, num_bins)
+            # sksurv derives its output grid from the unique observed training
+            # times (`model.unique_times_`), not `num_bins`. The dataset's
+            # out-of-horizon sentinel (`time_to_event_bin == num_bins`) also
+            # leaks an extra time point in, so `return_array=True` yields a
+            # variable (often num_bins + 1) column count that misaligns with the
+            # bin grid. Evaluate the survival step functions on the fixed bin
+            # grid instead so the PMF is always exactly num_bins wide.
+            step_fns = self.model.predict_survival_function(
+                input_features, return_array=False)
+            # Clip to the model's last observed time; the survival function is
+            # flat beyond it, and evaluating past the domain would raise.
+            bin_times = np.clip(np.arange(self.num_bins), None,
+                                self.model.unique_times_[-1])
+            survival = np.stack([fn(bin_times) for fn in step_fns])
+            # P(T=t) = S(t-1) - S(t); first bin is 1 - S(0)
+            pmf = survival[:, :-1] - survival[:, 1:]
+            pmf = np.concatenate((1 - survival[:, 0][:, np.newaxis], pmf),
+                                 axis=1)
+            return pmf  # (n_samples, num_bins)
 
 
 class GradientBoostingSurvivalModel(ClassicalSurvivalModel):

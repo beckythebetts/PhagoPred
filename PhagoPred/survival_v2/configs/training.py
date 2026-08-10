@@ -25,7 +25,7 @@ TRAINING = {
                 name='Quick'),
     'Standard':
     TrainingCfg(num_epochs=150,
-                batch_size=256,
+                batch_size=2048,
                 lr=1e-3,
                 scheduler='step',
                 step_size=10,

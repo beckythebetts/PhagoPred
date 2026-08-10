@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import os
+from collections import defaultdict
 
 import networkx as nx
 import numpy as np
@@ -79,6 +80,8 @@ class CausalGraph:
             time_steps = max(rule.get_delay() for rule in rules) + 1
         self.time_steps = time_steps
         self.nx_graph = self._build_nx_graph()
+
+        self.map = None  # Mapping of downstream children nodes for each parent node
 
     def get_variances(
         self,
@@ -162,6 +165,48 @@ class CausalGraph:
         bernoulli_floor = grand_mean * (1.0 - grand_mean) - cdf_between_var
 
         return hazard_branch_var, hazard_total_var, cdf_branch_var, cdf_total_var, bernoulli_floor
+
+    def branch_cif_at_horizon(
+        self,
+        base_signals: dict[str, np.ndarray],
+        landmark_frame: int,
+        max_horizon: int,
+        hazard_calibration_func: callable,
+        target_feature: str = 'Hazard',
+        branch_sample_size: int = 1000,
+    ) -> np.ndarray:
+        """Aleatory distribution of CIF at the horizon for a fixed base history.
+
+        Conditions on the realised trajectory up to ``landmark_frame`` (the
+        cell's known present) and samples ``branch_sample_size`` stochastic
+        futures, returning the cumulative incidence evaluated ``max_horizon``
+        steps past the landmark for each branch. The spread of the returned
+        values is the irreducible (aleatory) uncertainty in P(event within the
+        horizon) given the cell's present — the noise floor a model conditioned
+        on the same history cannot beat.
+
+        Returns:
+            cif_at_horizon: (branch_sample_size,) CIF(landmark + max_horizon).
+        """
+        base_hist = {
+            f.name: np.asarray(base_signals[f.name])[:landmark_frame]
+            for f in self.features
+        }
+        cif_at_horizon = np.empty(branch_sample_size)
+        for b in range(branch_sample_size):
+            signals = {
+                f.name:
+                np.append(base_hist[f.name], f.generate_signal(max_horizon))
+                for f in self.features
+            }
+            for t in range(landmark_frame, landmark_frame + max_horizon):
+                for rule in self.rules:
+                    signals = rule.apply_step(signals, t)
+            branch_traj = signals[target_feature][
+                landmark_frame:landmark_frame + max_horizon]
+            hazard = np.clip(hazard_calibration_func(branch_traj), 0.0, 1.0)
+            cif_at_horizon[b] = (1.0 - np.cumprod(1.0 - hazard))[-1]
+        return cif_at_horizon
 
     def _build_nx_graph(self) -> nx.DiGraph:
         """Construct a NetworkX DiGraph from the features and rules."""
@@ -311,6 +356,18 @@ class CausalGraph:
 
         fmt = save_path.suffix.lstrip('.') or 'pdf'
         g.render(str(save_path.with_suffix('')), format=fmt, cleanup=True)
+
+    def _get_map(self):
+        mapping = defaultdict(list)
+        for rule in self.rules:
+            for parent, edges in rule.get_map().items():
+                mapping[parent].extend(edges)
+        return mapping
+
+    def map(self):
+        if self.map is None:
+            self.map = self._get_map()
+        return self.map
 
 
 def test():

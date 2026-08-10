@@ -1,3 +1,4 @@
+from __future__ import annotations
 import numpy as np
 import os
 import sys
@@ -8,6 +9,8 @@ from tqdm import tqdm
 import cv2
 import scipy
 from concurrent.futures import ThreadPoolExecutor
+import cv2
+import math
 
 from PhagoPred import SETTINGS
 from .fluor_background_removal import replace_hot_pixels, bg_removal
@@ -480,24 +483,44 @@ def replace_hot_pixels(image: np.ndarray,
     return corrected
 
 
+def get_channel_tiffs(channel_dir: Path,
+                      frame_step: int = 1,
+                      num_frames: int = None) -> list:
+    """Sorted tiffs of one channel, keeping every frame_step-th file, then at most num_frames of those."""
+    tiff_files = sorted(channel_dir.glob("*.tif*"))[::frame_step]
+    if num_frames is not None:
+        tiff_files = tiff_files[:num_frames]
+    return tiff_files
+
+
 def hdf5_from_tiffs(tiff_files_path: Path,
                     hdf5_file: Path,
-                    num_frames: int = None):
-    """Create hdf5 datasets from folder for each channel containg tiffs. 16 bit to 8 bit done using percntile instensities of 100 equally spaced frames. """
+                    num_frames: int = None,
+                    frame_steps: int | dict = 1):
+    """Create hdf5 datasets from folder for each channel containg tiffs. 16 bit to 8 bit done using percntile instensities of 100 equally spaced frames.
+
+    frame_steps: keep only every nth tiff of a channel. Either one int applied to every channel, or a
+        {channel name: step} dict (unnamed channels keep every frame). e.g. {'Phase': 3} keeps every
+        3rd phase image, matching the fluor images that are already acquired at a third of that rate.
+    num_frames: frames kept per channel, applied after the frame step.
+    """
     if os.path.exists(hdf5_file):
         os.remove(hdf5_file)
 
     channel_shapes = {}
     channel_min_max = {}
+    channel_steps = {}
     print(tiff_files_path)
     for channel_dir in tiff_files_path.glob("*"):
         print(channel_dir)
         if not channel_dir.is_dir():
             continue
 
-        tiff_files = sorted(channel_dir.glob("*.tif*"))
-        if num_frames is not None:
-            tiff_files = tiff_files[:num_frames]
+        channel_steps[channel_dir.name] = (frame_steps if isinstance(
+            frame_steps, int) else frame_steps.get(channel_dir.name, 1))
+        tiff_files = get_channel_tiffs(channel_dir,
+                                       channel_steps[channel_dir.name],
+                                       num_frames)
         T = len(tiff_files)
         if not tiff_files:
             raise ValueError(f"No .tif files found in directory")
@@ -507,21 +530,29 @@ def hdf5_from_tiffs(tiff_files_path: Path,
             Y, X = shape
             channel_shapes[channel_dir.name] = (T, Y, X)
 
-        normalisation_frames = []
+        # Reduced frame by frame rather than stacking the sampled frames: the
+        # stack, its float32 copy and the copies np.percentile sorts came to
+        # ~8 GB for a 287 frame channel, which was enough to get OOM killed.
+        # The limits used here are the 0th/100th percentiles, i.e. just the
+        # min and max, so this gives identical values in constant memory.
+        min_val, max_val = np.inf, -np.inf
         for i in tqdm(
-                range(0, T, max(1, T // 100)),
+                range(0, T, math.ceil(T / 100)),
                 desc=f"Computing min/max for channel {channel_dir.name}"):
             with tifffile.TiffFile(str(tiff_files[i])) as tif:
                 im = tif.series[0].asarray()
-                normalisation_frames.append(im)
-        normalisation_frames = np.stack(normalisation_frames)
-        min_val, max_val = compute_percentile_limits(normalisation_frames, 0,
-                                                     100)
+            min_val = min(min_val, float(im.min()))
+            max_val = max(max_val, float(im.max()))
         channel_min_max[channel_dir.name] = (min_val, max_val)
     print(channel_shapes)
     max_T = max(shape[0] for shape in channel_shapes.values())
     max_X = max(shape[2] for shape in channel_shapes.values())
     max_Y = max(shape[1] for shape in channel_shapes.values())
+
+    grid_size = 20
+    x_tiles = math.floor(max_X / (grid_size * 2)) * 2 + 1
+    y_tiles = math.floor(max_Y / (grid_size * 2)) * 2 + 1
+    clahe = cv2.createCLAHE(tileGridSize=(y_tiles, x_tiles))
 
     with h5py.File(hdf5_file, 'w') as h:
         images_group = h.create_group('Images')
@@ -533,20 +564,18 @@ def hdf5_from_tiffs(tiff_files_path: Path,
                                                             max_X),
                                                      dtype='uint8',
                                                      chunks=(1, max_Y, max_X))
-            tiff_files = list(
-                sorted((tiff_files_path / channel).glob("*.tif*")))
-            if num_frames is not None:
-                tiff_files = tiff_files[:num_frames]
+            tiff_files = get_channel_tiffs(tiff_files_path / channel,
+                                           channel_steps[channel], num_frames)
+            channel_frame_step = (max_T - 1) / (shape[0] -
+                                                1) if shape[0] > 1 else 0
+            x_scale = max_X // shape[2]
+            y_scale = max_Y // shape[1]
             for i, tiff_file in tqdm(
                     enumerate(tiff_files),
                     total=len(tiff_files),
                     desc=
                     f"Processing channel {channel} for hdf5 file {hdf5_file.name}"
             ):
-                channel_frame_step = (max_T - 1) / (shape[0] - 1)
-                x_scale = max_X // shape[2]
-                y_scale = max_Y // shape[1]
-
                 frame_idx = int(round(i * channel_frame_step))
 
                 im = tifffile.imread(str(tiff_file))
@@ -557,6 +586,8 @@ def hdf5_from_tiffs(tiff_files_path: Path,
 
                 min_val, max_val = channel_min_max[channel]
                 im = to_8bit(im, min_val, max_val)
+                if channel == 'Phase':
+                    im = clahe.apply(im)
                 channel_ds[frame_idx] = im
 
     print(

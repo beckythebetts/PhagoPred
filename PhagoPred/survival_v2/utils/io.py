@@ -18,6 +18,22 @@ from PhagoPred.survival_v2.models.build import build_model
 log = get_logger()
 
 
+def _restore_calibration(model, cfg: ExperimentCfg) -> None:
+    """Restore post-hoc calibration saved in the experiment config onto the model.
+
+    Mirrors the re-evaluation path in run_experiments so that models loaded for
+    interpretation/analysis produce the same calibrated probabilities as the
+    evaluation pipeline (otherwise predictions are the raw, uncalibrated logits).
+    """
+    cal_cfg = getattr(cfg, "calibration", None)
+    if cal_cfg is None:
+        return
+    result = cal_cfg.to_result()
+    if result is not None:
+        model.set_calibration(result)
+        log.info(f"Restored calibration: {cal_cfg.name}")
+
+
 def load_model(
     experiment_dir: Union[str, Path],
     device: str = "cpu",
@@ -37,7 +53,7 @@ def load_model(
         model: Loaded SurvivalModel or ClassicalSurvivalModel.
         cfg: The ExperimentCfg used to train the model.
         checkpoint: For deep models, the raw checkpoint dict (contains
-                    'normalization_means' and 'normalization_stds').
+                    'normalisation_means' and 'normalisation_stds').
                     For classical models, an empty dict.
     """
     log.info(f'Loading model from {experiment_dir} to {device}')
@@ -58,6 +74,7 @@ def load_model(
     if isinstance(cfg.model, RSFCfg):
         log.info('Building Random Forest Model')
         model = ClassicalSurvivalModel.load(str(model_path))
+        _restore_calibration(model, cfg)
         return model, cfg, {}
 
     # Deep model: reconstruct architecture then load weights
@@ -74,6 +91,7 @@ def load_model(
     checkpoint = torch.load(model_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
+    _restore_calibration(model, cfg)
 
     return model, cfg, checkpoint
 
@@ -86,7 +104,7 @@ def load_dataset(
     """
     Load a single normalized dataset from an experiment directory.
 
-    Reads structural parameters (num_bins, min_length, etc.) and normalization
+    Reads structural parameters (num_bins, min_length, etc.) and normalisation
     stats from config.json so the dataset is always normalized consistently
     with training, without recomputing stats from scratch.
 
@@ -160,10 +178,10 @@ def load_dataset(
     return dataset
 
 
-def get_normalization_stats(
+def get_normalisation_stats(
     checkpoint: dict, ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Extract normalization means and stds from a deep model checkpoint.
+    Extract normalisation means and stds from a deep model checkpoint.
 
     Args:
         checkpoint: The dict returned as the third element of load_model.
@@ -171,6 +189,6 @@ def get_normalization_stats(
     Returns:
         (means, stds) as numpy arrays, or (None, None) for classical models.
     """
-    means = checkpoint.get("normalization_means")
-    stds = checkpoint.get("normalization_stds")
+    means = checkpoint.get("normalisation_means")
+    stds = checkpoint.get("normalisation_stds")
     return means, stds

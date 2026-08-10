@@ -34,7 +34,8 @@ from PhagoPred.utils import mask_funcs, tools
 os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def evaluator(directory=SETTINGS.MASK_RCNN_MODEL):
+def evaluator(directory=SETTINGS.MASK_RCNN_MODEL,
+              weights_name: str = 'model_final.pth'):
     setup_logger()
     os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 
@@ -50,8 +51,9 @@ def evaluator(directory=SETTINGS.MASK_RCNN_MODEL):
     with open(str(config_directory / 'train_metadata.json')) as json_file:
       train_metadata = json.load(json_file)
     cfg = get_cfg()
+    segment.add_validation_config(cfg)  # config.yaml carries a VALIDATION node
     cfg.merge_from_file(str(config_directory / 'config.yaml'))
-    cfg.MODEL.WEIGHTS = str(config_directory / 'model_final.pth') # path to the model we just trained
+    cfg.MODEL.WEIGHTS = segment.resolve_weights(config_directory, weights_name) # path to the model we just trained
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5   # set a custom testing threshold
     cfg.MODEL.DEVICE = "cuda"
     predictor = DefaultPredictor(cfg)
@@ -65,11 +67,12 @@ def evaluator(directory=SETTINGS.MASK_RCNN_MODEL):
 
 
 class Evaluator:
-    def __init__(self, dataset_dir: Path = (SETTINGS.MASK_RCNN_MODEL / 'Fine_Tuning_Data'), model_dir : Path= (SETTINGS.MASK_RCNN_MODEL / 'Model'), eval_mode: str = "metrics") -> None:
+    def __init__(self, dataset_dir: Path = (SETTINGS.MASK_RCNN_MODEL / 'Fine_Tuning_Data'), model_dir : Path= (SETTINGS.MASK_RCNN_MODEL / 'Model'), eval_mode: str = "metrics", weights_name: str = 'model_final.pth') -> None:
         self.dataset_dir = dataset_dir
         self.model_dir = model_dir
         self.eval_dir = self.model_dir.parent / 'Evaluation'
         self.eval_mode = eval_mode  # "metrics" or "confusion"
+        self.weights_name = weights_name  # 'model_best.pth' for best validation loss
 
         with open(self.dataset_dir / 'validate' / 'labels.json') as f:
             self.categories = [category['name'] for category in json.load(f)["categories"]]
@@ -86,7 +89,7 @@ class Evaluator:
         y_pred = []
 
         # Load cfg, train_metadata and predictor to avoid repated loading for each image
-        train_metadata, cfg = segment.get_model(cfg_dir=self.model_dir)
+        train_metadata, cfg = segment.get_model(cfg_dir=self.model_dir, weights_name=self.weights_name)
         cfg, predictor = segment.get_predictor(cfg)
 
         for im_name in tqdm(list((self.dataset_dir / 'validate' / 'images').iterdir()), desc="Evaluating "):

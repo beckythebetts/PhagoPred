@@ -12,28 +12,28 @@ from PhagoPred.survival_analysis.data import dataset
 from PhagoPred.survival_analysis.models.decision_tree import plt_tree, eval
 
 
-    
-def train(train_paths: list, val_paths: list, features: list, save_as: Path, fixed_len:int = 10, max_time_to_death: int = None) -> None:
-    train_ds = dataset.CellDataset(
-        train_paths,
-        features=features,
-        summary_stats=True,
-        fixed_len=fixed_len,
-        max_time_to_death=max_time_to_death
-    )
-    
-    means, stds = train_ds.get_normalization_stats()
-    
-    val_ds = dataset.CellDataset(
-        val_paths,
-        features=features,
-        means=means,
-        stds=stds,
-        summary_stats=True,
-        fixed_len=fixed_len,
-        max_time_to_death=max_time_to_death
-    )
-    
+def train(train_paths: list,
+          val_paths: list,
+          features: list,
+          save_as: Path,
+          fixed_len: int = 10,
+          max_time_to_death: int = None) -> None:
+    train_ds = dataset.CellDataset(train_paths,
+                                   features=features,
+                                   summary_stats=True,
+                                   fixed_len=fixed_len,
+                                   max_time_to_death=max_time_to_death)
+
+    means, stds = train_ds.get_normalisation_stats()
+
+    val_ds = dataset.CellDataset(val_paths,
+                                 features=features,
+                                 means=means,
+                                 stds=stds,
+                                 summary_stats=True,
+                                 fixed_len=fixed_len,
+                                 max_time_to_death=max_time_to_death)
+
     # def dataset_to_xy(ds, n_slices=5):
     #     X, events, times = [], [], []
     #     for i in tqdm(range(len(ds)), desc=f'Processing dataset {ds}'):
@@ -46,22 +46,25 @@ def train(train_paths: list, val_paths: list, features: list, save_as: Path, fix
     #     X = np.vstack(X)
     #     y = np.array(list(zip(events, times)), dtype=[('event', '?'), ('time', '<f8')])
     #     return X, y
-    
-    n_slices_per_cell = 10  
-    X_train, y_train = dataset.dataset_to_xy(train_ds, n_slices=n_slices_per_cell)
+
+    n_slices_per_cell = 10
+    X_train, y_train = dataset.dataset_to_xy(train_ds,
+                                             n_slices=n_slices_per_cell)
     print('Got train data')
     # X_val, y_val = dataset.dataset_to_xy(val_ds, n_slices=n_slices_per_cell)
     # print('Got val data')
-    
+
     print(len(X_train))
-    
-    survival_tree = SurvivalTree(min_samples_leaf=1000, max_depth=5, max_leaf_nodes=3)
+
+    survival_tree = SurvivalTree(min_samples_leaf=1000,
+                                 max_depth=5,
+                                 max_leaf_nodes=3)
     survival_tree.fit(X_train, y_train)
-    
+
     model_data = {
         "tree": survival_tree,
         "y_train": y_train,
-        "dataset_args" : {
+        "dataset_args": {
             "means": means,
             "stds": stds,
             "features": features,
@@ -69,23 +72,23 @@ def train(train_paths: list, val_paths: list, features: list, save_as: Path, fix
             "max_time_to_death": max_time_to_death,
         }
     }
-    
+
     with open(save_as / 'model.pickle', 'wb') as f:
         pickle.dump(model_data, f)
 
     for ds, name in zip((train_ds, val_ds), ('train', 'val')):
         eval.eval(model_data, ds, save_as / name)
-        
+
     # def c_index(y, pred):
     #     return concordance_index_censored(y["event"], y["time"], pred)[0]
 
     # pred_train = survival_tree.predict(X_train)
     # pred_val = survival_tree.predict(X_val)
-    
+
     # print(y_train.shape ,y_val.shape, pred_train.shape, pred_val.shape)
     # print(f"C-index Train:     {c_index(y_train, pred_train):.3f}")
     # print(f"C-index Val:       {c_index(y_val, pred_val):.3f}")
-    
+
     # # Choose evaluation time points
     # times_eval = np.arange(1, max_time_to_death, 1)
 
@@ -112,15 +115,20 @@ def train(train_paths: list, val_paths: list, features: list, save_as: Path, fix
     # print("\nValidation Brier Scores:")
     # for t, s in zip(times_val, scores_val):
     #     print(f"Time {t:.1f}: Brier Score {s:.4f}")
-    
+
     node_info = compute_node_survivals(survival_tree, X_train, y_train)
-    plot_all_km_curves_single_plot(node_info, save_dir = save_as)
-    
-    
-    flat_feature_names = [f"{feat}_{stat}" for feat in features for stat in train_ds.summary_funcs.keys()]
-    
+    plot_all_km_curves_single_plot(node_info, save_dir=save_as)
+
+    flat_feature_names = [
+        f"{feat}_{stat}" for feat in features
+        for stat in train_ds.summary_funcs.keys()
+    ]
+
     plt.figure(figsize=(40, 20))  # width x height in inches
-    plt_tree.plot_tree(survival_tree, feature_names=flat_feature_names, node_info=node_info, fontsize=4)
+    plt_tree.plot_tree(survival_tree,
+                       feature_names=flat_feature_names,
+                       node_info=node_info,
+                       fontsize=4)
     plt.savefig(save_as / 'view_tree.png', dpi=500)  # higher DPI = sharper
     plt.close()
 
@@ -170,7 +178,7 @@ def compute_node_survivals(tree, X_train, y_train, percentiles=[5, 50, 95]):
         "percentiles": node_percentiles,
         "kmf": node_kmf
     }
-    
+
 
 def plot_all_km_curves_single_plot(node_info, save_dir: Path):
     node_kmf = node_info["kmf"]
@@ -178,14 +186,20 @@ def plot_all_km_curves_single_plot(node_info, save_dir: Path):
     node_events = node_info["events"]
 
     n_curves = len(node_kmf)
-    cmap = plt.get_cmap('Set1')  # Choose colormap and number of discrete colors
+    cmap = plt.get_cmap(
+        'Set1')  # Choose colormap and number of discrete colors
 
     plt.figure(figsize=(12, 8))
 
     for i, (node_id, kmf) in enumerate(node_kmf.items()):
         color = cmap(i)
         # Plot survival function with confidence interval
-        ax = kmf.plot_survival_function(ci_show=True, color=color, label=f"Node {node_id} (n={node_samples[node_id]}, e={node_events[node_id]})")
+        ax = kmf.plot_survival_function(
+            ci_show=True,
+            color=color,
+            label=
+            f"Node {node_id} (n={node_samples[node_id]}, e={node_events[node_id]})"
+        )
 
     plt.title("Kaplan-Meier Survival Curves for All Nodes")
     plt.xlabel("Time")
@@ -194,59 +208,66 @@ def plot_all_km_curves_single_plot(node_info, save_dir: Path):
     plt.grid(True)
     plt.tight_layout()
     plt.savefig(save_dir / 'all_km_curves.png', dpi=300)
-    
+
+
 def main():
-        # features = [
-        #     'Area',
-        #     # 'X',
-        #     # 'Y',
-        #     'Circularity',
-        #     'Perimeter',
-        #     'Displacement',
-        #     'Speed',
-        #     'Skeleton Length', 
-        #     'Skeleton Branch Points', 
-        #     'Skeleton End Points', 
-        #     'Skeleton Branch Length Mean', 
-        #     'Skeleton Branch Length Std',
-        #     'Skeleton Branch Length Max',
-        #     # 'UMAP 1',
-        #     # 'UMAP 2',
-        #     # 'Mode 0',
-        #     # 'Mode 1',
-        #     # 'Mode 2',
-        #     # 'Mode 3',
-        #     # 'Mode 4',
-        #     # 'Speed',
-        #     'Phagocytes within 100 pixels',
-        #     'Phagocytes within 250 pixels',
-        #     'Phagocytes within 500 pixels',
-        #     # 'Total Fluorescence', 
-        #     # 'Fluorescence Distance Mean', 
-        #     # 'Fluorescence Distance Variance',
-        #     ] 
-        features = [
+    # features = [
+    #     'Area',
+    #     # 'X',
+    #     # 'Y',
+    #     'Circularity',
+    #     'Perimeter',
+    #     'Displacement',
+    #     'Speed',
+    #     'Skeleton Length',
+    #     'Skeleton Branch Points',
+    #     'Skeleton End Points',
+    #     'Skeleton Branch Length Mean',
+    #     'Skeleton Branch Length Std',
+    #     'Skeleton Branch Length Max',
+    #     # 'UMAP 1',
+    #     # 'UMAP 2',
+    #     # 'Mode 0',
+    #     # 'Mode 1',
+    #     # 'Mode 2',
+    #     # 'Mode 3',
+    #     # 'Mode 4',
+    #     # 'Speed',
+    #     'Phagocytes within 100 pixels',
+    #     'Phagocytes within 250 pixels',
+    #     'Phagocytes within 500 pixels',
+    #     # 'Total Fluorescence',
+    #     # 'Fluorescence Distance Mean',
+    #     # 'Fluorescence Distance Variance',
+    #     ]
+    features = [
         '0',
         '1',
         '2',
         '3',
-        ] 
-    
-        
-        # train_hdf5_paths=[
-        #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0.h5',
-        #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '28_10_2500.h5',
-        #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '10_10_5000.h5',
-            
-        # ]
-        # val_hdf5_paths=[
-        #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0.h5',
-        #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '28_10_2500.h5',
-        #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '10_10_5000.h5',
-        # ]
-        train_datasets = [Path('PhagoPred')/'Datasets'/'synthetic.h5']
-        val_datasets = [Path('PhagoPred')/'Datasets'/'val_synthetic.h5']
-        train(train_datasets, val_datasets, features, fixed_len=100, save_as=Path('PhagoPred') / 'survival_analysis' / 'models' / 'decision_tree' / 'test', max_time_to_death=100)
-        
+    ]
+
+    # train_hdf5_paths=[
+    #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0.h5',
+    #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '28_10_2500.h5',
+    #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '10_10_5000.h5',
+
+    # ]
+    # val_hdf5_paths=[
+    #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0.h5',
+    #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '28_10_2500.h5',
+    #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '10_10_5000.h5',
+    # ]
+    train_datasets = [Path('PhagoPred') / 'Datasets' / 'synthetic.h5']
+    val_datasets = [Path('PhagoPred') / 'Datasets' / 'val_synthetic.h5']
+    train(train_datasets,
+          val_datasets,
+          features,
+          fixed_len=100,
+          save_as=Path('PhagoPred') / 'survival_analysis' / 'models' /
+          'decision_tree' / 'test',
+          max_time_to_death=100)
+
+
 if __name__ == '__main__':
     main()

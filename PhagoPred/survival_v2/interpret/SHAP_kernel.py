@@ -68,6 +68,8 @@ class MaskWrapperBase:
         mask_value: float = 0.0,
         device: str = "cpu",
         time_bins: Optional[np.ndarray] = None,
+        max_batch: int = 2048,
+        value_background: Optional[torch.Tensor] = None,
     ):
         self.model = model
         self.model.eval()
@@ -78,30 +80,68 @@ class MaskWrapperBase:
         self.target_bin = target_bin
         self.mask_value = mask_value
         self.time_bins = time_bins
+        # Cap on coalitions evaluated in a single forward pass (bounds memory).
+        self.max_batch = max_batch
+        # Optional (nbg, T, F) background draws: masked features are replaced by
+        # each draw and the prediction is *averaged*, so v(S) = E_bg[f(x_S, bg)]
+        # — the distributional baseline. When None, masked -> ``mask_value``
+        # (a single point), which for a nonlinear model gives f(mean) != E[f].
+        self.value_background = (None if value_background is None else
+                                 value_background.to(device).to(
+                                     self.base_input.dtype))
 
     def __call__(self, masks: np.ndarray) -> np.ndarray:
-        """Apply masks and return model predictions."""
-        outputs = []
+        """Apply a batch of coalition masks and return model predictions.
 
-        for mask in masks:
-            masked_input = self._apply_mask(mask)
-            with torch.no_grad():
-                pred = self.model(masked_input,
-                                  self.lengths,
-                                  return_attention=False)
-                if isinstance(pred, tuple):
-                    pred = pred[0]
+        ``masks`` has shape (N, num_players). All N coalitions are evaluated in
+        batched forward passes (chunked by ``max_batch``) rather than one at a
+        time, which is what actually keeps the GPU busy.
+        """
+        masks = np.asarray(masks)
+        if masks.ndim == 1:
+            masks = masks[None, :]
+        n = masks.shape[0]
 
-                pred = self._extract_output(pred)
-
-            outputs.append(pred.cpu().numpy().flatten())
+        preds = []
+        for start in range(0, n, self.max_batch):
+            chunk = masks[start:start + self.max_batch]
+            # (B, T, F) keep-mask: 1 -> original value, 0 -> masked
+            keep = torch.as_tensor(self._expand_mask(chunk),
+                                   device=self.device,
+                                   dtype=self.base_input.dtype)
+            if self.value_background is None:
+                v = self._predict(self.base_input * keep + self.mask_value *
+                                  (1 - keep))
+            else:
+                # v(S) = mean over background draws of f(x_S kept, bg elsewhere)
+                acc = None
+                for bg in self.value_background:  # (T, F)
+                    p = self._predict(self.base_input * keep + bg[None] *
+                                      (1 - keep))
+                    acc = p if acc is None else acc + p
+                v = acc / self.value_background.shape[0]
+            preds.append(v.detach().cpu().numpy())
 
         # Return shape (N, 1) - KernelExplainer requires 2D output
-        return np.array(outputs).reshape(-1, 1)
+        return np.concatenate(preds, axis=0).reshape(n, -1)[:, :1]
+
+    def _predict(self, masked_input: torch.Tensor) -> torch.Tensor:
+        lengths = self.lengths[:1].expand(masked_input.shape[0])
+        with torch.no_grad():
+            pred = self.model(masked_input, lengths, return_attention=False)
+            if isinstance(pred, tuple):
+                pred = pred[0]
+            pred = self._extract_output(pred)
+        return pred.reshape(pred.shape[0], -1)
 
     @abstractmethod
-    def _apply_mask(self, mask: np.ndarray) -> torch.Tensor:
-        """Apply the given mask to the base input and return the masked input."""
+    def _expand_mask(self, masks: np.ndarray) -> np.ndarray:
+        """Expand coalition masks (N, num_players) to a (N, T, F) keep-mask.
+
+        Entries are 1 where the original input is kept and 0 where it is
+        replaced by ``mask_value``. A trailing dim of size 1 may be returned
+        (e.g. (N, T, 1)) to broadcast across features/timesteps.
+        """
         pass
 
     def _extract_output(self, logits: torch.Tensor) -> torch.Tensor:
@@ -146,21 +186,15 @@ class TemporalMaskWrapper(MaskWrapperBase):
                                               num_segments + 1,
                                               dtype=int)
 
-    def _apply_mask(self, mask: np.ndarray) -> torch.Tensor:
-        full_mask = np.zeros(self.T)
-        for i, m in enumerate(mask):
+    def _expand_mask(self, masks: np.ndarray) -> np.ndarray:
+        # masks: (N, num_segments) -> (N, T, 1), broadcast across features
+        n = masks.shape[0]
+        full = np.zeros((n, self.T), dtype=np.float32)
+        for i in range(self.num_segments):
             start = self.segment_boundaries[i]
             end = self.segment_boundaries[i + 1]
-            full_mask[start:end] = m
-
-        mask_tensor = torch.tensor(full_mask,
-                                   device=self.device,
-                                   dtype=torch.float32)
-        masked_input = self.base_input.clone()
-
-        masked_input = masked_input * mask_tensor.view(1, -1, 1) + \
-                        self.mask_value * (1 - mask_tensor.view(1, -1, 1))
-        return masked_input
+            full[:, start:end] = masks[:, i:i + 1]
+        return full[:, :, None]
 
 
 class FeatureMaskWrapper(MaskWrapperBase):
@@ -175,20 +209,9 @@ class FeatureMaskWrapper(MaskWrapperBase):
         super().__init__(*args, **kwargs)
         self.F = self.base_input.shape[2]
 
-    def _apply_mask(self, mask: np.ndarray) -> torch.Tensor:
-        """Apply a feature mask across all timesteps.
-        Args:
-            mask: np.ndarray of shape (num_features,) with values in {0, 1}
-        """
-        mask_tensor = torch.tensor(mask,
-                                   device=self.device,
-                                   dtype=torch.float32)
-        masked_input = self.base_input.clone()
-
-        # Blend between mask_value and original based on mask
-        masked_input = masked_input * mask_tensor.view(1, 1, -1) + \
-                        self.mask_value * (1 - mask_tensor.view(1, 1, -1))
-        return masked_input
+    def _expand_mask(self, masks: np.ndarray) -> np.ndarray:
+        """Expand feature masks (N, num_features) to (N, 1, F), broadcast over time."""
+        return masks.astype(np.float32)[:, None, :]
 
 
 class TemporalFeatureMaskWrapper(MaskWrapperBase):
@@ -205,25 +228,16 @@ class TemporalFeatureMaskWrapper(MaskWrapperBase):
                                               num_segments + 1,
                                               dtype=int)
 
-    def _apply_mask(self, mask: np.ndarray) -> torch.Tensor:
-        """Apply a 2D mask of shape (num_segments, num_features) to the input.
-        Args
-        ----
-            mask: np.ndarray of shape (num_segments, num_features) with values in {0, 1}
-        """
-        mask = mask.reshape(self.num_segments, self.F)  # Ensure correct shape
-        full_mask = np.zeros((self.T, self.F))
-        for i, m in enumerate(mask):
+    def _expand_mask(self, masks: np.ndarray) -> np.ndarray:
+        """Expand flattened (N, num_segments*F) masks to a (N, T, F) keep-mask."""
+        n = masks.shape[0]
+        m = masks.reshape(n, self.num_segments, self.F).astype(np.float32)
+        full = np.zeros((n, self.T, self.F), dtype=np.float32)
+        for i in range(self.num_segments):
             start = self.segment_boundaries[i]
             end = self.segment_boundaries[i + 1]
-            full_mask[start:end, :] = m
-        mask_tensor = torch.tensor(full_mask,
-                                   device=self.device,
-                                   dtype=torch.float32)
-        masked_input = self.base_input.clone()
-        masked_input = masked_input * mask_tensor + self.mask_value * (
-            1 - mask_tensor)
-        return masked_input
+            full[:, start:end, :] = m[:, i:i + 1, :]
+        return full
 
 
 class KernelSHAP:
@@ -277,6 +291,8 @@ class KernelSHAP:
         importance_type: Literal["temporal", "feature",
                                  "temporal_feature"] = "temporal",
         time_bins: Optional[np.ndarray] = None,
+        l1_reg: Union[bool, str, int, float] = False,
+        value_background: Optional[torch.Tensor] = None,
     ) -> tuple[np.ndarray, np.ndarray, float]:
         """Compute SHAP values for either temporal segments, features, or both.
         Args:
@@ -309,6 +325,7 @@ class KernelSHAP:
             mask_value=mask_value,
             device=self.device,
             time_bins=time_bins,
+            value_background=value_background,
         )
 
         if importance_type == "feature":
@@ -326,9 +343,15 @@ class KernelSHAP:
 
         test_input = np.ones_like(background)
 
-        # l1_reg = False if importance_type == "temporal_feature" else "num_features(10)"
+        # l1_reg=False -> full weighted-least-squares Shapley values (dense). The
+        # shap default ("auto") applies an L1/LARS penalty that zeros out players
+        # when nsamples is small relative to 2**num_players, which artificially
+        # sparsifies the temporal-feature map. Keep it off for a dense map, but
+        # ensure nsamples >= num_players (num_segments*num_features) or the
+        # least-squares fit is underdetermined.
         shap_values = explainer.shap_values(test_input,
-                                            nsamples="auto",
+                                            nsamples=nsamples,
+                                            l1_reg=l1_reg,
                                             silent=not show_progress)
 
         if isinstance(shap_values, list):
@@ -359,9 +382,16 @@ class KernelSHAP:
         compute_temporal_feature: bool = True,
         show_progress: bool = True,
         time_bins: Optional[np.ndarray] = None,
+        l1_reg: Union[bool, str, int, float] = False,
+        value_background: Optional[torch.Tensor] = None,
     ) -> KernelSHAPResults:
         """
         Full SHAP analysis for a single sample.
+
+        ``value_background`` (nbg, T, F): masked features are replaced by these
+        draws and the prediction averaged, giving the *distributional* baseline
+        E[f] rather than f(mask_value). Pass marginal/data draws so the model's
+        completeness sum (pred - E[f]) matches the ground-truth Shapley scale.
 
         Args:
             x: Input tensor (1, T, F) or (T, F)
@@ -381,6 +411,9 @@ class KernelSHAP:
             time_bins: Actual time values for each bin, used to compute RMST
                 when output_type="expected_time". If None, falls back to
                 predict_expected_time.
+            l1_reg: Regularisation passed to shap. False (default) gives dense
+                weighted-least-squares Shapley values; "auto"/"num_features(k)"
+                etc. sparsify (see compute_importance).
 
         Returns:
             KernelSHAPResults with all computed values
@@ -392,7 +425,8 @@ class KernelSHAP:
                 print("Computing temporal importance...")
             temporal_shap, temporal_baseline, boundaries = self.compute_importance(
                 x, lengths, num_segments, nsamples_temporal, output_type,
-                target_bin, mask_value, show_progress, 'temporal', time_bins)
+                target_bin, mask_value, show_progress, 'temporal', time_bins,
+                l1_reg, value_background)
             results.temporal_shap_values = temporal_shap.reshape(1, -1)
             results.temporal_importance = np.abs(temporal_shap)
             results.segment_boundaries = boundaries
@@ -403,7 +437,8 @@ class KernelSHAP:
                 print("Computing feature importance...")
             feature_shap, feature_baseline, _ = self.compute_importance(
                 x, lengths, num_segments, nsamples_feature, output_type,
-                target_bin, mask_value, show_progress, 'feature', time_bins)
+                target_bin, mask_value, show_progress, 'feature', time_bins,
+                l1_reg, value_background)
             results.feature_shap_values = feature_shap.reshape(1, -1)
             results.feature_importance = np.abs(feature_shap)
             results.feature_baseline = feature_baseline
@@ -420,7 +455,7 @@ class KernelSHAP:
             temporal_feature_shap, temporal_feature_baseline, boundaries = self.compute_importance(
                 x, lengths, num_segments, nsamples_temporal_feature,
                 output_type, target_bin, mask_value, show_progress,
-                'temporal_feature', time_bins)
+                'temporal_feature', time_bins, l1_reg, value_background)
             temporal_feature_shap_2d = temporal_feature_shap.reshape(
                 num_segments, -1)
             results.temporal_feature_shap_values = temporal_feature_shap_2d.reshape(

@@ -19,6 +19,8 @@ from .roc_plots import plot_rocs
 from .plot_brier_scores import plot_brier_scores
 from .plot_c_idxs import plot_c_idxs_scores
 from .plot_variance_mse import plot_variance_mse
+from .plot_shap_importance import (plot_shap_average_across_models,
+                                   plot_shap_samples_across_models)
 
 log = get_logger()
 
@@ -60,7 +62,8 @@ def plot_experiment_results(experiments_dir: Path,
             #     variances = {k: npz[k] for k in npz.files}
 
             all_experiemnts.append(
-                ExperimentRecord(config, results, training_history))
+                ExperimentRecord(config, results, training_history,
+                                 experiment_dir=experiment_path))
             log.info(f'Gathered resulsts for experiment {asdict(config)}')
             for f in fields(ExperimentCfg):
                 val = getattr(config, f.name)
@@ -99,6 +102,13 @@ def plot_experiment_results(experiments_dir: Path,
 
     _plot_and_save(plot_variance_mse, all_experiemnts, varying_params,
                    experiments_dir / 'variance_mse.png')
+
+    # SHAP comparisons need compare_importance to have run first; the plot
+    # functions return None (and log) when no shap_samples.h5 is present.
+    _plot_and_save(plot_shap_average_across_models, all_experiemnts,
+                   varying_params, experiments_dir / 'shap_average.png')
+    _plot_and_save(plot_shap_samples_across_models, all_experiemnts,
+                   varying_params, experiments_dir / 'shap_sample.png')
 
 
 def _plot_and_save(plotting_func: Callable,

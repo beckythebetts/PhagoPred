@@ -25,15 +25,15 @@ def label_datasets(directory_path: Path,
 
 
 if __name__ == '__main__':
-    directory_path = Path('/home/ubuntu/thor_server/MacrophageData/12_06')
+    directory_path = Path('/home/ubuntu/thor_server/29_06')
     phase_only_names = [
-        'A', 'B', 'C', 'L', 'J', 'K', 'M', 'N', 'O', 'W', 'X', 'Y'
+        'A', 'B', 'C', 'L', 'J', 'K', 'M', 'N', 'O', 'X', 'W', 'V'
     ]
     moi_dict = {
-        10: ['A', 'B', 'C', 'D', 'E', 'F'],
-        5: ['L', 'K', 'J', 'I', 'H', 'G'],
-        2: ['M', 'N', 'O', 'P', 'Q', 'R'],
-        0: ['W', 'X', 'Y', 'U', 'T', 'S']
+        0.1: ['A', 'B', 'C', 'D', 'E', 'F'],
+        0.5: ['L', 'K', 'J', 'I', 'H', 'G'],
+        1: ['M', 'N', 'O', 'P', 'Q', 'R'],
+        2: ['X', 'W', 'V', 'U', 'T', 'S']
     }
 
     label_datasets(directory_path, phase_only_names, moi_dict)

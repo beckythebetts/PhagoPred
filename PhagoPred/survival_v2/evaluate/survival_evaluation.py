@@ -37,9 +37,9 @@ class SurvivalResults:
     n_censored: int
     cm_expected: np.ndarray
     cm_argmax: np.ndarray
-    cm_soft: np.ndarray
-    brier_times: np.ndarray
-    brier_scores: np.ndarray
+    cm_soft: np.ndarray | None = None
+    brier_times: np.ndarray | None = None
+    brier_scores: np.ndarray | None = None
 
     hazard_mse_per_bin: np.ndarray | None = None
     pmf_mse_per_bin: np.ndarray | None = None

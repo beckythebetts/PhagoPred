@@ -11,16 +11,10 @@ import h5py
 from .generate_datasets import generate_dataset, calibrate_hazard, load_hazard_func, estimate_variances
 # from .predictability import compute_h_var  # unused; compute_h_var is currently commented out in predictability.py
 from .graph import Feature, CausalGraph
-from .rules import (
-    Rule,
-    ReLU,
-    Threshold,
-    Sigmoid,
-    Var,
-    AutoCorrelationRule,
-    MeanReversionRule,
-    expand_to_noise,
-)
+from .rules import (Rule, ReLU, Threshold, Sigmoid, Var, AutoCorrelationRule,
+                    MeanReversionRule, Sin
+                    # expand_to_noise,
+                    )
 
 
 @dataclass
@@ -85,13 +79,17 @@ class ScenarioCfg:
             set(self.observed_features) & set(self.hidden_features))
         features = []
         for feature_name in self.observed_features:
-            features.append(
-                Feature(
-                    feature_name,
-                    pre_noise=self.noise_cfg.pre_noise,
-                    post_noise=self.noise_cfg.post_noise,
-                    hidden=False,
-                ))
+            if feature_name == 'Hazard':
+                features.append(
+                    Feature(feature_name, pre_noise=_hazard_noise.pre_noise))
+            else:
+                features.append(
+                    Feature(
+                        feature_name,
+                        pre_noise=self.noise_cfg.pre_noise,
+                        post_noise=self.noise_cfg.post_noise,
+                        hidden=False,
+                    ))
         for feature_name in self.hidden_features:
             features.append(
                 Feature(
@@ -224,40 +222,13 @@ class ScenarioCfg:
                     )
                     ds.attrs['rows'] = ['Total', 'Unobserved']
 
-    # def _save_variances(file_names: list[Path],
-    #                     graph: CausalGraph,
-    #                     hazard_calibration_func: callable,
-    #                     max_horizon: int,
-    #                     max_base_time_steps: int,
-    #                     base_sample_size: int = 200,
-    #                     branch_sample_size: int = 1000,
-    #                     hazard_bins: np.ndarray | None = None):
-    #     variances = estimate_variances(
-    #         graph,
-    #         hazard_calibration_func,
-    #         max_horizon,
-    #         max_base_time_steps,
-    #         base_sample_size,
-    #         branch_sample_size,
-    #         hazard_bins=hazard_bins,
-    #     )
-    #     dataset_map = {'hazard': 'HazardRates', 'cdf': 'CIFs'}
-    #     for file_name in file_names:
-    #         with h5py.File(file_name, 'r+') as f:
-    #             for name, dataset_name in dataset_map.items():
-    #                 attrs = f['Cells']['Phase'][dataset_name].attrs
-    #                 attrs['Total Variance'] = variances[name]['Total']
-    #                 attrs['Unobserved Variance'] = variances[name][
-    #                     'Unobserved']
-    #             if hazard_bins is not None:
-    #                 f['Cells']['Phase']['HazardRates'].attrs[
-    #                     'Hazard Bins'] = hazard_bins
-
 
 # === NOISE CFGS ===
 # pre_noise drives the causal dynamics (same across noise levels for fair comparison).
 # post_noise is observation/measurement noise — varied to control SNR.
 _pre_noise_sigma = 0.5
+_hazard_noise = NoiseCfg(pre_noise=noise_funcs.NoNoise(),
+                         post_noise=noise_funcs.NoNoise())
 _no_noise = NoiseCfg(pre_noise=noise_funcs.GaussianNoise(_pre_noise_sigma),
                      post_noise=noise_funcs.NoNoise())
 _low_noise = NoiseCfg(pre_noise=noise_funcs.GaussianNoise(_pre_noise_sigma),
@@ -273,16 +244,24 @@ _low_missingness = MissingnessCfg(prob_missing=0.0,
                                   late_entry_prob=0.2,
                                   early_exit_prob=0.2)
 
-_default_auto_coefficient = 1 - 1e-5
+_high_ar_coeff = 1 - 1e-5
+_med_ar_coeff = 0.5
+_low_ar_coeff = 0
+
+_hazard_ar_coeff = 1 - 1e-5
+
+# _default_auto_coefficient = 0.8
 
 
 # === RULES ===
-def auto_correlate(feature_coeffs: dict[str, float] = None) -> list[Rule]:
+def auto_correlate(feature_coeffs: dict[str, float] = None,
+                   ar_coeff: float = _high_ar_coeff) -> list[Rule]:
     if feature_coeffs is None:
         feature_coeffs = {
-            feat_name: _default_auto_coefficient
+            feat_name: ar_coeff
             for feat_name in ('A', 'B', 'C', 'D')
         }
+        feature_coeffs['Hazard'] = _hazard_ar_coeff
         # feature_coeffs['Hazard'] = 0.8
     rules = []
     for key, val in feature_coeffs.items():
@@ -295,7 +274,7 @@ def mean_reversion(feature_params: dict[str, tuple] = None) -> list[Rule]:
     if feature_params is None:
         feature_params = {
             feat_name: (0.0, 0.01)
-            for feat_name in ('A', 'B', 'C', 'D')
+            for feat_name in ('A', 'B', 'C', 'D', 'Hazard')
         }
     rules = []
     for key, val in feature_params.items():
@@ -304,94 +283,51 @@ def mean_reversion(feature_params: dict[str, tuple] = None) -> list[Rule]:
     return rules
 
 
-_linear = [
-    Rule(target='Hazard',
-         expr=ReLU(Var('A', 25) + Var('B', 50) + Var('C', 100), thresh=3.0))
-] + auto_correlate()
+def _linear(ar_coeff: float) -> list[Rule]:
+    return [
+        Rule(target='Hazard', expr=Var('A', 25) + Var('B', 50) + Var('C', 100))
+    ] + auto_correlate(ar_coeff=ar_coeff)
 
-_chain = [
-    Rule(target='B', expr=0.8 * Var('A', 50)),
-    Rule(target='C', expr=0.8 * Var('B', 50)),
-    Rule(target='Hazard', expr=ReLU(Var('C', 50), thresh=0.0))
-] + auto_correlate({
-    'A': _default_auto_coefficient,
-    'B': 0.2,
-    'C': 0.2,
-    'D': _default_auto_coefficient,
-    # 'Hazard': 0.8
-})
 
-_multiplicative = [
-    Rule(target='Hazard', expr=ReLU(Var('A', 50) * Var('B', 100), thresh=0.0))
-] + auto_correlate()
+def _linear_chain(ar_coeff: float) -> list[Rule]:
+    return [
+        Rule(target='B', expr=0.8 * Var('A', 50)),
+        Rule(target='C', expr=0.8 * Var('B', 50)),
+        Rule(target='Hazard', expr=Var('C', 50))
+    ] + auto_correlate(ar_coeff=ar_coeff)
 
-_ratio = [Rule(target='Hazard', expr=Sigmoid(Var('A', 50) / Var('B', 100)))
-          ] + auto_correlate()
 
-# _resetting_accumulation = [
-#     Rule(target='Hazard', expr=ReLU(Var('A') - )
-# ] + auto_correlate({
-#     'A': 0.999,
-#     'B': 0.999,
-#     'C': 0.999,
-#     'D': 0.999,
-# }) + mean_reversion()
+def _nonlinear_chain(ar_coeff: float) -> list[Rule]:
+    return [
+        Rule(target='B', expr=Sin(Var('A', 50))),
+        Rule(target='C', expr=Sin(Var('B', 50))),
+        Rule(target='Hazard', expr=Var('C', 50)),
+    ] + auto_correlate(ar_coeff=ar_coeff)
+
+
+# _multiplicative = [
+#     Rule(target='Hazard', expr=ReLU(Var('A', 50) * Var('B', 100), thresh=0.0))
+# ] + auto_correlate()
+
+# _ratio = [Rule(target='Hazard', expr=Sigmoid(Var('A', 50) / Var('B', 100)))
+#           ] + auto_correlate()
+_SCENARIO_BUILDERS = (
+    ('linear', _linear),
+    ('linear_chain', _linear_chain),
+    ('nonlinear_chain', _nonlinear_chain),
+)
+_AR_VARIANTS = (
+    (_low_ar_coeff, 'low_ar'),
+    (_med_ar_coeff, 'med_ar'),
+    (_high_ar_coeff, 'high_ar'),
+    )
 
 ALL_CFGS: list[ScenarioCfg] = [
-    ScenarioCfg('base_linear',
-                rules=_linear,
+    ScenarioCfg(f'{name}_{ar_name}',
+                rules=build(ar),
                 noise_cfg=_low_noise,
-                missingness_cfg=_low_missingness),
-    # Learning-curve ablation: linear rules at varying training set sizes
-    # ScenarioCfg('base_linear_n100',
-    #             rules=_linear,
-    #             noise_cfg=_low_noise,
-    #             missingness_cfg=_low_missingness,
-    #             train_num_cells=100),
-    # ScenarioCfg('base_linear_n500',
-    #             rules=_linear,
-    #             noise_cfg=_low_noise,
-    #             missingness_cfg=_low_missingness,
-    #             train_num_cells=500),
-    # ScenarioCfg('base_linear_n1000',
-    #             rules=_linear,
-    #             noise_cfg=_low_noise,
-    #             missingness_cfg=_low_missingness,
-    #             train_num_cells=1000),
-    # ScenarioCfg('base_linear_n5000',
-    #             rules=_linear,
-    #             noise_cfg=_low_noise,
-    #             missingness_cfg=_low_missingness,
-    #             train_num_cells=5000),
-    ScenarioCfg('base_chain',
-                rules=_chain,
-                noise_cfg=_low_noise,
-                missingness_cfg=_low_missingness),
-    ScenarioCfg('base_multiplicative',
-                rules=_multiplicative,
-                noise_cfg=_low_noise,
-                missingness_cfg=_low_missingness),
-    ScenarioCfg('base_ratio',
-                rules=_ratio,
-                noise_cfg=_low_noise,
-                missingness_cfg=_low_missingness),
-    # ScenarioCfg('base_restting_accumulation',
-    #             rules=_resetting_accumulation,
-    #             noise_cfg=_low_noise,
-    #             missingness_cfg=_low_missingness),
-    # Noise-level comparison (linear rules)
-    # ScenarioCfg('linear_no_noise',
-    #             rules=_linear,
-    #             noise_cfg=_no_noise,
-    #             missingness_cfg=_low_missingness),
-    # ScenarioCfg('linear_low_noise',
-    #             rules=_linear,
-    #             noise_cfg=_low_noise,
-    #             missingness_cfg=_low_missingness),
-    # ScenarioCfg('linear_high_noise',
-    #             rules=_linear,
-    #             noise_cfg=_high_noise,
-    #             missingness_cfg=_low_missingness),
+                missingness_cfg=_none_missing) for ar, ar_name in _AR_VARIANTS
+    for name, build in _SCENARIO_BUILDERS
 ]
 
 
@@ -448,18 +384,19 @@ if __name__ == '__main__':
     save_dir = Path('PhagoPred') / 'Datasets' / 'graph_synthetic'
 
     for cfg in ALL_CFGS:
+        cfg: ScenarioCfg
         print(f"Generating '{cfg.filename}' ...")
         cfg.calibrate_hazard()
         cfg.generate(save_dir)
         # c
-        cfg.load(save_dir)
-        max_horizon = 100
+        # cfg.load(save_dir)
+        # max_horizon = 100
         # cfg.save_variances(save_dir,
         #                    max_horizon,
         #                    base_sample_size=500,
         #                    warm_up_steps=50,
         #                    force=True)
-        cfg.load(save_dir)
+        # cfg.load(save_dir)
     print('Done.')
 
     # plot_variances(save_path=Path('temp') / 'variances_hazards.png',

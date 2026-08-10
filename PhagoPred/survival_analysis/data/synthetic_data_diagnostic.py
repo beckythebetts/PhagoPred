@@ -9,6 +9,7 @@ import h5py
 from PhagoPred.survival_analysis.data.synthetic_data import Cell, GradualRampRule, create_synthetic_dataset
 from PhagoPred.survival_analysis.data.dataset import CellDataset
 
+
 def create_dataset_with_delay(delay, num_cells=1000, num_frames=1000):
     """Create synthetic dataset with specified delay."""
 
@@ -18,7 +19,8 @@ def create_dataset_with_delay(delay, num_cells=1000, num_frames=1000):
 
     # Modify the rule to use specified delay
     rules = [
-        GradualRampRule(feature='1', ramp_height=10.0, delay=delay, sigma=30.0),
+        GradualRampRule(feature='1', ramp_height=10.0, delay=delay,
+                        sigma=30.0),
     ]
     num_rules = len(rules)
     for rule in rules:
@@ -26,11 +28,14 @@ def create_dataset_with_delay(delay, num_cells=1000, num_frames=1000):
 
     # Generate data (copying from create_synthetic_dataset)
     start_frames = np.random.randint(0, 10, size=num_cells)
-    end_frames = np.random.randint(num_frames//2, num_frames, size=num_cells)
+    end_frames = np.random.randint(num_frames // 2, num_frames, size=num_cells)
 
     features = ['0', '1', '2']
 
-    all_features = {name: np.empty((num_frames, num_cells), dtype=np.float32) for name in features}
+    all_features = {
+        name: np.empty((num_frames, num_cells), dtype=np.float32)
+        for name in features
+    }
     all_deaths = np.empty(num_cells, dtype=np.float32)
     cifs = np.empty((num_frames, num_cells), dtype=np.float32)
     pmfs = np.empty((num_frames, num_cells), dtype=np.float32)
@@ -75,7 +80,9 @@ def create_dataset_with_delay(delay, num_cells=1000, num_frames=1000):
         grp = f.create_group('Cells/Phase')
         for name in features:
             grp.create_dataset(name, data=all_features[name], dtype=np.float32)
-        grp.create_dataset('CellDeath', data=all_deaths[np.newaxis, :], dtype=np.float32)
+        grp.create_dataset('CellDeath',
+                           data=all_deaths[np.newaxis, :],
+                           dtype=np.float32)
         grp.create_dataset('CIFs', data=cifs, dtype=np.float32)
         grp.create_dataset('PMFs', data=pmfs, dtype=np.float32)
         grp.create_dataset('Hazards', data=hazards, dtype=np.float32)
@@ -83,11 +90,15 @@ def create_dataset_with_delay(delay, num_cells=1000, num_frames=1000):
     return temp_path
 
 
-def analyze_delay_effect(delays=[100, 150, 200], num_cells=1000, num_frames=1000,
-                         num_bins=5, min_length=200, max_time_to_death=100):
+def analyze_delay_effect(delays=[100, 150, 200],
+                         num_cells=1000,
+                         num_frames=1000,
+                         num_bins=5,
+                         min_length=200,
+                         max_time_to_death=100):
     """Analyze how different delay values affect the dataset using actual CellDataset class."""
 
-    fig, axes = plt.subplots(len(delays), 4, figsize=(20, 5*len(delays)))
+    fig, axes = plt.subplots(len(delays), 4, figsize=(20, 5 * len(delays)))
     if len(delays) == 1:
         axes = axes.reshape(1, -1)
 
@@ -110,8 +121,8 @@ def analyze_delay_effect(delays=[100, 150, 200], num_cells=1000, num_frames=1000
             uncensored_only=False,
         )
 
-        # Get normalization stats (as in training)
-        means, stds = dataset.get_normalization_stats()
+        # Get normalisation stats (as in training)
+        means, stds = dataset.get_normalisation_stats()
 
         print(f"\nDataset created:")
         print(f"  Total samples in metadata: {len(dataset)}")
@@ -125,7 +136,8 @@ def analyze_delay_effect(delays=[100, 150, 200], num_cells=1000, num_frames=1000
         valid_samples = 0
         none_samples = 0
 
-        for _ in tqdm(range(num_samples), desc=f'Sampling dataset (delay={delay})'):
+        for _ in tqdm(range(num_samples),
+                      desc=f'Sampling dataset (delay={delay})'):
             idx = np.random.randint(len(dataset))
             item = dataset[idx]
             if item is None:
@@ -162,16 +174,23 @@ def analyze_delay_effect(delays=[100, 150, 200], num_cells=1000, num_frames=1000
         bin_counts = np.bincount(event_bins, minlength=num_bins)
         print(f"\nSamples per bin:")
         for i in range(num_bins):
-            print(f"  Bin {i}: {bin_counts[i]} ({100*bin_counts[i]/len(event_bins):.1f}%)")
+            print(
+                f"  Bin {i}: {bin_counts[i]} ({100*bin_counts[i]/len(event_bins):.1f}%)"
+            )
 
         # Check for issues
         unique_bin_edges = len(np.unique(dataset.event_time_bins))
         if unique_bin_edges < num_bins + 1:
-            print(f"\n⚠️  WARNING: Only {unique_bin_edges} unique bin edges (expected {num_bins+1})")
+            print(
+                f"\n⚠️  WARNING: Only {unique_bin_edges} unique bin edges (expected {num_bins+1})"
+            )
 
-        max_bin_proportion = np.max(bin_counts) / len(event_bins) if len(event_bins) > 0 else 0
+        max_bin_proportion = np.max(bin_counts) / len(event_bins) if len(
+            event_bins) > 0 else 0
         if max_bin_proportion > 0.5:
-            print(f"⚠️  WARNING: Most populous bin has {100*max_bin_proportion:.1f}% of samples")
+            print(
+                f"⚠️  WARNING: Most populous bin has {100*max_bin_proportion:.1f}% of samples"
+            )
 
         if np.min(bin_counts) == 0:
             empty_bins = np.where(bin_counts == 0)[0]
@@ -184,7 +203,11 @@ def analyze_delay_effect(delays=[100, 150, 200], num_cells=1000, num_frames=1000
 
         ax = axes[delay_idx, 0]
         ax.plot(typical_hazard)
-        ax.axhline(y=1.0, color='r', linestyle='--', alpha=0.5, label='Saturation')
+        ax.axhline(y=1.0,
+                   color='r',
+                   linestyle='--',
+                   alpha=0.5,
+                   label='Saturation')
         ax.set_title(f'Delay={delay}: Hazard (sample 0)')
         ax.set_xlabel('Frame')
         ax.set_ylabel('Hazard')
@@ -202,7 +225,9 @@ def analyze_delay_effect(delays=[100, 150, 200], num_cells=1000, num_frames=1000
         # Plot 3: Time-to-event distribution
         ax = axes[delay_idx, 2]
         ax.hist(event_time_to_events, bins=50, alpha=0.7, edgecolor='black')
-        ax.axvline(np.mean(event_time_to_events), color='r', linestyle='--',
+        ax.axvline(np.mean(event_time_to_events),
+                   color='r',
+                   linestyle='--',
                    label=f'Mean={np.mean(event_time_to_events):.0f}')
         ax.set_title(f'Delay={delay}: Time-to-Event Distribution')
         ax.set_xlabel('Time-to-Event (frames)')
@@ -213,7 +238,11 @@ def analyze_delay_effect(delays=[100, 150, 200], num_cells=1000, num_frames=1000
         # Plot 4: Bin distribution
         ax = axes[delay_idx, 3]
         colors = ['red' if c == 0 else 'blue' for c in bin_counts]
-        ax.bar(range(num_bins), bin_counts, alpha=0.7, edgecolor='black', color=colors)
+        ax.bar(range(num_bins),
+               bin_counts,
+               alpha=0.7,
+               edgecolor='black',
+               color=colors)
         ax.set_title(f'Delay={delay}: Samples per Bin')
         ax.set_xlabel('Bin Index')
         ax.set_ylabel('Count')
@@ -222,8 +251,13 @@ def analyze_delay_effect(delays=[100, 150, 200], num_cells=1000, num_frames=1000
 
         # Add bin edges as text
         bin_text = f"Bin edges: {dataset.event_time_bins[:num_bins+1]}"
-        ax.text(0.5, 0.95, bin_text, transform=ax.transAxes,
-                verticalalignment='top', fontsize=8, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        ax.text(0.5,
+                0.95,
+                bin_text,
+                transform=ax.transAxes,
+                verticalalignment='top',
+                fontsize=8,
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
 
     plt.tight_layout()
     output_path = Path('temp') / 'delay_diagnostic_with_dataset.png'
@@ -250,7 +284,11 @@ def analyze_gaussian_scaling(num_frames=1000):
     axes[0, 0].set_ylabel('Hazard Contribution')
     axes[0, 0].legend()
     axes[0, 0].grid(True)
-    axes[0, 0].axhline(y=1.0, color='r', linestyle='--', alpha=0.5, label='Saturation')
+    axes[0, 0].axhline(y=1.0,
+                       color='r',
+                       linestyle='--',
+                       alpha=0.5,
+                       label='Saturation')
 
     # Show the issue with scaling
     sigma = 30.0
@@ -274,7 +312,11 @@ def analyze_gaussian_scaling(num_frames=1000):
     axes[1, 0].grid(True)
 
     axes[1, 1].plot(gaussian_scaled, label='Scaled by 5 (current code)')
-    axes[1, 1].axhline(y=1.0, color='r', linestyle='--', alpha=0.5, label='Saturation threshold')
+    axes[1, 1].axhline(y=1.0,
+                       color='r',
+                       linestyle='--',
+                       alpha=0.5,
+                       label='Saturation threshold')
     axes[1, 1].set_title(f'Final Hazard Contribution (sigma={sigma})')
     axes[1, 1].set_xlabel('Frame')
     axes[1, 1].set_ylabel('Hazard')
@@ -296,13 +338,16 @@ def analyze_gaussian_scaling(num_frames=1000):
 
 if __name__ == '__main__':
     print("Running diagnostic analysis...")
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("PART 1: Analyzing Gaussian Scaling")
-    print("="*60)
+    print("=" * 60)
     analyze_gaussian_scaling()
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("PART 2: Analyzing Delay Effects with CellDataset")
-    print("="*60)
-    analyze_delay_effect(delays=[100, 150, 200], num_cells=1000, num_bins=5,
-                        min_length=200, max_time_to_death=100)
+    print("=" * 60)
+    analyze_delay_effect(delays=[100, 150, 200],
+                         num_cells=1000,
+                         num_bins=5,
+                         min_length=200,
+                         max_time_to_death=100)

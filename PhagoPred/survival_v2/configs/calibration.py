@@ -8,6 +8,7 @@ from PhagoPred.survival_v2.probability_calib import (
     TemperatureScalingResult,
     VectorScalingResult,
     PlattScalingResult,
+    IsotonicScalingResult,
 )
 
 
@@ -66,11 +67,34 @@ class PlattScalingCfg(CalibrationCfg):
         return PlattScalingResult(a=self.a, b=self.b)
 
 
+@dataclass
+class IsotonicScalingCfg(CalibrationCfg):
+    """Monotone non-parametric calibration on the binary probability. Binary only.
+
+    Fits a free step function from the model's predicted probability to the
+    empirical event rate (sklearn IsotonicRegression). The fitted interpolation
+    knots are stored so the map is reconstructed at load time without sklearn.
+    """
+    calibration_type: str = field(default='isotonic', init=False)
+    name: str = 'Isotonic Scaling'
+    x_thresholds: list[float] | None = field(default=None, compare=False)
+    y_thresholds: list[float] | None = field(default=None, compare=False)
+
+    def to_result(self) -> IsotonicScalingResult | None:
+        if self.x_thresholds is None or self.y_thresholds is None:
+            return None
+        return IsotonicScalingResult(
+            x_thresholds=np.array(self.x_thresholds),
+            y_thresholds=np.array(self.y_thresholds),
+        )
+
+
 CALIBRATION: dict[str, CalibrationCfg | None] = {
     'None': CalibrationCfg(),
     'Temperature Scaling': TemperatureScalingCfg(),
     'Vector Scaling': VectorScalingCfg(),
     'Platt Scaling': PlattScalingCfg(),
+    'Isotonic Scaling': IsotonicScalingCfg(),
 }
 
 CALIBRATION_TYPES: dict[str, type[CalibrationCfg]] = {
@@ -78,4 +102,5 @@ CALIBRATION_TYPES: dict[str, type[CalibrationCfg]] = {
     'temperature': TemperatureScalingCfg,
     'vector': VectorScalingCfg,
     'platt': PlattScalingCfg,
+    'isotonic': IsotonicScalingCfg,
 }

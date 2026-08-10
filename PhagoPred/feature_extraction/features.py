@@ -428,6 +428,119 @@ class Displacement(BaseFeature):
 
 
 class DensityPhase(BaseFeature):
+    derived_feature = True
+    crop = True
+
+    radii = [100, 250, 500]
+    frame_batch_size = 10
+
+    def get_names(self):
+        return [f'Phagocytes within {radius} pixels' for radius in self.radii]
+
+    def circle_fraction_in_frame(self, x, y, r, x_max, y_max):
+        circle = Point(x, y).buffer(r)
+        frame = box(0, 0, x_max, y_max)
+        intersection = circle.intersection(frame)
+        return intersection.area / (np.pi * r * r)
+
+    def compute(self, phase_xr: xr.DataArray, epi_xr: xr.DataArray):
+        """
+        phase_xr contains:
+          - X, Y   (Frame × Cell)
+          - CellDeath[0] (Cell,) = death frame or NaN
+        """
+
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        positions = xr.concat([phase_xr[feat] for feat in ['X', 'Y']],
+                              dim='Feature').transpose('Frame', 'Cell Index',
+                                                       'Feature').chunk({})
+
+        n_frames = positions.sizes['Frame']
+        n_cells = positions.sizes['Cell Index']
+        n_radii = len(self.radii)
+
+        # death_frame = phase_xr['CellDeath'][0].values
+
+        frame_idx = np.arange(n_frames)[:, None]
+        # death_expanded = np.broadcast_to(death_frame, (n_frames, n_cells))
+
+        # is_dead = (~np.isnan(death_expanded)) & (death_expanded <= frame_idx)
+        # is_alive = ~is_dead  # includes NaN → alive
+
+        results = np.full((n_frames, n_cells, n_radii), np.nan)
+
+        # Coords builds X from the row axis and Y from the column axis, so X is
+        # bounded by the image height and Y by its width - not the other way round.
+        x_max, y_max = SETTINGS.IMAGE_SIZE
+
+        for first_frame in tqdm(range(0, n_frames, self.frame_batch_size)):
+            last_frame = min(first_frame + self.frame_batch_size, n_frames)
+
+            batch_positions_np = positions.isel(
+                Frame=slice(first_frame, last_frame)).values
+            batch_positions = torch.tensor(batch_positions_np, device=device)
+
+            distances = batch_positions.unsqueeze(
+                2) - batch_positions.unsqueeze(1)
+            distances = torch.norm(distances, dim=3)
+            distances[distances == 0] = float('nan')
+
+            # alive_mask = torch.tensor(is_alive[first_frame:last_frame],
+            #                           device=device)
+            # dead_mask = torch.tensor(is_dead[first_frame:last_frame],
+            #                          device=device)
+
+            for r_idx, radius in enumerate(self.radii):
+
+                neighbors = (distances < radius)  # boolean adjacency
+
+                counts = (neighbors).sum(dim=2).cpu().numpy()
+                # alive_counts = (neighbors & alive_mask.unsqueeze(1)).sum(
+                #     dim=2).cpu().numpy()
+
+                # dead_counts = (neighbors & dead_mask.unsqueeze(1)).sum(
+                #     dim=2).cpu().numpy()
+
+                xs = batch_positions_np[..., 0]
+                ys = batch_positions_np[..., 1]
+
+                fraction_in = np.ones_like(xs)
+
+                edge_mask = (
+                    (xs - radius < 0) | (xs + radius > x_max) |
+                    (ys - radius < 0) |
+                    (ys + radius > y_max)) & ~np.isnan(xs) & ~np.isnan(ys)
+
+                if np.any(edge_mask):
+                    for i, j in np.argwhere(edge_mask):
+                        fraction_in[i, j] = self.circle_fraction_in_frame(
+                            xs[i, j], ys[i, j], radius, x_max, y_max)
+
+                # A centre inside the frame always keeps at least a quarter of its
+                # disc, so anything below 0.25 means the geometry is wrong.
+                fraction_in = np.clip(fraction_in, 0.25, 1.0)
+
+                corrected = counts / fraction_in
+                # dead_corrected = dead_counts / fraction_in
+
+                # print('alive ', np.unique(alive_corrected), '\ndead ', np.unique(dead_corrected))
+                # print("alive_corrected shape:", alive_corrected.shape)
+                # print("dead_corrected  shape:", dead_corrected.shape)
+                # print("results slice shape :", results[first_frame:last_frame, :, 2*r_idx+1].shape)
+                results[first_frame:last_frame, :, r_idx] = corrected
+                # results[first_frame:last_frame, :,
+                #         2 * r_idx + 1] = dead_corrected
+                # print(np.unique(results[first_frame:last_frame, :, 2 * r_idx + 1]))
+
+        valid_mask = ~np.isnan(phase_xr['X'].values)
+        results = np.where(valid_mask[:, :, None], results, np.nan)
+        # print(np.unique(results[first_frame:last_frame, :, 2 * r_idx + 1]))
+
+        return results
+
+
+class DensityPhaseWithDeath(BaseFeature):
 
     derived_feature = True
     crop = True
@@ -441,9 +554,9 @@ class DensityPhase(BaseFeature):
             for radius in self.radii for state in ['Alive', 'Dead']
         ]
 
-    def circle_fraction_in_frame(self, x, y, r, H, W):
+    def circle_fraction_in_frame(self, x, y, r, x_max, y_max):
         circle = Point(x, y).buffer(r)
-        frame = box(0, 0, W, H)
+        frame = box(0, 0, x_max, y_max)
         intersection = circle.intersection(frame)
         return intersection.area / (np.pi * r * r)
 
@@ -474,7 +587,9 @@ class DensityPhase(BaseFeature):
 
         results = np.full((n_frames, n_cells, 2 * n_radii), np.nan)
 
-        H, W = SETTINGS.IMAGE_SIZE
+        # Coords builds X from the row axis and Y from the column axis, so X is
+        # bounded by the image height and Y by its width - not the other way round.
+        x_max, y_max = SETTINGS.IMAGE_SIZE
 
         for first_frame in tqdm(range(0, n_frames, self.frame_batch_size)):
             last_frame = min(first_frame + self.frame_batch_size, n_frames)
@@ -508,16 +623,19 @@ class DensityPhase(BaseFeature):
 
                 fraction_in = np.ones_like(xs)
 
-                edge_mask = ((xs - radius < 0) | (xs + radius > W) |
-                             (ys - radius < 0) |
-                             (ys + radius > H)) & ~np.isnan(xs) & ~np.isnan(ys)
+                edge_mask = (
+                    (xs - radius < 0) | (xs + radius > x_max) |
+                    (ys - radius < 0) |
+                    (ys + radius > y_max)) & ~np.isnan(xs) & ~np.isnan(ys)
 
                 if np.any(edge_mask):
                     for i, j in np.argwhere(edge_mask):
                         fraction_in[i, j] = self.circle_fraction_in_frame(
-                            xs[i, j], ys[i, j], radius, H, W)
+                            xs[i, j], ys[i, j], radius, x_max, y_max)
 
-                fraction_in = np.clip(fraction_in, 1e-3, 1.0)
+                # A centre inside the frame always keeps at least a quarter of its
+                # disc, so anything below 0.25 means the geometry is wrong.
+                fraction_in = np.clip(fraction_in, 0.25, 1.0)
 
                 alive_corrected = alive_counts / fraction_in
                 dead_corrected = dead_counts / fraction_in

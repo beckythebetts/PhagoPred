@@ -168,6 +168,20 @@ class Max(Expr):
         return self.sources[active].partial(var_name, lag, context)
 
 
+class Sin(Expr):
+
+    def __init__(self, source: str | Expr):
+        self.source = Var(source) if isinstance(source, str) else source
+
+    def __call__(self, context):
+        return np.sin(self.source(context))
+
+    def partial(self, var_name, lag, context):
+        # chain rule: d/dx sin(g) = cos(g) * dg/dx
+        return np.cos(self.source(context)) * self.source.partial(
+            var_name, lag, context)
+
+
 class Apply(Expr):
 
     def __init__(self, func, source: str | Expr, *args, **kwargs):
@@ -304,6 +318,15 @@ class Rule:
             result[v.name].append(v.lag)
         return result
 
+    def get_map(self) -> dict[str, list[tuple[str, int, Rule]]]:
+        """Get direct children (name and lags) of all input features"""
+        result = {}
+        for v in _vars(self.expr):
+            if v.name not in result:
+                result[v.name] = []
+            result[v.name].append((self.target, v.lag, self))
+        return result
+
 
 def _vars(expr: Expr) -> list[Var]:
     if isinstance(expr, Var):
@@ -335,45 +358,45 @@ class MeanReversionRule(Rule):
         super().__init__(target, expr)
 
 
-def expand_to_noise(rules: list[Rule],
-                    target: str,
-                    t: int,
-                    max_depth: int = 10):
-    rules_by_target = defaultdict(list)
-    for rule in rules:
-        rules_by_target[rule.target].append(rule)
+# def expand_to_noise(rules: list[Rule],
+#                     target: str,
+#                     t: int,
+#                     max_depth: int = 10):
+#     rules_by_target = defaultdict(list)
+#     for rule in rules:
+#         rules_by_target[rule.target].append(rule)
 
-    def expand_var(name, time, depth):
-        noise_term = sp.Symbol(f'noise_{name}_{time}')
-        if depth <= 0 or name not in rules_by_target:
-            return noise_term
-        return noise_term + sum(
-            expand_expr(rule.expr, time, depth - 1)
-            for rule in rules_by_target[name])
+#     def expand_var(name, time, depth):
+#         noise_term = sp.Symbol(f'noise_{name}_{time}')
+#         if depth <= 0 or name not in rules_by_target:
+#             return noise_term
+#         return noise_term + sum(
+#             expand_expr(rule.expr, time, depth - 1)
+#             for rule in rules_by_target[name])
 
-    def expand_expr(expr, time, depth):
-        if isinstance(expr, Const):
-            return sp.Float(expr.val)
-        elif isinstance(expr, Var):
-            return expand_var(expr.name, time - expr.lag, depth)
-        elif isinstance(expr, Add):
-            return (expand_expr(expr.left, time, depth) +
-                    expand_expr(expr.right, time, depth))
-        elif isinstance(expr, Sub):
-            return (expand_expr(expr.left, time, depth) -
-                    expand_expr(expr.right, time, depth))
-        elif isinstance(expr, Mul):
-            return (expand_expr(expr.left, time, depth) *
-                    expand_expr(expr.right, time, depth))
-        elif isinstance(expr, Div):
-            return (expand_expr(expr.left, time, depth) /
-                    expand_expr(expr.right, time, depth))
-        elif isinstance(expr, Apply):
-            inner = expand_expr(expr.source, time, depth)
-            return sp.Function(expr.func.__name__)(inner)
-        elif hasattr(expr, 'source'):
-            inner = expand_expr(expr.source, time, depth)
-            return sp.Function(type(expr).__name__)(inner)
-        return sp.Symbol(f'unknown_{time}')
+#     def expand_expr(expr, time, depth):
+#         if isinstance(expr, Const):
+#             return sp.Float(expr.val)
+#         elif isinstance(expr, Var):
+#             return expand_var(expr.name, time - expr.lag, depth)
+#         elif isinstance(expr, Add):
+#             return (expand_expr(expr.left, time, depth) +
+#                     expand_expr(expr.right, time, depth))
+#         elif isinstance(expr, Sub):
+#             return (expand_expr(expr.left, time, depth) -
+#                     expand_expr(expr.right, time, depth))
+#         elif isinstance(expr, Mul):
+#             return (expand_expr(expr.left, time, depth) *
+#                     expand_expr(expr.right, time, depth))
+#         elif isinstance(expr, Div):
+#             return (expand_expr(expr.left, time, depth) /
+#                     expand_expr(expr.right, time, depth))
+#         elif isinstance(expr, Apply):
+#             inner = expand_expr(expr.source, time, depth)
+#             return sp.Function(expr.func.__name__)(inner)
+#         elif hasattr(expr, 'source'):
+#             inner = expand_expr(expr.source, time, depth)
+#             return sp.Function(type(expr).__name__)(inner)
+#         return sp.Symbol(f'unknown_{time}')
 
-    return sp.expand(expand_var(target, t, max_depth))
+#     return sp.expand(expand_var(target, t, max_depth))

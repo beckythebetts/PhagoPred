@@ -14,8 +14,8 @@ def cellpose_train(directory: Path):
     io.logger_setup()
     print(f'Loading train data from {directory / "train"}')
     images, labels, image_names, test_images, test_labels, image_names_test = io.load_train_test_data(
-        str(directory / 'train' / 'data'),
-        str(directory / 'validate' / 'data'),
+        str(directory / 'train'),
+        str(directory / 'validate'),
         image_filter='im',
         mask_filter='mask')
     model = models.CellposeModel(gpu=use_GPU, pretrained_model='cpsam')
@@ -29,13 +29,14 @@ def cellpose_train(directory: Path):
         normalize=True,
         test_data=test_images,
         test_labels=test_labels,
-        weight_decay=1e-4,
+        weight_decay=0.1,
         SGD=True,
-        learning_rate=1e-4,
+        learning_rate=1e-5,
         n_epochs=100,
         save_path=str(directory),
         model_name='model',
-        batch_size=2)
+        batch_size=2,
+        rescale=True)
 
     losses_dict = {
         'Train Losses': train_losses.tolist(),
@@ -58,14 +59,16 @@ def cellpose_train(directory: Path):
     plt.clf()
 
 
-def detectron_to_cellpose_dir_structure(dir_path: Path):
-    for im in (dir_path / 'images').iterdir():
-        mask = mask_funcs.convert_coco_file
+# def detectron_to_cellpose_dir_structure(dir_path: Path):
+#     for im in (dir_path / 'images').iterdir():
+#         mask = mask_funcs.convert_coco_file
 
 
 def main():
 
-    model_directory = SETTINGS.CELLPOSE_MODEL
+    model_directory = Path(
+        '/home/ubuntu/PhagoPred/PhagoPred/cellpose_segmentation/Models/bio_20x_thp1_clahe_withrescale'
+    )
     # mask_funcs.convert_coco_file(model_directory / 'train' / 'labels.json',
     #                              model_directory / 'train' / 'images',
     #                              model_directory / 'train' / 'data')

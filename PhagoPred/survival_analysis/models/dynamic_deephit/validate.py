@@ -10,6 +10,7 @@ import numpy as np
 from PhagoPred.survival_analysis.data.dataset import CellDataset, collate_fn
 from PhagoPred.survival_analysis.models.dynamic_deephit import model
 
+
 def validate_step(model_, dataloader, loss_fn, device):
     model_.eval()
     # total_loss = 0.0
@@ -24,22 +25,36 @@ def validate_step(model_, dataloader, loss_fn, device):
             # event_indicators = event_indicators.to(device)
             # time_to_events = time_to_events.to(device)
 
-            outputs, y = model_(batch['features'], batch['length'], mask=batch['mask'])
-            loss_values = loss_fn(outputs, batch['time_to_event_bin'], batch['event_indicator'], batch['features'], y, mask=batch['mask'])
-            for key, value in zip(
-                ['Total Loss', 'NLL Loss', 'Ranking Loss', 'Prediction Loss', 'Censored Loss', 'Uncensored Loss'], loss_values):
-                losses[key] += value.item() * batch['features'].size(0)  # Multiply by batch size
+            outputs, y = model_(batch['features'],
+                                batch['length'],
+                                mask=batch['mask'])
+            loss_values = loss_fn(outputs,
+                                  batch['time_to_event_bin'],
+                                  batch['event_indicator'],
+                                  batch['features'],
+                                  y,
+                                  mask=batch['mask'])
+            for key, value in zip([
+                    'Total Loss', 'NLL Loss', 'Ranking Loss',
+                    'Prediction Loss', 'Censored Loss', 'Uncensored Loss'
+            ], loss_values):
+                losses[key] += value.item() * batch['features'].size(
+                    0)  # Multiply by batch size
 
-    avg_losses = {key: value / len(dataloader.dataset) for key, value in losses.items()}
+    avg_losses = {
+        key: value / len(dataloader.dataset)
+        for key, value in losses.items()
+    }
     return avg_losses
 
+
 def visualize_validation_predictions(
-    model_, 
-    dataloader, 
-    device, 
-    bin_edges, 
-    features=None,               # ← OPTIONAL: list of feature names
-    num_examples=20, 
+    model_,
+    dataloader,
+    device,
+    bin_edges,
+    features=None,  # ← OPTIONAL: list of feature names
+    num_examples=20,
     save_path=None,
     padding_at: str = 'start',
 ):
@@ -57,44 +72,55 @@ def visualize_validation_predictions(
         time_to_events = batch['time_to_event'].cpu().numpy()
         event_indicators = batch['event_indicator'].cpu().numpy()
         cell_idxs = batch['cell_idx']
-        files = batch['hdf5_path']  
+        files = batch['hdf5_path']
         feature_values = batch['features'].cpu().numpy()
-        
-              
+
         with torch.no_grad():
-            outputs, _, attn_weights = model_(batch['features'], batch['length'], return_attention=True, mask=batch['mask'])
-        
+            outputs, _, attn_weights = model_(batch['features'],
+                                              batch['length'],
+                                              return_attention=True,
+                                              mask=batch['mask'])
+
         predicted_pmf = model.estimated_pmf(outputs)
         attn_weights_np = attn_weights.cpu().numpy()
 
         for i in range(len(batch['features'])):
-            
+
             seq_len = lengths[i]
-            
+
             if padding_at == 'start':
                 padding_slice = slice(-seq_len, None)
             else:
                 padding_slice = slice(None, seq_len)
-                
+
             if examples_plotted >= num_examples:
                 break
 
-            
-
             fig = plt.figure(figsize=(14, 6))
-            gs = fig.add_gridspec(2, 2, width_ratios=[2, 1], height_ratios=[1, 1.2])
+            gs = fig.add_gridspec(2,
+                                  2,
+                                  width_ratios=[2, 1],
+                                  height_ratios=[1, 1.2])
 
             # ====== (1) Attention + Feature Values Overlay ======
             # print(attn_weights_np.shape, feature_values.shape)
-            attn_weights  = attn_weights_np[i, padding_slice]
+            attn_weights = attn_weights_np[i, padding_slice]
             ax_att = fig.add_subplot(gs[0, 0])
-            ax_att.scatter(np.arange(seq_len), attn_weights, color='k', marker='o', label='Attention')
+            ax_att.scatter(np.arange(seq_len),
+                           attn_weights,
+                           color='k',
+                           marker='o',
+                           label='Attention')
             ax_att.set_ylabel("Attention")
-            
+
             ax_feat = fig.add_subplot(gs[1, 0])
             feats = feature_values[i, padding_slice, :]
             for f_idx in range(feats.shape[1]):
-                ax_feat.plot(np.arange(seq_len), feats[:, f_idx], label=(features[f_idx] if features else f"F{f_idx}"), alpha=0.7)
+                ax_feat.plot(
+                    np.arange(seq_len),
+                    feats[:, f_idx],
+                    label=(features[f_idx] if features else f"F{f_idx}"),
+                    alpha=0.7)
 
             ax_feat.set_xlabel("Time Step")
             ax_feat.set_ylabel("Covariates")
@@ -105,18 +131,17 @@ def visualize_validation_predictions(
             ax_sd = fig.add_subplot(gs[:, 1])  # span both rows
             abs_bin_edges = bin_edges + seq_len
             bin_widths = np.diff(abs_bin_edges)
-            bin_widths[-1] = bin_widths[-2]  # make last bin same width for visualization
-  
-            ax_sd.bar(
-                abs_bin_edges[:-1],
-                predicted_pmf[i].cpu().numpy(),
-                width=bin_widths,
-                align='edge',
-                color='tab:blue',
-                edgecolor='k',
-                alpha=0.5
-            )
-            
+            bin_widths[-1] = bin_widths[
+                -2]  # make last bin same width for visualization
+
+            ax_sd.bar(abs_bin_edges[:-1],
+                      predicted_pmf[i].cpu().numpy(),
+                      width=bin_widths,
+                      align='edge',
+                      color='tab:blue',
+                      edgecolor='k',
+                      alpha=0.5)
+
             ax_sd.bar(
                 abs_bin_edges[:-1],
                 # np.arange(len(pmfs[i])),
@@ -130,11 +155,18 @@ def visualize_validation_predictions(
 
             abs_event_time = time_to_events[i] + seq_len
             if event_indicators[i] == 1:
-                ax_sd.axvline(abs_event_time, color='red', linestyle='--', label="True Event")
+                ax_sd.axvline(abs_event_time,
+                              color='red',
+                              linestyle='--',
+                              label="True Event")
             else:
-                ax_sd.axvline(abs_event_time, color='orange', linestyle='--', label="Censored")
+                ax_sd.axvline(abs_event_time,
+                              color='orange',
+                              linestyle='--',
+                              label="Censored")
 
-            ax_sd.set_title(f"Predicted Survival Distribution {cell_idxs[i]}, {files[i]}")
+            ax_sd.set_title(
+                f"Predicted Survival Distribution {cell_idxs[i]}, {files[i]}")
             ax_sd.set_xlabel("Absolute Time")
             ax_sd.set_ylabel("Probability")
             ax_sd.legend()
@@ -152,6 +184,7 @@ def visualize_validation_predictions(
 
         if examples_plotted >= num_examples:
             break
+
 
 def average_attention(model, dataloader, device, save_as: Path, max_len=None):
     """
@@ -179,22 +212,31 @@ def average_attention(model, dataloader, device, save_as: Path, max_len=None):
                 if event_indicators_np[i] == 1:
                     attn_vec = attn_weights_np[i, :lengths_np[i]]
                     time_to_event = time_to_events_np[i]
-                    aligned_vec = np.concatenate([attn_vec, np.full(time_to_event, np.nan)])
+                    aligned_vec = np.concatenate(
+                        [attn_vec, np.full(time_to_event, np.nan)])
 
                     attn_accum.append(aligned_vec)
                     lengths_list.append(len(aligned_vec))
         max_len = max(lengths_list)
-        padded_attn = [np.concatenate([np.full(max_len - len(attn), np.nan), attn]) for attn in attn_accum]
-        
+        padded_attn = [
+            np.concatenate([np.full(max_len - len(attn), np.nan), attn])
+            for attn in attn_accum
+        ]
+
     attn = np.stack(padded_attn, axis=0)
     # avg_attn = np.nanmean(attn, axis=0)
     avg_attn = np.nanpercentile(attn, 50, axis=0)
     lower = np.nanpercentile(attn, 25, axis=0)
     upper = np.nanpercentile(attn, 75, axis=0)
-    
-    plt.figure(figsize=(12,4))
+
+    plt.figure(figsize=(12, 4))
     plt.plot(np.arange(-len(avg_attn), 0), avg_attn, color='k')
-    plt.fill_between(np.arange(-len(avg_attn), 0), lower, upper, color='k', alpha=0.2, edgecolor='none')
+    plt.fill_between(np.arange(-len(avg_attn), 0),
+                     lower,
+                     upper,
+                     color='k',
+                     alpha=0.2,
+                     edgecolor='none')
     plt.xlabel("Time Step")
     plt.ylabel("Average Attention Weight")
     plt.title("Average Attention Weights Across Validation Set")
@@ -202,7 +244,9 @@ def average_attention(model, dataloader, device, save_as: Path, max_len=None):
     plt.savefig(save_as)
     plt.close()
 
-def average_feature_importance(model, dataloader, device, features, save_as: Path):
+
+def average_feature_importance(model, dataloader, device, features,
+                               save_as: Path):
     """
     Compute average gradient-based feature importance, aligned by event time.
     """
@@ -210,7 +254,8 @@ def average_feature_importance(model, dataloader, device, features, save_as: Pat
     all_importances = []
     lengths_list = []
 
-    for batch in tqdm(dataloader, desc="Computing gradient feature importance"):
+    for batch in tqdm(dataloader,
+                      desc="Computing gradient feature importance"):
         cell_features, lengths, time_to_event_bins, event_indicators, time_to_events, cell_idxs, files, pmfs = batch
         cell_features = cell_features.to(device)
         lengths_np = lengths.cpu().numpy()
@@ -241,7 +286,10 @@ def average_feature_importance(model, dataloader, device, features, save_as: Pat
 
             # Append NaNs for timesteps after event if needed
             time_to_event = time_to_events_np[i]
-            aligned_imp = np.concatenate([importance, np.full((time_to_event, importance.shape[1]), np.nan)])
+            aligned_imp = np.concatenate([
+                importance,
+                np.full((time_to_event, importance.shape[1]), np.nan)
+            ])
 
             all_importances.append(aligned_imp)
             lengths_list.append(aligned_imp.shape[0])
@@ -252,18 +300,20 @@ def average_feature_importance(model, dataloader, device, features, save_as: Pat
     max_len = max(lengths_list)
     # Prepend NaNs so events align at the same index
     padded_importances = [
-        np.concatenate([np.full((max_len - imp.shape[0], imp.shape[1]), np.nan), imp])
+        np.concatenate(
+            [np.full((max_len - imp.shape[0], imp.shape[1]), np.nan), imp])
         for imp in all_importances
     ]
 
-    stacked = np.stack(padded_importances, axis=0)  # (num_cells, num_frames, num_features)
+    stacked = np.stack(padded_importances,
+                       axis=0)  # (num_cells, num_frames, num_features)
     # mean_importance = np.nanmean(stacked, axis=0)
     median_importance = np.nanpercentile(stacked, 50, axis=0)
     lower = np.nanpercentile(stacked, 5, axis=0)
     upper = np.nanpercentile(stacked, 95, axis=0)
 
     # Plot each feature as a line with confidence interval
-    plt.figure(figsize=(12,6))
+    plt.figure(figsize=(12, 6))
     x = np.arange(-max_len, 0)  # negative steps leading to event
     for f_idx, feat_name in enumerate(features):
         plt.plot(x, median_importance[:, f_idx], label=feat_name)
@@ -277,10 +327,16 @@ def average_feature_importance(model, dataloader, device, features, save_as: Pat
     plt.savefig(save_as)
     plt.close()
 
+
 from sklearn.metrics import confusion_matrix
 import seaborn as sns
 
-def plot_confusion_matrix(model_, dataloader, device, num_bins, save_path=None):
+
+def plot_confusion_matrix(model_,
+                          dataloader,
+                          device,
+                          num_bins,
+                          save_path=None):
     """
     Plot a confusion matrix comparing predicted vs true event bins.
     Predicted bin is argmax over predicted PMF.
@@ -291,7 +347,9 @@ def plot_confusion_matrix(model_, dataloader, device, num_bins, save_path=None):
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc='GEtting confusion matrix data'):
-            outputs, _ = model_(batch['features'], batch['length'], mask=batch['mask'])
+            outputs, _ = model_(batch['features'],
+                                batch['length'],
+                                mask=batch['mask'])
             predicted_pmf = model.estimated_pmf(outputs)
 
             # True bins
@@ -306,8 +364,8 @@ def plot_confusion_matrix(model_, dataloader, device, num_bins, save_path=None):
             all_true.extend(true_bins[events == 1])
             all_pred.extend(pred_bins[events == 1])
 
-    
-    print(np.unique(all_true, return_counts=True), np.unique(all_pred, return_counts=True))
+    print(np.unique(all_true, return_counts=True),
+          np.unique(all_pred, return_counts=True))
     # Compute confusion matrix
     cm = confusion_matrix(all_true, all_pred, labels=np.arange(num_bins))
     cm_normalized = cm.astype(float) / cm.sum(axis=1, keepdims=True)
@@ -325,14 +383,13 @@ def plot_confusion_matrix(model_, dataloader, device, num_bins, save_path=None):
     else:
         plt.show()
 
-def plot_time_calibration(
-    model_,
-    dataloader,
-    device,
-    num_bins,
-    num_prob_bins=10,
-    save_path=None
-):
+
+def plot_time_calibration(model_,
+                          dataloader,
+                          device,
+                          num_bins,
+                          num_prob_bins=10,
+                          save_path=None):
     """
     Plot a global calibration curve for predicted time-bin probabilities.
     Aggregates over all samples and all time bins.
@@ -352,22 +409,21 @@ def plot_time_calibration(
 
             predicted_pmf = model.estimated_pmf(outputs)  # (B, num_bins)
 
-            true_bins = batch['time_to_event_bin']          # (B,)
-            events = batch['event_indicator']               # (B,)
+            true_bins = batch['time_to_event_bin']  # (B,)
+            events = batch['event_indicator']  # (B,)
 
             # Only uncensored events (same choice as your confusion matrix)
             mask = events == 1
 
-            pmf = predicted_pmf[mask]        # (N, num_bins)
-            true_bins = true_bins[mask]      # (N,)
+            pmf = predicted_pmf[mask]  # (N, num_bins)
+            true_bins = true_bins[mask]  # (N,)
 
             # For every sample and every bin:
             for i in range(pmf.shape[0]):
                 for k in range(num_bins):
                     all_pred_probs.append(pmf[i, k].item())
-                    all_outcomes.append(
-                        1.0 if k == true_bins[i].item() else 0.0
-                    )
+                    all_outcomes.append(1.0 if k ==
+                                        true_bins[i].item() else 0.0)
 
     all_pred_probs = np.array(all_pred_probs)
     all_outcomes = np.array(all_outcomes)
@@ -405,13 +461,12 @@ def plot_time_calibration(
     else:
         plt.show()
 
-def plot_soft_confusion_matrix(
-    model_,
-    dataloader,
-    device,
-    num_bins,
-    save_path=None
-):
+
+def plot_soft_confusion_matrix(model_,
+                               dataloader,
+                               device,
+                               num_bins,
+                               save_path=None):
     """
     Plot a soft confusion matrix using the full predicted PMF
     instead of argmax predictions.
@@ -423,11 +478,9 @@ def plot_soft_confusion_matrix(
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Getting soft confusion data"):
-            outputs, _ = model_(
-                batch['features'],
-                batch['length'],
-                mask=batch['mask']
-            )
+            outputs, _ = model_(batch['features'],
+                                batch['length'],
+                                mask=batch['mask'])
 
             predicted_pmf = model.estimated_pmf(outputs)  # (B, num_bins)
 
@@ -441,18 +494,14 @@ def plot_soft_confusion_matrix(
                     continue
 
                 t = true_bins[i]
-                soft_cm[t] += pmf[i]       # add full distribution
+                soft_cm[t] += pmf[i]  # add full distribution
                 row_counts[t] += 1
 
     # Normalize per true bin
     soft_cm = soft_cm / np.maximum(row_counts[:, None], 1e-8)
 
     plt.figure(figsize=(8, 6))
-    sns.heatmap(
-        soft_cm,
-        cmap="Blues",
-        cbar=True
-    )
+    sns.heatmap(soft_cm, cmap="Blues", cbar=True)
 
     plt.xlabel("Predicted Time Bin")
     plt.ylabel("True Time Bin")
@@ -465,7 +514,7 @@ def plot_soft_confusion_matrix(
     else:
         plt.show()
 
-    
+
 def validate(model_, model_dir, val_hdf5_paths):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -474,11 +523,12 @@ def validate(model_, model_dir, val_hdf5_paths):
 
     features = model_params['features']
     model_ = model_(**model_params)
-    model_.load_state_dict(torch.load(model_dir / 'model.pth', map_location=device))
+    model_.load_state_dict(
+        torch.load(model_dir / 'model.pth', map_location=device))
     model_.to(device)
 
-    normalisation_means = model_params['normalization_means']
-    normalisation_stds = model_params['normalization_stds']
+    normalisation_means = model_params['normalisation_means']
+    normalisation_stds = model_params['normalisation_stds']
     validate_dataset = CellDataset(
         hdf5_paths=val_hdf5_paths,
         features=features,
@@ -490,31 +540,60 @@ def validate(model_, model_dir, val_hdf5_paths):
         min_length=500,
         max_time_to_death=100,
     )
-    
+
     print(len(validate_dataset), "validation samples loaded.")
 
-    validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size=256, shuffle=False, collate_fn= lambda x: collate_fn(x, dataset=validate_dataset, device=device, pad_at='end'))
-    plot_soft_confusion_matrix(model_, validate_loader, device, num_bins=model_params['output_size'], save_path=model_dir / 'soft_confusion_matrix.png')
-    plot_time_calibration(model_, validate_loader, device, num_bins=model_params['output_size'], save_path=model_dir / 'time_calibration.png')
-    plot_confusion_matrix(model_, validate_loader, device, num_bins=model_params['output_size'], save_path=model_dir / 'confusion_matrix.png')
+    validate_loader = torch.utils.data.DataLoader(
+        validate_dataset,
+        batch_size=256,
+        shuffle=False,
+        collate_fn=lambda x: collate_fn(
+            x, dataset=validate_dataset, device=device, pad_at='end'))
+    plot_soft_confusion_matrix(model_,
+                               validate_loader,
+                               device,
+                               num_bins=model_params['output_size'],
+                               save_path=model_dir /
+                               'soft_confusion_matrix.png')
+    plot_time_calibration(model_,
+                          validate_loader,
+                          device,
+                          num_bins=model_params['output_size'],
+                          save_path=model_dir / 'time_calibration.png')
+    plot_confusion_matrix(model_,
+                          validate_loader,
+                          device,
+                          num_bins=model_params['output_size'],
+                          save_path=model_dir / 'confusion_matrix.png')
     loss_fn = model.compute_loss
 
     val_loss = validate_step(model_, validate_loader, loss_fn, device)
     # print(f"Validation Loss: {val_loss:.4f}")
     # average_attention(model_, validate_loader, device, model_dir / 'attention_weights.jpeg')
     # average_feature_importance(model_, validate_loader, device, features, model_dir / 'feature_importance.jpeg')
-    visualize_validation_predictions(model_, validate_loader, device, num_examples=50, save_path=model_dir, bin_edges=np.array(model_params['event_time_bins']), features=features, padding_at='end')
+    visualize_validation_predictions(model_,
+                                     validate_loader,
+                                     device,
+                                     num_examples=50,
+                                     save_path=model_dir,
+                                     bin_edges=np.array(
+                                         model_params['event_time_bins']),
+                                     features=features,
+                                     padding_at='end')
+
 
 def main():
     # datasets = list((Path('PhagoPred')/'Datasets'/ 'ExposureTest').iterdir())
     # train_datasets = datasets[:-2]
     # val_datasets = datasets[-2:]
-    val_datasets = [Path('PhagoPred')/'Datasets'/'val_synthetic.h5']
+    val_datasets = [Path('PhagoPred') / 'Datasets' / 'val_synthetic.h5']
     validate(
         model_=model.DynamicDeepHit,
-        model_dir=Path('PhagoPred') / 'survival_analysis' / 'models' / 'dynamic_deephit' / 'test_run',
+        model_dir=Path('PhagoPred') / 'survival_analysis' / 'models' /
+        'dynamic_deephit' / 'test_run',
         val_hdf5_paths=val_datasets,
     )
-    
+
+
 if __name__ == "__main__":
     main()

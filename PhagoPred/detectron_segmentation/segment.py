@@ -31,6 +31,7 @@ from scipy import ndimage
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import tools
+from PhagoPred.detectron_segmentation.config import add_validation_config
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -82,11 +83,34 @@ class NoResizePredictor:
             return predictions
 
 
-def get_model(cfg_dir: Path) -> tuple[dict, detectron2.config.CfgNode]:
+def resolve_weights(cfg_dir: Path,
+                    weights_name: str = 'model_final.pth') -> str:
+    """
+    Path to the requested checkpoint in cfg_dir.
+    'model_best.pth' only exists if training ran with cfg.VALIDATION enabled, so
+    fall back to model_final.pth (with a warning) rather than failing a long run.
+    """
+    weights = cfg_dir / weights_name
+    if not weights.exists():
+        fallback = cfg_dir / 'model_final.pth'
+        if not fallback.exists():
+            raise FileNotFoundError(
+                f'Found neither {weights} nor {fallback} to load weights from.')
+        print(f'Warning: {weights} not found, falling back to {fallback}.')
+        weights = fallback
+    return str(weights)
+
+
+def get_model(
+    cfg_dir: Path,
+    weights_name: str = 'model_final.pth'
+) -> tuple[dict, detectron2.config.CfgNode]:
     """
     Get training metadata and model from cfg_dir
     Parameters:
         cfg_dir: path containing train_metadata.json, config.yaml. model_final.pth
+        weights_name: checkpoint to load, e.g. 'model_best.pth' for the lowest
+            validation loss iteration rather than the last one
     Returns:
         train_metadata dict
         cfg
@@ -94,8 +118,9 @@ def get_model(cfg_dir: Path) -> tuple[dict, detectron2.config.CfgNode]:
     with open(str(cfg_dir / 'train_metadata.json')) as json_file:
         train_metadata = json.load(json_file)
     cfg = get_cfg()
+    add_validation_config(cfg)  # config.yaml carries a VALIDATION node
     cfg.merge_from_file(str(cfg_dir / 'config.yaml'))
-    cfg.MODEL.WEIGHTS = str(cfg_dir / 'model_final.pth')
+    cfg.MODEL.WEIGHTS = resolve_weights(cfg_dir, weights_name)
 
     return train_metadata, cfg
 
@@ -115,7 +140,8 @@ def seg_image(
         im: np.ndarray,
         train_metadata=None,
         cfg=None,
-        predictor=None
+        predictor=None,
+        weights_name: str = 'model_final.pth'
     #   categories: tuple[str, ...]
 ) -> dict[str, np.ndarray]:
     """
@@ -123,12 +149,13 @@ def seg_image(
     Parameters:
         cfg_dir: Path to cfg dir
         im: np.ndarry image [X, Y, 3]
+        weights_name: only used when cfg is not supplied
         # categories: tuple of the category names to segment
     Returns:
         masks: Dict of {category name: mask}. Each mask shape [X, Y], 0 for background with each item labelled 1, ..,N
     """
     if train_metadata is None or cfg is None:
-        train_metadata, cfg = get_model(cfg_dir)
+        train_metadata, cfg = get_model(cfg_dir, weights_name)
     if predictor is None:
         cfg, predictor = get_predictor(cfg)
     # device = torch.device(device_str)

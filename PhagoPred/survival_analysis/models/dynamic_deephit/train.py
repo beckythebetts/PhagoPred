@@ -14,38 +14,59 @@ from PhagoPred.survival_analysis.data.dataset import CellDataset, collate_fn, pl
 from PhagoPred.survival_analysis.models.dynamic_deephit import model
 from PhagoPred.survival_analysis.models.dynamic_deephit.validate import validate_step, visualize_validation_predictions
 
-# === Collate function must pad at end of sequence for LSTM 'pack_padded_sequence' === 
-def train_step(model, dataloader, optimiser, loss_fn, device, max_grad_norm=1.0):
+
+# === Collate function must pad at end of sequence for LSTM 'pack_padded_sequence' ===
+def train_step(model,
+               dataloader,
+               optimiser,
+               loss_fn,
+               device,
+               max_grad_norm=1.0):
     model.train()
     losses = defaultdict(float)
-    
+
     for batch in dataloader:
         optimiser.zero_grad()
-        outputs, y = model(batch['features'], batch['length'], mask=batch['mask'])
-        loss_values = loss_fn(outputs, batch['time_to_event_bin'], batch['event_indicator'], batch['features'], y, mask=batch['mask'])
-        
+        outputs, y = model(batch['features'],
+                           batch['length'],
+                           mask=batch['mask'])
+        loss_values = loss_fn(outputs,
+                              batch['time_to_event_bin'],
+                              batch['event_indicator'],
+                              batch['features'],
+                              y,
+                              mask=batch['mask'])
+
         loss = loss_values[0]
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(model.parameters(),
+                                       max_norm=max_grad_norm)
         optimiser.step()
-        
-        for key, value in zip(
-            ['Total Loss', 'NLL Loss', 'Ranking Loss', 'Prediction Loss', 'Censored Loss', 'Uncensored Loss'], loss_values
-        ):
+
+        for key, value in zip([
+                'Total Loss', 'NLL Loss', 'Ranking Loss', 'Prediction Loss',
+                'Censored Loss', 'Uncensored Loss'
+        ], loss_values):
             losses[key] += value.item() * batch['features'].size(0)
 
-    avg_losses = {key: value / len(dataloader.dataset) for key, value in losses.items()}
+    avg_losses = {
+        key: value / len(dataloader.dataset)
+        for key, value in losses.items()
+    }
     return avg_losses
 
-def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list, features: list, optimiser, loss_fn, num_epochs, save_dir: Path, batch_size: int, lr: float):
+
+def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list,
+          features: list, optimiser, loss_fn, num_epochs, save_dir: Path,
+          batch_size: int, lr: float):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # model_params = {k: v.to()}
     model = model(**model_params)
     model = model.to(device)
-    
+
     os.makedirs(save_dir, exist_ok=True)
-    
+
     train_dataset = CellDataset(
         hdf5_paths=train_hdf5_paths,
         features=features,
@@ -54,100 +75,133 @@ def train(model, model_params, train_hdf5_paths: list, val_hdf5_paths: list, fea
         max_time_to_death=100,
         # uncensored_only=True,
     )
-    
+
     plot_samples_per_bin(train_dataset, 1000)
 
     # exit()
-    
+
     bins = train_dataset.event_time_bins
     print(bins)
-    train_dataset.plot_event_vs_censoring_hist(save_path=save_dir / 'train_event_censoring_histogram.png', title='Training Set Event vs Censoring Histogram')
-    normalisation_means, normalization_stds = train_dataset.get_normalization_stats()
-    model_params['normalization_means'] = normalisation_means.tolist()
-    model_params['normalization_stds'] = normalization_stds.tolist()
+    train_dataset.plot_event_vs_censoring_hist(
+        save_path=save_dir / 'train_event_censoring_histogram.png',
+        title='Training Set Event vs Censoring Histogram')
+    normalisation_means, normalisation_stds = train_dataset.get_normalisation_stats(
+    )
+    model_params['normalisation_means'] = normalisation_means.tolist()
+    model_params['normalisation_stds'] = normalisation_stds.tolist()
     model_params['event_time_bins'] = bins.tolist()
-    normalisation_means = torch.tensor(normalisation_means, dtype=torch.float32)
-    normalization_stds = torch.tensor(normalization_stds, dtype=torch.float32)
-    
+    normalisation_means = torch.tensor(normalisation_means,
+                                       dtype=torch.float32)
+    normalisation_stds = torch.tensor(normalisation_stds, dtype=torch.float32)
 
-    
     validate_dataset = CellDataset(
         hdf5_paths=val_hdf5_paths,
         features=features,
         means=normalisation_means,
-        stds=normalization_stds,
+        stds=normalisation_stds,
         num_bins=model_params['output_size'],
         event_time_bins=bins,
         uncensored_only=False,
         min_length=500,
         max_time_to_death=100,
-        )
-    
+    )
+
     plot_samples_per_bin(validate_dataset, 1000)
 
     # exit()
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size, shuffle=True, collate_fn=lambda x: collate_fn(x, dataset=train_dataset, device=device, pad_at='end'), num_workers=0)
-    validate_loader = torch.utils.data.DataLoader(validate_dataset, batch_size, shuffle=False, collate_fn=lambda x: collate_fn(x, dataset=validate_dataset, device=device, pad_at='end'), num_workers=0)
-    
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size,
+        shuffle=True,
+        collate_fn=lambda x: collate_fn(
+            x, dataset=train_dataset, device=device, pad_at='end'),
+        num_workers=0)
+    validate_loader = torch.utils.data.DataLoader(
+        validate_dataset,
+        batch_size,
+        shuffle=False,
+        collate_fn=lambda x: collate_fn(
+            x, dataset=validate_dataset, device=device, pad_at='end'),
+        num_workers=0)
+
     compute_orcale_losses(validate_dataset, loss_fn, device)
-    
+
     with open(save_dir / 'model_params.json', 'w') as f:
         json.dump(model_params, f)
-        
+
     optimiser = optimiser(model.parameters(), lr=lr)
     training_json = save_dir / 'training.jsonl'
-    
-    training_json  = save_dir / 'training.jsonl'
-    
-    scheduler = torch.optim.lr_scheduler.StepLR(optimiser, step_size=10, gamma=0.9)
-    
+
+    training_json = save_dir / 'training.jsonl'
+
+    scheduler = torch.optim.lr_scheduler.StepLR(optimiser,
+                                                step_size=10,
+                                                gamma=0.9)
+
     with open(training_json, 'w') as f:
-            for epoch in tqdm(range(1, num_epochs + 1), desc="Training"):
-                train_losses = train_step(model, train_loader, optimiser, loss_fn, device)
-                validate_losses = validate_step(model, validate_loader, loss_fn, device)
-                
-                losses_dict = {'epoch': epoch, 'train': train_losses, 'validate': validate_losses}
-                print(losses_dict)
-                f.write(json.dumps(losses_dict) + '\n')
-                scheduler.step()
+        for epoch in tqdm(range(1, num_epochs + 1), desc="Training"):
+            train_losses = train_step(model, train_loader, optimiser, loss_fn,
+                                      device)
+            validate_losses = validate_step(model, validate_loader, loss_fn,
+                                            device)
+
+            losses_dict = {
+                'epoch': epoch,
+                'train': train_losses,
+                'validate': validate_losses
+            }
+            print(losses_dict)
+            f.write(json.dumps(losses_dict) + '\n')
+            scheduler.step()
 
     # --- Step 7: Save model and plot ---
     torch.save(model.state_dict(), save_dir / 'model.pth')
     plot_training_losses(training_json, save_dir / 'loss_plot.png')
     print(f"Training complete. Model saved to {save_dir}")
 
-    visualize_validation_predictions(model, validate_loader, device, num_examples=20, save_path=save_dir , bin_edges=bins, features=features, padding_at='end')
+    visualize_validation_predictions(model,
+                                     validate_loader,
+                                     device,
+                                     num_examples=20,
+                                     save_path=save_dir,
+                                     bin_edges=bins,
+                                     features=features,
+                                     padding_at='end')
 
 
-def compute_orcale_losses(dataset: CellDataset, loss_fn, device:str):
+def compute_orcale_losses(dataset: CellDataset, loss_fn, device: str):
     """For given slice of each cell time series, compute loss using underlying pmf (if exists)."""
     losses = defaultdict(float)
     dataloader = torch.utils.data.DataLoader(
-        dataset, 
+        dataset,
         batch_size=256,
         shuffle=False,
-        collate_fn=lambda x: collate_fn(x, dataset=dataset, device=device, pad_at='end'),
+        collate_fn=lambda x: collate_fn(
+            x, dataset=dataset, device=device, pad_at='end'),
         num_workers=0,
     )
     for batch in tqdm(dataloader, 'Getting oracle losses'):
         pmf = torch.tensor(batch['binned_pmf']).to(device)
         loss_values = loss_fn(
-            None, 
-            batch['time_to_event_bin'], 
+            None,
+            batch['time_to_event_bin'],
             batch['event_indicator'],
             pmf=pmf,
-            )
-        for key, value in zip(
-            ['Total Loss', 'NLL Loss', 'Ranking Loss', 'Prediction Loss', 'Censored Loss', 'Uncensored Loss'], loss_values
-        ):
+        )
+        for key, value in zip([
+                'Total Loss', 'NLL Loss', 'Ranking Loss', 'Prediction Loss',
+                'Censored Loss', 'Uncensored Loss'
+        ], loss_values):
             losses[key] += value.item() * pmf.size(0)
-    loss_values = {key: value / len(dataloader.dataset)  for key, value in losses.items()}
+    loss_values = {
+        key: value / len(dataloader.dataset)
+        for key, value in losses.items()
+    }
     print(loss_values)
     # exit()
-        
-            
-            
+
+
 def plot_training_losses(losses_json_path: Path, output_path: Path = None):
     # Load losses dictionary from JSON
     all_losses = {}
@@ -174,9 +228,10 @@ def plot_training_losses(losses_json_path: Path, output_path: Path = None):
     for epoch in epochs:
         epoch_str = str(epoch)
         for loss_type in loss_types:
-            train_losses[loss_type].append(all_losses[epoch_str]['train'][loss_type])
-            val_losses[loss_type].append(all_losses[epoch_str]['validate'][loss_type])
-            
+            train_losses[loss_type].append(
+                all_losses[epoch_str]['train'][loss_type])
+            val_losses[loss_type].append(
+                all_losses[epoch_str]['validate'][loss_type])
 
     plt.figure(figsize=(12, 8))
 
@@ -184,9 +239,18 @@ def plot_training_losses(losses_json_path: Path, output_path: Path = None):
         train = train_losses[loss_type]
         val = val_losses[loss_type]
         # maximum = max(train + val)
-        maximum=1
-        plt.plot(epochs, np.array(train)/maximum, label=f'Train {loss_type}', linestyle='-', color=colour)
-        plt.plot(epochs, np.array(val)/maximum, label=f'Validation {loss_type}', linestyle='--', color=colour)
+        maximum = 1
+        plt.plot(epochs,
+                 np.array(train) / maximum,
+                 label=f'Train {loss_type}',
+                 linestyle='-',
+                 color=colour)
+        plt.plot(epochs,
+                 np.array(val) / maximum,
+                 label=f'Validation {loss_type}',
+                 linestyle='--',
+                 color=colour)
+
     cmap = plt.get_cmap('Set1')
     # Plot each loss type: train solid line, val dashed line
     loss_types = [_ for _ in loss_types if _ != 'Total Loss']
@@ -211,7 +275,7 @@ def plot_training_losses(losses_json_path: Path, output_path: Path = None):
 
     print(f"Loss plot saved to {output_path}")
 
-    
+
 def main():
     # features = [
     #         'Area',
@@ -220,10 +284,10 @@ def main():
     #         'Circularity',
     #         'Perimeter',
     #         'Displacement',
-    #         'Skeleton Length', 
-    #         'Skeleton Branch Points', 
-    #         'Skeleton End Points', 
-    #         'Skeleton Branch Length Mean', 
+    #         'Skeleton Length',
+    #         'Skeleton Branch Points',
+    #         'Skeleton End Points',
+    #         'Skeleton Branch Length Mean',
     #         'Skeleton Branch Length Std',
     #         'Skeleton Branch Length Max',
     #         'Speed',
@@ -233,17 +297,17 @@ def main():
     #         'Dead Phagocytes within 100 pixels',
     #         'Dead Phagocytes within 250 pixels',
     #         'Dead Phagocytes within 500 pixels',
-    #         # 'Total Fluorescence', 
-    #         # 'Fluorescence Distance Mean', 
+    #         # 'Total Fluorescence',
+    #         # 'Fluorescence Distance Mean',
     #         # 'Fluorescence Distance Variance',
-    #         ] 
+    #         ]
     features = [
         '0',
         '1',
         '2',
         '3',
-        ] 
-    
+    ]
+
     model_params = {
         'num_features': len(features),  # Features + mask
         'output_size': 5,  # Number of time bins
@@ -258,10 +322,12 @@ def main():
     # datasets = list((Path('PhagoPred')/'Datasets'/ 'ExposureTest' / 'Truncated').iterdir())
     # train_datasets = datasets[:-2]
     # val_datasets = datasets[-2:]
-    
-    train_datasets = [Path('PhagoPred')/'Datasets'/'synthetic.h5']
-    val_datasets = [Path('PhagoPred')/'Datasets'/'val_synthetic.h5']
-    save_dir=Path('PhagoPred') / 'survival_analysis' / 'models' / 'dynamic_deephit' / 'test_run'
+
+    train_datasets = [Path('PhagoPred') / 'Datasets' / 'synthetic.h5']
+    val_datasets = [Path('PhagoPred') / 'Datasets' / 'val_synthetic.h5']
+    save_dir = Path(
+        'PhagoPred'
+    ) / 'survival_analysis' / 'models' / 'dynamic_deephit' / 'test_run'
     train(
         model=model.DynamicDeepHit,
         model_params=model_params,
@@ -270,7 +336,7 @@ def main():
         # train_hdf5_paths=[
         #     # Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0.h5',
         #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '21_10_2500.h5',
-            
+
         # ],
         # val_hdf5_paths=[
         #     Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '21_10_2500.h5',
@@ -301,8 +367,7 @@ def main():
     #     val_split=0.2,
     #     seed=42
     # )
-    
+
+
 if __name__ == '__main__':
     main()
-
-
