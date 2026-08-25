@@ -117,6 +117,14 @@ def collapse_experiment_grid(
 
 
 EXPERIMENT_SUITES = {
+    '24_07_test':
+    generate_experiment_grid(
+        ExperimentCfg(model=[MODELS['CNN Medium'], MODELS['LSTM Medium']],
+                      attention=ATTENTION['Last'],
+                      loss=LOSSES['BCE'],
+                      dataset=DATASETS['24_07_test'],
+                      training=TRAINING['Standard'],
+                      feature_combo=FEATURE_COMBOS['All'])),
     'Quick Survival Test':
     generate_experiment_grid(
         ExperimentCfg(model=[
@@ -291,43 +299,41 @@ EXPERIMENT_SUITES = {
     # all at high autocorrelation.
     'Graph Scenario Types Binary':
     generate_experiment_grid(
-        ExperimentCfg(
-            model=[
-                MODELS['CNN Medium'],
-                MODELS['LSTM Medium'],
-            ],
-            attention=ATTENTION['Last'],
-            loss=LOSSES['Weighted BCE'],
-            dataset=[
-                DATASETS['Binary Graph Linear High AR'],
-                DATASETS['Binary Graph Linear Chain High AR'],
-                DATASETS['Binary Graph Nonlinear Chain High AR'],
-            ],
-            training=TRAINING['Standard'],
-            feature_combo=['A', 'B', 'C', 'D'],
-            calibration=[
-                CALIBRATION['Platt Scaling'],
-            ])),
+        ExperimentCfg(model=[
+            MODELS['CNN Medium'],
+            MODELS['LSTM Medium'],
+        ],
+                      attention=ATTENTION['Last'],
+                      loss=LOSSES['Weighted BCE'],
+                      dataset=[
+                          DATASETS['Binary Graph Linear High AR'],
+                          DATASETS['Binary Graph Linear Chain High AR'],
+                          DATASETS['Binary Graph Nonlinear Chain High AR'],
+                      ],
+                      training=TRAINING['Standard'],
+                      feature_combo=['A', 'B', 'C', 'D'],
+                      calibration=[
+                          CALIBRATION['Platt Scaling'],
+                      ])),
     # Compare nonlinear chain scenario at different autocorrelation levels.
     'Graph Nonlinear Chain AR Binary':
     generate_experiment_grid(
-        ExperimentCfg(
-            model=[
-                MODELS['CNN Medium'],
-                MODELS['LSTM Medium'],
-            ],
-            attention=ATTENTION['Last'],
-            loss=LOSSES['Weighted BCE'],
-            dataset=[
-                DATASETS['Binary Graph Nonlinear Chain Low AR'],
-                DATASETS['Binary Graph Nonlinear Chain Med AR'],
-                DATASETS['Binary Graph Nonlinear Chain High AR'],
-            ],
-            training=TRAINING['Standard'],
-            feature_combo=['A', 'B', 'C', 'D'],
-            calibration=[
-                CALIBRATION['Platt Scaling'],
-            ])),
+        ExperimentCfg(model=[
+            MODELS['CNN Medium'],
+            MODELS['LSTM Medium'],
+        ],
+                      attention=ATTENTION['Last'],
+                      loss=LOSSES['Weighted BCE'],
+                      dataset=[
+                          DATASETS['Binary Graph Nonlinear Chain Low AR'],
+                          DATASETS['Binary Graph Nonlinear Chain Med AR'],
+                          DATASETS['Binary Graph Nonlinear Chain High AR'],
+                      ],
+                      training=TRAINING['Standard'],
+                      feature_combo=['A', 'B', 'C', 'D'],
+                      calibration=[
+                          CALIBRATION['Platt Scaling'],
+                      ])),
 }
 # EXPERIMENT_SUITES = {
 #     'quick_test':

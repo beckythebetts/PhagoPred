@@ -22,8 +22,9 @@ def train():
         # 'Graph Noise Survival',
         # 'Graph Noise Binary',
         # 'Learning Curve Survival',
-        'Graph Scenario Types Binary',
-        'Graph Nonlinear Chain AR Binary')
+        # 'Graph Scenario Types Binary',
+        # 'Graph Nonlinear Chain AR Binary',
+        '24_07_test', )
     for suite in suites:
         run_experiment_suite(
             suite_name=suite,
@@ -72,7 +73,7 @@ def shap_comparison(suite_dir: Path):
 def eval():
     evaluate_suite(
         Path(
-            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Learning Curve Survival_15062026_145828'
+            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/24_07_test_13082026_133851'
         ))
     # evaluate_suite(
     #     Path(
@@ -105,8 +106,9 @@ def plot():
 
 
 if __name__ == '__main__':
-    plot()
+    # plot()
     # train()
+    eval()
 
     # for h5_file in Path(
     #         '/home/ubuntu/PhagoPred/PhagoPred/Datasets/graph_synthetic/shap_samples'

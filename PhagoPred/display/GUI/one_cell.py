@@ -187,18 +187,20 @@ class CellLoaderThread(QThread):
 
             for idx in range(self.n_frames):
                 frame_idx = self.first_frame + idx
-                xmin, xmax, ymin, ymax = mask_funcs.get_crop_indices(
-                    (y_centres[idx], x_centres[idx]), self.frame_size,
+                # 'X' is the row centroid and 'Y' the column, so the centre
+                # must be passed as (row, col) to match im_shape = (H, W)
+                rmin, rmax, cmin, cmax = mask_funcs.get_crop_indices(
+                    (x_centres[idx], y_centres[idx]), self.frame_size,
                     im_shape)
                 phase_data[idx] = self.hdf5_file['Images']['Phase'][frame_idx,
-                                                                    ymin:ymax,
-                                                                    xmin:xmax]
+                                                                    rmin:rmax,
+                                                                    cmin:cmax]
                 epi_data[idx] = self.hdf5_file['Images']['Epi'][frame_idx,
-                                                                ymin:ymax,
-                                                                xmin:xmax]
+                                                                rmin:rmax,
+                                                                cmin:cmax]
                 mask[idx] = self.hdf5_file['Segmentations']['Phase'][frame_idx,
-                                                                     ymin:ymax,
-                                                                     xmin:xmax]
+                                                                     rmin:rmax,
+                                                                     cmin:cmax]
                 # self.loading_bar.update_progress(idx)
                 self.progress.emit(idx)
 

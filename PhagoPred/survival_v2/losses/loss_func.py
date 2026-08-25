@@ -7,6 +7,7 @@ from PhagoPred.survival_v2.data import (
     SurvivalCell,
     BinaryCellBatch,
     SurvivalCellBatch,
+    BinaryClassCell,
 )
 from PhagoPred.survival_v2.configs.losses import LossCfg, SurvivalLossCfg, BinaryLossCfg
 from PhagoPred.utils.logger import get_logger
@@ -110,8 +111,8 @@ def compute_survival_loss(
         # cumsum of unbounded logits overflows exp(...) in ranking_loss_cif.
         h = torch.sigmoid(outputs)
         log_s = torch.log((1 - h).clamp(min=1e-8)).cumsum(dim=1)
-        log_s_prev = torch.cat(
-            [torch.zeros_like(log_s[:, :1]), log_s[:, :-1]], dim=1)
+        log_s_prev = torch.cat([torch.zeros_like(log_s[:, :1]), log_s[:, :-1]],
+                               dim=1)
         pmf = h * torch.exp(log_s_prev)
         if ranking_type == 'concordance':
             ranking = ranking_loss_concordance(pmf, t, e)
@@ -164,7 +165,9 @@ def compute_loss(outputs: torch.Tensor,
             y_pred,
             batch.mask,
         )
-
+    elif isinstance(batch, BinaryClassCell):
+        loss_dict = compute_binary_loss(outputs[:, 0], batch.target_class,
+                                        loss_cfg)
     else:
         raise TypeError(
             'Batches must be either BinaryCellBatch or SurvivalCellBatch')

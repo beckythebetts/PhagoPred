@@ -8,11 +8,11 @@ import numpy as np
 from PhagoPred.utils.logger import get_logger
 from PhagoPred.survival_v2.configs.io import load_experiment_cfg
 from PhagoPred.survival_v2.configs.models import RSFCfg
-from PhagoPred.survival_v2.configs.datasets import BinaryDatasetCfg
+from PhagoPred.survival_v2.configs.datasets import BinaryDatasetCfg, BinaryClassDatasetCfg
 from PhagoPred.survival_v2.configs.experiments import ExperimentCfg
 from PhagoPred.survival_v2.models.base import SurvivalModel
 from PhagoPred.survival_v2.models.classical_base import ClassicalSurvivalModel
-from PhagoPred.survival_v2.data import CellDataset, SurvivalCellDataset, BinaryCellDataset
+from PhagoPred.survival_v2.data import CellDataset, SurvivalCellDataset, BinaryCellDataset, BinaryClassDataset
 from PhagoPred.survival_v2.models.build import build_model
 
 log = get_logger()
@@ -154,6 +154,11 @@ def load_dataset(
     if isinstance(dcfg, BinaryDatasetCfg):
         dataset: CellDataset = BinaryCellDataset(
             prediction_horizon=dcfg.prediction_horizon,
+            **common,
+        )
+    elif isinstance(dcfg, BinaryClassDatasetCfg):
+        dataset = BinaryClassDataset(
+            class_dict=dcfg.class_dict,
             **common,
         )
     else:

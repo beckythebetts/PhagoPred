@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import xarray as xr
 import torch
 import numpy as np
@@ -11,6 +13,7 @@ from skimage.measure import label, regionprops
 import time
 import kornia
 import matplotlib.pyplot as plt
+import skan  #skeletonising
 
 from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
 from PhagoPred.feature_extraction.morphology.UMAP import load_UMAP, UMAP_embedding
@@ -218,15 +221,45 @@ class Coords(BaseFeature):
 #         embeddings = self.umap_embedding.apply(expanded_frame_mask)
 #         return embeddings
 
+_NEIGHBOURS = np.ones((3, 3), np.uint8)
+
+
+def _skeleton_has_path(skeleton: np.ndarray) -> bool:
+    """True iff two skeleton pixels are 8-adjacent, i.e. skan can build >=1 path.
+
+    skan raises ValueError on skeletons with no paths, which skeletonize produces
+    for any roughly convex mask (a disc of any radius collapses to one pixel).
+    """
+    counts = ndimage.convolve(
+        skeleton.astype(
+            np.uint8), _NEIGHBOURS, mode='constant', cval=0) - skeleton
+    return bool(np.any(counts[skeleton]))
+
+
+def _summarise_branches(distances: np.ndarray) -> list[float]:
+    """[length, branches, mean, std, max]; zeros when there is no measurable skeleton."""
+    if distances.size == 0:
+        return [0.0, 0, 0.0, 0.0, 0.0]
+    return [
+        distances.sum(), distances.size,
+        distances.mean(),
+        distances.std(),
+        distances.max()
+    ]
+
 
 class Skeleton(BaseFeature):
 
     primary_feature = True
     crop = True
 
+    def __init__(self, min_length: int | None = 10):
+        super().__init__()
+        self.min_length = min_length
+
     def get_names(self):
         return [
-            'Skeleton Length', 'Skeleton Branch Points', 'Skeleton End Points',
+            'Skeleton Length', 'Skeleton Branches',
             'Skeleton Branch Length Mean', 'Skeleton Branch Length Std',
             'Skeleton Branch Length Max'
         ]
@@ -242,55 +275,102 @@ class Skeleton(BaseFeature):
 
         results = {name: [] for name in feature_names}
 
-        kernel = np.array([[1, 1, 1], [1, 10, 1], [1, 1, 1]])
-
-        n = expanded_mask.shape[0]
-
-        for i, cell_mask in enumerate(expanded_mask, 1):
+        for cell_mask in expanded_mask:
             if not cell_mask.any():
-                for feature in results.keys():
-                    results[feature].append(np.nan)
-                continue
+                # cell absent from this frame - genuinely missing, not zero
+                cell_features = [np.nan] * len(feature_names)
+            else:
+                coords = np.argwhere(cell_mask)
+                min_row, min_col = coords.min(axis=0)
+                max_row, max_col = coords.max(axis=0)
+                cell_mask = cell_mask[min_row:max_row + 1, min_col:max_col + 1]
+                cell_mask = np.ascontiguousarray(cell_mask.astype(bool))
 
-            coords = np.argwhere(cell_mask)
-            min_row, min_col = coords.min(axis=0)
-            max_row, max_col = coords.max(axis=0)
-            cell_mask = cell_mask[min_row:max_row + 1, min_col:max_col + 1]
-            cell_mask = np.ascontiguousarray(cell_mask.astype(bool))
+                skeleton = skeletonize(cell_mask)
 
-            skeleton = skeletonize(cell_mask)
+                if not _skeleton_has_path(skeleton):
+                    # round cell: skeleton is isolated pixels, skan would raise
+                    cell_features = _summarise_branches(np.empty(0))
+                else:
+                    branch_data = skan.summarize(skan.Skeleton(skeleton),
+                                                 separator='_')
 
-            length = np.sum(skeleton)
+                    if self.min_length is not None:
+                        # prune short spurs only; keep unbranched cells and cycles
+                        keep = ((branch_data['branch_type'] != 1)
+                                | (branch_data['branch_distance']
+                                   >= self.min_length))
+                        branch_data = branch_data[keep]
 
-            neighbor_count = ndimage.convolve(skeleton.astype(int),
-                                              kernel,
-                                              mode='constant',
-                                              cval=0)
+                    cell_features = _summarise_branches(
+                        branch_data['branch_distance'].to_numpy())
 
-            branch_points = np.sum((neighbor_count >= 13) & skeleton)
-            end_points = np.sum((neighbor_count == 11) & skeleton)
-
-            labeled_skel = label(skeleton, connectivity=2)
-
-            regions = regionprops(labeled_skel)
-            branch_lengths = np.array([r.area for r in regions])
-
-            branch_len_mean = branch_lengths.mean(
-            ) if branch_lengths.size > 0 else np.nan
-            branch_len_std = branch_lengths.std(
-            ) if branch_lengths.size > 0 else np.nan
-            branch_len_max = branch_lengths.max(
-            ) if branch_lengths.size > 0 else np.nan
-
-            results['Skeleton Length'].append(length)
-            results['Skeleton Branch Points'].append(branch_points)
-            results['Skeleton End Points'].append(end_points)
-            results['Skeleton Branch Length Mean'].append(branch_len_mean)
-            results['Skeleton Branch Length Std'].append(branch_len_std)
-            results['Skeleton Branch Length Max'].append(branch_len_max)
+            for name, value in zip(feature_names, cell_features):
+                results[name].append(value)
 
         return np.stack([results[feature] for feature in feature_names],
                         axis=1)
+
+    # def compute(self, mask: torch.tensor, image: torch.tensor,
+    #             epi_image: torch.tensor,
+    #             binary_mask: torch.tensor) -> np.ndarray:
+    #     """
+    #     return [num_cells, num_features]
+    #     """
+    #     expanded_mask = mask.cpu().numpy()
+    #     feature_names = self.get_names()
+
+    #     results = {name: [] for name in feature_names}
+
+    #     kernel = np.array([[1, 1, 1], [1, 10, 1], [1, 1, 1]])
+
+    #     n = expanded_mask.shape[0]
+
+    #     for i, cell_mask in enumerate(expanded_mask, 1):
+    #         if not cell_mask.any():
+    #             for feature in results.keys():
+    #                 results[feature].append(np.nan)
+    #             continue
+
+    #         coords = np.argwhere(cell_mask)
+    #         min_row, min_col = coords.min(axis=0)
+    #         max_row, max_col = coords.max(axis=0)
+    #         cell_mask = cell_mask[min_row:max_row + 1, min_col:max_col + 1]
+    #         cell_mask = np.ascontiguousarray(cell_mask.astype(bool))
+
+    #         skeleton = skeletonize(cell_mask)
+
+    #         length = np.sum(skeleton)
+
+    #         neighbor_count = ndimage.convolve(skeleton.astype(int),
+    #                                           kernel,
+    #                                           mode='constant',
+    #                                           cval=0)
+
+    #         branch_points = np.sum((neighbor_count >= 13) & skeleton)
+    #         end_points = np.sum((neighbor_count == 11) & skeleton)
+
+    #         labeled_skel = label(skeleton, connectivity=2)
+
+    #         regions = regionprops(labeled_skel)
+    #         branch_lengths = np.array([r.area for r in regions])
+
+    #         branch_len_mean = branch_lengths.mean(
+    #         ) if branch_lengths.size > 0 else np.nan
+    #         branch_len_std = branch_lengths.std(
+    #         ) if branch_lengths.size > 0 else np.nan
+    #         branch_len_max = branch_lengths.max(
+    #         ) if branch_lengths.size > 0 else np.nan
+
+    #         results['Skeleton Length'].append(length)
+    #         results['Skeleton Branch Points'].append(branch_points)
+    #         results['Skeleton End Points'].append(end_points)
+    #         results['Skeleton Branch Length Mean'].append(branch_len_mean)
+    #         results['Skeleton Branch Length Std'].append(branch_len_std)
+    #         results['Skeleton Branch Length Max'].append(branch_len_max)
+
+    #     return np.stack([results[feature] for feature in feature_names],
+    #                     axis=1)
 
 
 class Speed(BaseFeature):
@@ -856,6 +936,16 @@ class Fluorescence(BaseFeature):
             results[valid_np, 4] = outer_fluorescence.cpu().numpy()
 
         return results
+
+
+# class MinorMajorAxes(BaseFeature):
+#     def get_names(self):
+#         return ['Major Axis Length', 'Minor Axis Length']
+#     def compute(self,
+#                 mask: torch.tensor = None,
+#                 image: torch.tensor = None,
+#                 epi_image: torch.tensor = None,
+#                 binary_mask: torch.tensor = None) -> np.ndarray:
 
 
 def crop_masks_images(

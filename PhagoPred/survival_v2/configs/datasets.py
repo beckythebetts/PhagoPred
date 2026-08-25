@@ -6,7 +6,12 @@ from typing import Union
 
 @dataclass
 class DatasetCfg:
-    """Config to hold datset information."""
+    """Config to hold datset information.
+
+    dataset_type tags which subclass this is so a saved config.json can be
+    loaded back as the same type (see DATASET_TYPES and configs.io).
+    """
+    dataset_type: str = field(default='', init=False)
     train_paths: list[Union[Path, str]]
     val_paths: list[Union[Path, str]]
     min_length: int
@@ -26,28 +31,68 @@ class DatasetCfg:
 @dataclass
 class SurvivalDatasetCfg(DatasetCfg):
     """Config to hold survival dataset information"""
+    dataset_type: str = field(default='survival', init=False)
     max_time_to_death: int = 0
     name: str = ''
     bins: list[int] | None = field(default=None, compare=False)
-
-    # total_hazard_var: list[float] | None = None
-    # unobserved_hazard_var: list[float] | None = None
-    # total_pmf_var: list[float] | None = None
-    # unobserved_pmf_var: list[float] | None = None
 
 
 @dataclass
 class BinaryDatasetCfg(DatasetCfg):
     """Config to hold binary dataset information"""
+    dataset_type: str = field(default='binary', init=False)
     prediction_horizon: int = 0
     num_bins: int = field(default=1, init=False)
     name: str = ''
 
-    # total_cdf_var: float | None = None
-    # unobserved_cdf_var: float | None = None
 
+@dataclass
+class BinaryClassDatasetCfg(DatasetCfg):
+    dataset_type: str = field(default='binary_class', init=False)
+    num_bins: int = field(default=1, init=False)
+    class_dict: dict = field(default_factory=dict)
+
+
+DATASET_TYPES: dict[str, type[DatasetCfg]] = {
+    'survival': SurvivalDatasetCfg,
+    'binary': BinaryDatasetCfg,
+    'binary_class': BinaryClassDatasetCfg,
+}
 
 DATASETS = {
+    '24_07_test':
+    BinaryClassDatasetCfg(
+        train_paths=[
+            Path('~/thor_server/MacrophageData/24_07/').expanduser() /
+            f'{_}.h5' for _ in ('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I',
+                                'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R')
+        ],
+        val_paths=[
+            Path('~/thor_server/MacrophageData/24_07/').expanduser() /
+            f'{_}.h5' for _ in ('S', 'T', 'U', 'V', 'W', 'X')
+        ],
+        calibrate_paths=[
+            Path('~/thor_server/MacrophageData/24_07/').expanduser() /
+            f'{_}.h5' for _ in ('S', 'T', 'U', 'V', 'W', 'X')
+        ],
+        min_length=50,
+        name='24_07_test',
+        class_dict={
+            p: 0
+            for p in [
+                Path('~/thor_server/MacrophageData/24_07/').expanduser() /
+                f'{_}.h5' for _ in ('A', 'B', 'C', 'J', 'K', 'L', 'M', 'N',
+                                    'O', 'V', 'W', 'X')
+            ]
+        } | {
+            p: 1
+            for p in [
+                Path('~/thor_server/MacrophageData/24_07/').expanduser() /
+                f'{_}.h5' for _ in ('D', 'E', 'F', 'G', 'H', 'I', 'P', 'Q',
+                                    'R', 'S', 'T', 'U')
+            ]
+        },
+    ),
     'Survival Baseline':
     SurvivalDatasetCfg(
         train_paths=[
@@ -472,12 +517,20 @@ DATASETS = {
 }
 FEATURE_COMBOS = {
     'All': [
-        'frame_count',
-        'linear_trend',
-        'polynomial_trend',
-        'random_walk',
-        'oscillation',
-        'oscillation + linear',
+        'Area',
+        'Circularity',
+        'Displacement',
+        'Perimeter',
+        'Phagocytes within 100 pixels',
+        'Phagocytes within 250 pixels',
+        'Phagocytes within 500 pixels',
+        'Skeleton Branch Length Mean',
+        'Skeleton Branch Length Max',
+        'Skeleton Branch Length Std',
+        'Skeleton Branch Points',
+        'Skeleton End Points',
+        'Skeleton Length',
+        'Speed',
     ],
     'No Frame Count': ['0', '1', '3'],
 }

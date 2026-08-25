@@ -183,9 +183,18 @@ class CellDataset(torch.utils.data.Dataset, ABC):
     def _load_cell_metadata(self) -> None:
         """Load metadata about each cell."""
         for path_idx, _ in enumerate(self.hdf5_paths):
-            cell_deaths = self._get_features_np(
-                path_idx, features=['CellDeath'])[0][0]  # shape = (num_cells)
-            num_cells = len(cell_deaths)
+
+            test_feature_data = self._get_features_np(
+                path_idx, features=self.feature_names[0:1])[0]
+            num_frames, num_cells = test_feature_data.shape
+
+            try:
+                cell_deaths = self._get_features_np(
+                    path_idx,
+                    features=['CellDeath'])[0][0]  # shape = (num_cells)
+            except KeyError:
+                cell_deaths = np.full(num_cells, np.nan)
+
             if self.num_cells is not None:
                 if self.num_cells < num_cells:
                     num_cells = self.num_cells
@@ -301,7 +310,6 @@ class CellDataset(torch.utils.data.Dataset, ABC):
         #                                      replace=False)
         # return all_landmarks
 
-    @abstractmethod
     def _load_true_variances(self) -> None:
         return
 
@@ -347,6 +355,7 @@ def collate_fn(batch: list[CellSample],
                 'event',
                 'length',
                 'event_indicator',
+                'target_class',
         ]:
             batch_dict[f.name] = torch.tensor(values, device=device)
 

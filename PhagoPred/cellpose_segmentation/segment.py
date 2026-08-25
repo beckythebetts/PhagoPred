@@ -15,12 +15,15 @@ import torch
 
 from PhagoPred import SETTINGS
 from PhagoPred.cellpose_segmentation import threshold_epi
+from PhagoPred.cellpose_segmentation.upsample import (DEFAULT_SIGMA_LOW_RES,
+                                                      upsample_labels)
 
 
 def seg_dataset(h5_file: Path,
                 model_dir: Path = SETTINGS.CELLPOSE_MODEL,
                 channel: Literal['Phase', 'Epi'] = 'Phase',
-                category: str = 'Macrophage') -> None:
+                category: str = 'Macrophage',
+                smooth_sigma: float = DEFAULT_SIGMA_LOW_RES) -> None:
 
     model = models.CellposeModel(gpu=True,
                                  pretrained_model=str(model_dir / 'models' /
@@ -33,9 +36,13 @@ def seg_dataset(h5_file: Path,
                 del group[channel]
         f['Segmentations'].attrs['Model'] = str(model_dir)
         images_ds = f['Images'][channel]
+
         segmentations_ds = f.create_dataset(f'Segmentations/{channel}',
                                             shape=images_ds.shape,
                                             maxshape=images_ds.shape,
+                                            chunks=(1, *images_ds.shape[1:]),
+                                            compression='gzip',
+                                            compression_opts=4,
                                             dtype='i2')
         cells_group = f.require_group(f'Cells/{channel}')
         cells_group.require_dataset('Confidence Score',
@@ -65,8 +72,14 @@ def seg_dataset(h5_file: Path,
                                      resample=False)
             masks = masks.astype(np.int16)
             if masks.shape != image.shape:
-                masks = cv2.resize(masks, (image.shape[1], image.shape[0]),
-                                   interpolation=cv2.INTER_NEAREST)
+                # INTER_NEAREST here would replicate every low-res pixel into a
+                # ~3x3 block, turning each contour into a staircase that
+                # inflates the perimeter and covers the medial axis in spurs.
+                # Interpolate each label's signed distance field instead.
+                masks = upsample_labels(masks,
+                                        out_shape=image.shape,
+                                        background=0,
+                                        smooth_sigma=smooth_sigma)
             masks -= 1
 
             cell_ids = np.unique(masks)

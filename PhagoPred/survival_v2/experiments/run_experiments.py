@@ -13,9 +13,9 @@ from torch.utils.data import DataLoader
 #                                                              EXPERIMENT_SUITES,
 #                                                              FEATURE_COMBOS)
 from PhagoPred.survival_v2.configs.experiments import EXPERIMENT_SUITES, ExperimentCfg, ModelCfg, AttentionCfg, DatasetCfg
-from PhagoPred.survival_v2.configs.io import load_experiment_cfg
+from PhagoPred.survival_v2.configs.io import load_experiment_cfg, save_experiment_cfg
 from PhagoPred.survival_v2.configs.models import LSTMCfg, CNNCfg, RSFCfg
-from PhagoPred.survival_v2.configs.datasets import SurvivalDatasetCfg, BinaryDatasetCfg
+from PhagoPred.survival_v2.configs.datasets import SurvivalDatasetCfg, BinaryDatasetCfg, BinaryClassDatasetCfg
 from PhagoPred.survival_v2.configs.calibration import (
     CalibrationCfg,
     TemperatureScalingCfg,
@@ -37,8 +37,10 @@ from PhagoPred.survival_v2.data import (
     CellDataset,
     SurvivalCellDataset,
     BinaryCellDataset,
+    BinaryClassDataset,
     binary_collate_fn,
     survival_collate_fn,
+    binary_class_collate_fn,
 )
 from PhagoPred.survival_v2.utils.plots import plot_losses
 from PhagoPred.survival_v2.interpret.run_interpret import interpret
@@ -114,14 +116,11 @@ def build_datasets(
     if isinstance(dataset_config, BinaryDatasetCfg):
 
         dataset_args = {
-            # 'hdf5_paths': dataset_config['train_paths'],
             'feature_names': feature_combo,
             'min_length': dataset_config.min_length,
             'model_type': model_type,
             'prediction_horizon': dataset_config.prediction_horizon,
             'num_cells': dataset_config.num_cells,
-            # 'means': dataset_config.normalisation_means,
-            # 'stds': dataset_config.normalisation_stds,
         }
         train_dataset = BinaryCellDataset(
             hdf5_paths=dataset_config.train_paths, **dataset_args)
@@ -143,21 +142,13 @@ def build_datasets(
 
     elif isinstance(dataset_config, SurvivalDatasetCfg):
         dataset_args = {
-            # 'hdf5_paths': dataset_config['train_paths'],
             'feature_names': feature_combo,
             'min_length': dataset_config.min_length,
             'model_type': model_type,
             'num_bins': dataset_config.num_bins,
             'max_time_to_death': dataset_config.max_time_to_death,
-            # 'event_time_bins': dataset_config.bins,
-            # 'means': dataset_config.normalisation_means,
-            # 'stds': dataset_config.normalisation_stds,
         }
 
-        # Match bin edges across all experiments in a suite: reuse cached edges
-        # if present, otherwise compute from this train set and cache them. This
-        # keeps the learning-curve comparison apples-to-apples (same bins at
-        # every N) instead of recomputing size-dependent quantiles per experiment.
         event_time_bins = _load_cached_bins(dataset_config, cache_dir)
         if event_time_bins is not None:
             train_dataset = SurvivalCellDataset(
@@ -179,6 +170,7 @@ def build_datasets(
             event_time_bins=event_time_bins,
             **dataset_args,
         )
+
         if dataset_config.calibrate_paths is not None:
             calibrate_dataset = SurvivalCellDataset(
                 hdf5_paths=dataset_config.calibrate_paths,
@@ -190,6 +182,32 @@ def build_datasets(
 
         dataset_config.bins = list(event_time_bins)
 
+    elif isinstance(dataset_config, BinaryClassDatasetCfg):
+        dataset_args = {
+            'feature_names': feature_combo,
+            'min_length': dataset_config.min_length,
+            'model_type': model_type,
+            'class_dict': dataset_config.class_dict,
+        }
+
+        train_dataset = BinaryClassDataset(
+            hdf5_paths=dataset_config.train_paths,
+            **dataset_args,
+        )
+        means, stds = train_dataset.get_normalisation_stats()
+        val_dataset = BinaryClassDataset(
+            hdf5_paths=dataset_config.val_paths,
+            means=means,
+            stds=stds,
+            **dataset_args,
+        )
+        if dataset_config.calibrate_paths is not None:
+            calibrate_dataset = BinaryClassDataset(
+                hdf5_paths=dataset_config.calibrate_paths,
+                means=means,
+                stds=stds,
+                **dataset_args,
+            )
     if not is_classical:
         train_dataset.apply_normalisation()
         val_dataset.apply_normalisation()
@@ -243,7 +261,7 @@ def run_single_experiment(
         setattr(experiment_config.loss, 'pos_weight', pos_weight)
         log.info(f"Computed pos_weight: {pos_weight:.2f}")
 
-    else:
+    elif isinstance(train_dataset, SurvivalCellDataset):
         train_dataset: SurvivalCellDataset
 
         bins = train_dataset.event_time_bins
@@ -266,8 +284,7 @@ def run_single_experiment(
                         device,
                         feature_names=experiment_config.feature_combo)
 
-    with (exp_dir / 'config.json').open('w') as f:
-        json.dump(asdict(experiment_config), f, indent=2)
+    save_experiment_cfg(experiment_config, exp_dir / 'config.json')
 
     print('Training Model...')
     log.info(
@@ -286,8 +303,7 @@ def run_single_experiment(
         cal_dataset = _build_cal_dataset(experiment_config)
         _fit_and_store_calibration(experiment_config, model, cal_dataset,
                                    device)
-        with (exp_dir / 'config.json').open('w') as f:
-            json.dump(asdict(experiment_config), f, indent=2)
+        save_experiment_cfg(experiment_config, exp_dir / 'config.json')
         log.info(f'Calibration fitted: {experiment_config.calibration}')
 
     print("Evaluating model...")
@@ -381,6 +397,16 @@ def _build_cal_dataset(cfg: ExperimentCfg) -> CellDataset:
             means=means,
             stds=stds,
         )
+    elif isinstance(cfg.dataset, BinaryClassDatasetCfg):
+        ds = BinaryClassDataset(
+            hdf5_paths=cfg.dataset.calibrate_paths,
+            feature_names=cfg.feature_combo,
+            min_length=cfg.dataset.min_length,
+            model_type=model_type,
+            class_dict=cfg.dataset.class_dict,
+            means=means,
+            stds=stds,
+        )
     else:
         raise TypeError(f'Unknown dataset config type: {type(cfg.dataset)}')
 
@@ -429,6 +455,23 @@ def _get_calibration_inputs(model,
                                     if batch.mask is not None else None)
                         all_outputs.append(out.cpu().numpy())
                         all_labels.append(batch.event.cpu().numpy())
+            return (np.concatenate(all_outputs).squeeze(),
+                    np.concatenate(all_labels), None, None)
+        elif isinstance(dataset, BinaryClassDataset):
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=128,
+                shuffle=False,
+                collate_fn=lambda b: binary_class_collate_fn(b, device=device))
+            with torch.no_grad():
+                for _ in range(n_passes):
+                    for batch in loader:
+                        out = model(batch.features.to(device),
+                                    batch.length.to(device),
+                                    mask=batch.mask.to(device)
+                                    if batch.mask is not None else None)
+                        all_outputs.append(out.cpu().numpy())
+                        all_labels.append(batch.target_class.cpu().numpy())
             return (np.concatenate(all_outputs).squeeze(),
                     np.concatenate(all_labels), None, None)
         else:
@@ -522,6 +565,16 @@ def _build_val_dataset(cfg: ExperimentCfg) -> CellDataset:
             num_bins=cfg.dataset.num_bins,
             max_time_to_death=cfg.dataset.max_time_to_death,
             event_time_bins=cfg.dataset.bins,
+            means=means,
+            stds=stds,
+        )
+    elif isinstance(cfg.dataset, BinaryClassDatasetCfg):
+        val_dataset = BinaryClassDataset(
+            hdf5_paths=cfg.dataset.val_paths,
+            feature_names=cfg.feature_combo,
+            min_length=cfg.dataset.min_length,
+            model_type=model_type,
+            class_dict=cfg.dataset.class_dict,
             means=means,
             stds=stds,
         )

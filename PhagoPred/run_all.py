@@ -12,7 +12,7 @@ from PhagoPred.display import save, plots, napari_GUI
 from PhagoPred.feature_extraction import extract_features, clean_features, features
 from PhagoPred.feature_extraction.morphology.UMAP import UMAP_embedding
 from PhagoPred.prediction.decision_tree import model
-from PhagoPred.utils.tools import fill_missing_cells, repack_hdf5
+from PhagoPred.utils.tools import fill_missing_cells, repack_hdf5, rechunk_hdf5, hdf5_needs_rechunk
 from PhagoPred.utils.dataset_creation import epi_background_correction, keep_only_group, truncate_hdf5, hdf5_from_tiffs, rename_group, hdf5_from_ome_tiffs
 import PhagoPred.display.GUI.main as GUI
 from PhagoPred.tracking import trackpy_2_stage
@@ -22,7 +22,7 @@ from PhagoPred.survival_analysis.models import losses
 
 if __name__ == '__main__':
     datasets = Path(
-        '~/thor_server/MacrophageData/24_07/').expanduser().iterdir()
+        '~/thor_server/MacrophageData/14_08/').expanduser().iterdir()
     # dataset
     h5_paths = [
         Path('PhagoPred') / 'Datasets' / 'B.h5',
@@ -72,16 +72,22 @@ if __name__ == '__main__':
             dataset=dataset, phase_features=[features.FirstLastFrame()])
 
         fill_missing_cells(dataset=dataset)
+
+        # One frame per chunk + gzip on Segmentations/Phase. Skipped automatically if
+        # already done, so this is a one-off cost per dataset. Mask reads were 68% of
+        # extraction runtime over sshfs before this.
+        # rechunk_hdf5(dataset)
+
         extract_features.extract_features(dataset=dataset)
         # extract_features.extract_features(dataset=h5_file,
         #                                   phase_features=[
         #                                       features.Fluorescence(),
         #                                       features.ExternalFluorescence()
         #                                   ])
-        # shutil.move(h5_file, dataset)
+        shutil.move(h5_file, dataset)
         shutil.move(
             dataset,
-            Path('~/thor_server/MacrophageData/24_07/').expanduser() /
+            Path('~/thor_server/MacrophageData/14_08/').expanduser() /
             dataset.name)
 
         # GUI.run(dataset=dataset)

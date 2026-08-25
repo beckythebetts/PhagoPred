@@ -17,7 +17,7 @@ from PhagoPred.survival_v2.utils.plots import (
 from PhagoPred.survival_v2.configs.datasets import DatasetCfg
 from PhagoPred.utils.logger import get_logger
 from PhagoPred.utils.tools import to_json_safe
-from PhagoPred.survival_v2.data import BinaryCellDataset, BinaryCellSample, BinaryCell, binary_collate_fn
+from PhagoPred.survival_v2.data import BinaryCellDataset, BinaryClassDataset, BinaryCellSample, BinaryClassCell, BinaryCell, binary_collate_fn, binary_class_collate_fn
 from .metrics import (
     reciever_operator_characteristic,
     mean_squared_error,
@@ -152,7 +152,7 @@ def evaluate_binary_model(model,
 
 def _get_deep_predictions(
     model: SurvivalModel,
-    dataset: BinaryCellDataset,
+    dataset: BinaryCellDataset | BinaryClassDataset,
     device: str,
     save_dir: Path,
     visualise_predicitons: int = 10,
@@ -161,12 +161,20 @@ def _get_deep_predictions(
 ):
     model.eval()
     model = model.to(device)
+    if isinstance(dataset, BinaryCellDataset):
+        collate_fn = binary_collate_fn
+        target_attr = 'event'
+        sample_cls = BinaryCell
+    elif isinstance(dataset, BinaryClassDataset):
+        collate_fn = binary_class_collate_fn
+        target_attr = 'target_class'
+        sample_cls = BinaryClassCell
 
     data_loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        collate_fn=lambda batch: binary_collate_fn(batch, device=device))
+        collate_fn=lambda batch: collate_fn(batch, device=device))
 
     all_predictions = []
     all_labels = []
@@ -176,7 +184,7 @@ def _get_deep_predictions(
 
     with torch.no_grad():
         for batch in data_loader:
-            batch: BinaryCell
+            # batch: BinaryCell | ?
             features = batch.features.to(device)
             lengths = batch.length.to(device)
             mask = batch.mask
@@ -186,23 +194,26 @@ def _get_deep_predictions(
             outputs = model(features, lengths, mask=mask)
             binary_preds = model.predict_binary(outputs).cpu().numpy()
             all_predictions.append(binary_preds)
-            all_labels.append(batch.event.cpu().numpy())
+            all_labels.append(getattr(batch, target_attr).cpu().numpy())
 
-            event_probs = batch.event_probability
-            if event_probs is not None:
-                if hasattr(event_probs, 'cpu'):
-                    event_probs = event_probs.cpu().numpy()
-                all_event_probs.extend(event_probs)
-            else:
-                all_event_probs.extend([None] * len(binary_preds))
+            if hasattr(batch, 'event_probability'):
+                event_probs = batch.event_probability
+                if event_probs is not None:
+                    if hasattr(event_probs, 'cpu'):
+                        event_probs = event_probs.cpu().numpy()
+                    all_event_probs.extend(event_probs)
+                else:
+                    all_event_probs.extend([None] * len(binary_preds))
+            # else:
+            #     event_probs = None
 
             for i in range(len(lengths)):
                 if visualised < visualise_predicitons:
                     single_sample_dict = {}
-                    for field in fields(BinaryCell):
+                    for field in fields(sample_cls):
                         single_sample_dict[field.name] = getattr(
                             batch, field.name)[i]
-                    single_sample = BinaryCellSample(**single_sample_dict)
+                    single_sample = sample_cls(**single_sample_dict)
                     visualise_binary_prediction(
                         single_sample,
                         binary_preds[i][0],

@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-from PhagoPred.survival_v2.data import BinaryCellSample, SurvivalCellSample
+from PhagoPred.survival_v2.data import BinaryCellSample, SurvivalCellSample, BinaryCell
 from PhagoPred.utils.logger import get_logger
 
 log = get_logger()
@@ -545,6 +545,9 @@ def visualise_binary_prediction(sample: BinaryCellSample,
         save_path: path to save figure
         start_frame: first frame index for x-axis
     """
+    if not isinstance(sample, BinaryCell):
+        log.info(f'Skipping plot sample, sample type is {type(sample)}')
+        return
 
     log.info(
         f'Visualising binary prediction, predicted_probability {pred_prob}')

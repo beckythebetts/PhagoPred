@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 import torch
 from PhagoPred.survival_v2.configs import TrainingCfg, LossCfg
 from PhagoPred.survival_v2.models import SurvivalModel, ClassicalSurvivalModel
-from PhagoPred.survival_v2.data import CellDataset, binary_collate_fn, survival_collate_fn, BinaryCellDataset
+from PhagoPred.survival_v2.data import CellDataset, binary_collate_fn, survival_collate_fn, binary_class_collate_fn, BinaryCellDataset, SurvivalCellDataset, BinaryClassDataset
 from PhagoPred.survival_v2.utils.plots import plot_losses
 from PhagoPred.utils.tools import to_json_safe
 from .train_classical import train_classical
@@ -26,8 +26,10 @@ def train(
     if isinstance(model, SurvivalModel):
         if isinstance(train_dataset, BinaryCellDataset):
             collate_fn = binary_collate_fn
-        else:
+        elif isinstance(train_dataset, SurvivalCellDataset):
             collate_fn = survival_collate_fn
+        elif isinstance(train_dataset, BinaryClassDataset):
+            collate_fn = binary_class_collate_fn
         train_loader = DataLoader(
             train_dataset,
             batch_size=train_config.batch_size,

@@ -11,10 +11,14 @@ import scipy
 from concurrent.futures import ThreadPoolExecutor
 import cv2
 import math
+import basicpy
 
 from PhagoPred import SETTINGS
-from .fluor_background_removal import replace_hot_pixels, bg_removal
+from .fluor_background_removal import (replace_hot_pixels, bg_removal,
+                                       rolling_ball_background, n2v_denoise)
 from .tools import remake_dir
+
+N2V_MODEL_DIR = Path('/home/ubuntu/PhagoPred/PhagoPred/Datasets/nv2_model')
 
 
 def truncate_hdf5(dataset_path: Path, new_path: Path, start_frame: int,
@@ -493,6 +497,19 @@ def get_channel_tiffs(channel_dir: Path,
     return tiff_files
 
 
+def _get_min_max(tiff_files: list[Path],
+                 sample_size: int = 100) -> tuple[int, int]:
+    min_val, max_val = np.inf, -np.inf
+    T = len(tiff_files)
+    for i in tqdm(range(0, T, math.ceil(T / sample_size)),
+                  desc=f"Computing min/max"):
+        with tifffile.TiffFile(str(tiff_files[i])) as tif:
+            im = tif.series[0].asarray()
+        min_val = min(min_val, float(im.min()))
+        max_val = max(max_val, float(im.max()))
+    return min_val, max_val
+
+
 def hdf5_from_tiffs(tiff_files_path: Path,
                     hdf5_file: Path,
                     num_frames: int = None,
@@ -508,11 +525,11 @@ def hdf5_from_tiffs(tiff_files_path: Path,
         os.remove(hdf5_file)
 
     channel_shapes = {}
-    channel_min_max = {}
     channel_steps = {}
-    print(tiff_files_path)
+
+    fluor_ims = []
+
     for channel_dir in tiff_files_path.glob("*"):
-        print(channel_dir)
         if not channel_dir.is_dir():
             continue
 
@@ -530,21 +547,9 @@ def hdf5_from_tiffs(tiff_files_path: Path,
             Y, X = shape
             channel_shapes[channel_dir.name] = (T, Y, X)
 
-        # Reduced frame by frame rather than stacking the sampled frames: the
-        # stack, its float32 copy and the copies np.percentile sorts came to
-        # ~8 GB for a 287 frame channel, which was enough to get OOM killed.
-        # The limits used here are the 0th/100th percentiles, i.e. just the
-        # min and max, so this gives identical values in constant memory.
-        min_val, max_val = np.inf, -np.inf
-        for i in tqdm(
-                range(0, T, math.ceil(T / 100)),
-                desc=f"Computing min/max for channel {channel_dir.name}"):
-            with tifffile.TiffFile(str(tiff_files[i])) as tif:
-                im = tif.series[0].asarray()
-            min_val = min(min_val, float(im.min()))
-            max_val = max(max_val, float(im.max()))
-        channel_min_max[channel_dir.name] = (min_val, max_val)
-    print(channel_shapes)
+        if channel_dir.name == 'Phase':
+            phase_min, phase_max = _get_min_max(tiff_files)
+
     max_T = max(shape[0] for shape in channel_shapes.values())
     max_X = max(shape[2] for shape in channel_shapes.values())
     max_Y = max(shape[1] for shape in channel_shapes.values())
@@ -552,7 +557,8 @@ def hdf5_from_tiffs(tiff_files_path: Path,
     grid_size = 20
     x_tiles = math.floor(max_X / (grid_size * 2)) * 2 + 1
     y_tiles = math.floor(max_Y / (grid_size * 2)) * 2 + 1
-    clahe = cv2.createCLAHE(tileGridSize=(y_tiles, x_tiles))
+    clahe = cv2.createCLAHE(tileGridSize=(y_tiles, x_tiles), clipLimit=3.0)
+    basic = basicpy.BaSiC(get_darkfield=False)
 
     with h5py.File(hdf5_file, 'w') as h:
         images_group = h.create_group('Images')
@@ -568,8 +574,7 @@ def hdf5_from_tiffs(tiff_files_path: Path,
                                            channel_steps[channel], num_frames)
             channel_frame_step = (max_T - 1) / (shape[0] -
                                                 1) if shape[0] > 1 else 0
-            x_scale = max_X // shape[2]
-            y_scale = max_Y // shape[1]
+
             for i, tiff_file in tqdm(
                     enumerate(tiff_files),
                     total=len(tiff_files),
@@ -579,20 +584,49 @@ def hdf5_from_tiffs(tiff_files_path: Path,
                 frame_idx = int(round(i * channel_frame_step))
 
                 im = tifffile.imread(str(tiff_file))
-                if x_scale > 1 or y_scale > 1:
-                    im = cv2.resize(im,
-                                    (shape[2] * x_scale, shape[1] * y_scale),
-                                    interpolation=cv2.INTER_NEAREST)
-
-                min_val, max_val = channel_min_max[channel]
-                im = to_8bit(im, min_val, max_val)
                 if channel == 'Phase':
+                    im = to_8bit(im, phase_min, phase_max)
                     im = clahe.apply(im)
-                channel_ds[frame_idx] = im
+                    channel_ds[frame_idx] = im
+                elif channel == 'Fluor':
+                    fluor_ims.append(im)
+        if len(fluor_ims) > 0:
+            fluor_ims = np.stack(fluor_ims, axis=0)
 
+            fluor_ims = rolling_ball_background(fluor_ims)
+            fluor_ims = n2v_denoise(fluor_ims, N2V_MODEL_DIR)
+
+            fluor_min, fluor_max = np.percentile(fluor_ims,
+                                                 0.1), np.percentile(
+                                                     fluor_ims, 99.9)
+            fluor_ims = to_8bit(fluor_ims, fluor_min, fluor_max)
+
+            fluor_ims = basic.fit_transform(fluor_ims, is_timelapse=True)
+
+            for i, im in tqdm(enumerate(fluor_ims),
+                              total=len(fluor_ims),
+                              desc='Upscaling and writing fluor ims'):
+                im = cv2.resize(im, (max_X, max_Y),
+                                interpolation=cv2.INTER_NEAREST)
+                images_group['Fluor'][i] = im
+            # images_group['Fluor'][:] = fluor_ims
+            # basic.fit(fluor_ims)
+            # basic_batch_size = 286
+            # for batch_start in tqdm(range(0, len(fluor_ims), basic_batch_size),
+            #                         desc='BaSiC transform'):
+            #     batch = fluor_ims[batch_start:batch_start + basic_batch_size]
+            #     batch = basic.transform(batch, is_timelapse=True)
+            #     for i, im in enumerate(batch):
+            #         im = cv2.resize(im, (max_X, max_Y),
+            #                         interpolation=cv2.INTER_NEAREST)
+            #         images_group['Fluor'][batch_start + i] = im
+            images_group['Fluor'].attrs['Baseline'] = basic.baseline
     print(
         f"HDF5 file created: {hdf5_file} with channels: {list(channel_shapes.keys())}"
     )
+
+
+# def _fit_basic(ims: list[Path])
 
 
 def rename_group(hdf5_file: Path, old_group_name: str,

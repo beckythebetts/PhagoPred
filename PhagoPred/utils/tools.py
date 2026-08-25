@@ -643,15 +643,152 @@ def repack_hdf5(file=SETTINGS.DATASET):
     temp_file.rename(file)
 
 
-def copy_hdf5_groups(src_filename, dest_filename, groups_to_copy):
+# Segmentations are written by tracking with chunks spanning several frames (e.g.
+# (9, 68, 160)), but every reader takes one frame at a time, so a single frame read
+# pulls every touched chunk in full - about 10x more bytes than needed. One frame per
+# chunk makes that read contiguous, and gzip shrinks int16 label images by ~70x
+# (mostly background, few distinct labels). Measured on the sshfs mount, mask reads
+# were 68% of feature-extraction runtime before this.
+FRAMEWISE_SEGMENTATIONS = {
+    'Segmentations/Phase': {
+        'chunks': (1, None, None),
+        'compression': 'gzip',
+        'compression_opts': 4,
+    },
+}
+
+
+def _resolve_chunks(chunks, shape):
+    """Replace None entries in a chunks tuple with the dataset's full extent.
+
+    Other entries pass through untouched - clamping them to the current shape would
+    silently shrink chunks on datasets that are resizable (maxshape of None).
+    """
+    if not chunks or chunks is True:
+        return chunks
+    return tuple(
+        int(dim) if requested is None else int(requested)
+        for requested, dim in zip(chunks, shape))
+
+
+def hdf5_needs_rechunk(file, layout=FRAMEWISE_SEGMENTATIONS):
+    """True if any dataset named in `layout` is not already stored that way.
+
+    Lets the run_all loop call rechunk_hdf5 unconditionally and stay idempotent.
+    """
+    if isinstance(file, str):
+        file = Path(file)
+    with h5py.File(file, 'r') as f:
+        for path, wanted in layout.items():
+            if path not in f:
+                continue
+            dset = f[path]
+            if 'chunks' in wanted and dset.chunks != _resolve_chunks(
+                    wanted['chunks'], dset.shape):
+                return True
+            if ('compression' in wanted
+                    and dset.compression != wanted['compression']):
+                return True
+    return False
+
+
+def rechunk_hdf5(file=SETTINGS.DATASET,
+                 layout=FRAMEWISE_SEGMENTATIONS,
+                 verify_frames=12,
+                 skip_if_done=True):
+    """Rewrite `file` so the datasets in `layout` use a frame-wise, compressed layout.
+
+    Chunk shape cannot be changed in place, so the file is copied to a temp file
+    alongside it and swapped in only after verification passes. Datasets not named in
+    `layout` keep their existing storage exactly.
+
+    Parameters:
+    - layout: see copy_hdf5_groups. Defaults to FRAMEWISE_SEGMENTATIONS.
+    - verify_frames: how many evenly spaced frames of each re-laid-out dataset to read
+      back and compare against the original before replacing it. Set to None to skip
+      the check, or to a negative number to compare every frame (slow on a network
+      mount: it re-reads the whole original).
+    - skip_if_done: return early if the file already has the requested layout.
+    """
+    if isinstance(file, str):
+        file = Path(file)
+
+    if skip_if_done and not hdf5_needs_rechunk(file, layout):
+        print(f'{file.name} already has the requested chunking, skipping.')
+        return
+
+    temp_file = file.parent / (file.stem + '_rechunk' + file.suffix)
+    if temp_file.exists():
+        # a previous attempt died partway; its contents cannot be trusted
+        os.remove(temp_file)
+
+    with h5py.File(file, 'r') as f:
+        all_groups = list(f.keys())
+
+    print(highlight_str(f'Re-chunking {file.name}'))
+    copy_hdf5_groups(file, temp_file, all_groups, layout=layout)
+
+    if verify_frames is not None:
+        _verify_rechunk(file, temp_file, layout, verify_frames)
+
+    size_before, size_after = file.stat().st_size, temp_file.stat().st_size
+    os.remove(file)
+    temp_file.rename(file)
+    print(f'{file.name}: {size_before / 1e9:.2f} GB -> '
+          f'{size_after / 1e9:.2f} GB '
+          f'({size_before / max(size_after, 1):.1f}x smaller)')
+
+
+def _verify_rechunk(original, rewritten, layout, verify_frames):
+    """Compare sampled frames of the re-laid-out datasets, raising if they differ.
+
+    Runs before the original is deleted, so a mismatch leaves the source untouched.
+    """
+    with h5py.File(original, 'r') as src, h5py.File(rewritten, 'r') as dst:
+        for path in layout:
+            if path not in src:
+                continue
+            a, b = src[path], dst[path]
+            if a.shape != b.shape or a.dtype != b.dtype:
+                raise ValueError(
+                    f'{original.name}: {path} changed from {a.shape}/{a.dtype} '
+                    f'to {b.shape}/{b.dtype} during re-chunking')
+            if verify_frames < 0:
+                frames = range(a.shape[0])
+            else:
+                frames = np.unique(
+                    np.linspace(0, a.shape[0] - 1,
+                                min(verify_frames, a.shape[0])).astype(int))
+            for frame in tqdm(frames, desc=f'Verifying {path}'):
+                if not np.array_equal(a[frame], b[frame]):
+                    raise ValueError(
+                        f'{original.name}: {path} frame {frame} differs after '
+                        f're-chunking; original left in place')
+
+
+def copy_hdf5_groups(src_filename,
+                     dest_filename,
+                     groups_to_copy,
+                     layout=None,
+                     blocks_per_read=4):
     """
     Copy specified groups and all their attributes and datasets from a source HDF5 file to a new HDF5 file.
-    
+
     Parameters:
     - src_filename: str, the path to the source HDF5 file.
     - dest_filename: str, the path to the destination HDF5 file.
     - groups_to_copy: list of str, list of group paths to copy from the source to the destination file.
+    - layout: dict | None, maps a dataset's full path (e.g. 'Segmentations/Phase') to
+      create_dataset kwargs (chunks / compression / compression_opts) that override the
+      source's storage layout. A None entry inside a chunks tuple means "the dataset's
+      full extent along that axis", so (1, None, None) is one whole frame per chunk.
+      Datasets not named keep their existing layout, so layout=None reproduces the
+      previous behaviour exactly.
+    - blocks_per_read: int, how many source chunks deep to read at once. Larger values
+      mean fewer, bigger reads, which matters a lot when the source is on a network
+      mount (sshfs) where per-request latency dominates.
     """
+    layout = layout or {}
     with h5py.File(src_filename,
                    'r') as src_file, h5py.File(dest_filename,
                                                'w') as dest_file:
@@ -663,17 +800,37 @@ def copy_hdf5_groups(src_filename, dest_filename, groups_to_copy):
             for name, item in src_group.items():
                 if isinstance(item, h5py.Dataset):  # Copy datasets directly
                     maxshape = item.maxshape
+                    create_kwargs = {
+                        'chunks': item.chunks,
+                        'compression': item.compression,
+                        'compression_opts': item.compression_opts,
+                    }
+                    override = layout.get(item.name.lstrip('/'),
+                                          layout.get(name, {}))
+                    if override:
+                        # only touch the layout of datasets the caller named, so
+                        # everything else is reproduced byte-for-byte as before
+                        create_kwargs.update(override)
+                        create_kwargs['chunks'] = _resolve_chunks(
+                            create_kwargs['chunks'], item.shape)
+                        if (create_kwargs['compression']
+                                and not create_kwargs['chunks']):
+                            # compression requires a chunked layout
+                            create_kwargs['chunks'] = True
+
                     dset = dest_group.create_dataset(name,
                                                      shape=item.shape,
                                                      maxshape=item.maxshape,
                                                      dtype=item.dtype,
-                                                     chunks=item.chunks)
+                                                     **create_kwargs)
 
                     if item.chunks:
-                        for i in tqdm(range(0, item.shape[0], item.chunks[0]),
+                        # step through the SOURCE chunking so each source chunk is
+                        # read exactly once, regardless of the destination layout
+                        step = max(item.chunks[0] * blocks_per_read, 1)
+                        for i in tqdm(range(0, item.shape[0], step),
                                       desc=f'Copying {name} dataset'):
-                            sel = slice(i,
-                                        min(i + item.chunks[0], item.shape[0]))
+                            sel = slice(i, min(i + step, item.shape[0]))
                             dset[sel, ...] = item[sel, ...]
                     else:
                         dset[...] = item[()]

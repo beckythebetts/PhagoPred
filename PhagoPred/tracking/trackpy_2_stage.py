@@ -21,6 +21,10 @@ class TrackerWithTrackpy2Stage:
         self.track_id_map = None  # will be a 2D array: frames x max_cells
         self.min_cell_size = 500
 
+        self.max_log_area_ratio = 1.4
+        self.log_area_ratio_per_frame = 0.15
+        self.area_cost_weight = 12.0
+
         self.feature_extractor = extract_features.FeaturesExtraction(self.file)
 
     def extract_features_for_tracking(self):
@@ -42,6 +46,7 @@ class TrackerWithTrackpy2Stage:
                         'frame': frame,
                         'x': X[idx],
                         'y': Y[idx],
+                        'area': areas[idx],
                         'cell_index': idx
                     })
 
@@ -132,24 +137,32 @@ class TrackerWithTrackpy2Stage:
             last_rows.loc[info.index, 'x'].values, last_rows.loc[info.index,
                                                                  'y'].values
         ])
+        start_areas = first_rows.loc[info.index, 'area'].values
+        end_areas = last_rows.loc[info.index, 'area'].values
 
         # Use KDTree on start_coords to find spatial neighbours for each end_coord
         # max possible distance is max_dist * max_time_gap (distance scales with time gap)
         spatial_radius = max_dist * max_time_gap
         start_tree = cKDTree(start_coords)
 
-        # Collect valid (end_idx, start_idx, distance) pairs
+        # Collect valid (end_idx, start_idx, distance, |log area ratio|) pairs
         candidate_pairs = []
         for i, end_coord in enumerate(end_coords):
             nearby_j_indices = start_tree.query_ball_point(end_coord,
                                                            r=spatial_radius)
             for j in nearby_j_indices:
                 time_gap = start_frames[j] - end_frames[i]
-                if time_gap <= 0 or time_gap >= max_time_gap:
+                if time_gap <= 0 or time_gap > max_time_gap:
                     continue
                 dist = np.linalg.norm(end_coord - start_coords[j])
-                if dist < max_dist * time_gap:
-                    candidate_pairs.append((i, j, dist))
+                if dist >= max_dist * time_gap:
+                    continue
+                log_area_ratio = abs(np.log(end_areas[i] / start_areas[j]))
+                if log_area_ratio > (self.max_log_area_ratio +
+                                     self.log_area_ratio_per_frame *
+                                     (time_gap - 1)):
+                    continue
+                candidate_pairs.append((i, j, dist, log_area_ratio))
 
         if not candidate_pairs:
             return df
@@ -158,6 +171,8 @@ class TrackerWithTrackpy2Stage:
         end_idxs = candidate_pairs[:, 0].astype(int)
         start_idxs = candidate_pairs[:, 1].astype(int)
         dists = candidate_pairs[:, 2]
+        log_area_ratios = candidate_pairs[:, 3]
+        gaps = start_frames[start_idxs] - end_frames[end_idxs]
 
         # Build small cost matrix for only the tracklets involved in valid pairs
         unique_ends = np.unique(end_idxs)
@@ -165,14 +180,25 @@ class TrackerWithTrackpy2Stage:
         end_remap = {v: k for k, v in enumerate(unique_ends)}
         start_remap = {v: k for k, v in enumerate(unique_starts)}
 
-        BIG_COST = 1e18
-        cost_matrix = np.full((len(unique_ends), len(unique_starts)), BIG_COST)
-        for ei, si, d in zip(end_idxs, start_idxs, dists):
-            cost_matrix[end_remap[ei], start_remap[si]] = d
+        # BIG_COST = 1e18
+        # cost_matrix = np.full((len(unique_ends), len(unique_starts)), BIG_COST)
+        # for ei, si, d in zip(end_idxs, start_idxs, dists):
+        #     cost_matrix[end_remap[ei], start_remap[si]] = d
+        # Non-edges stay at 0 and a real edge scores (cost - max_dist) < 0, so a
+        # good link is worth more than a marginal one and cardinality alone
+        # cannot trade away an obvious join. The size penalty can push a gated
+        # edge back above 0; that is fine, the solver prefers the 0 non-edge and
+        # the `< 0` filter below drops it either way.
+        cost_matrix = np.zeros((len(unique_ends), len(unique_starts)))
+        for ei, si, d, gap, lr in zip(end_idxs, start_idxs, dists, gaps,
+                                      log_area_ratios):
+            cost_matrix[end_remap[ei],
+                        start_remap[si]] = ((d / gap) - max_dist +
+                                            self.area_cost_weight * lr)
 
         # Optimal assignment on the small matrix
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        valid = cost_matrix[row_ind, col_ind] < BIG_COST
+        valid = cost_matrix[row_ind, col_ind] < 0
         row_ind, col_ind = row_ind[valid], col_ind[valid]
 
         # Map back to tracklet IDs
@@ -207,13 +233,6 @@ class TrackerWithTrackpy2Stage:
         with h5py.File(self.file, 'r+') as f:
 
             print('\nUpdating datasets with track ID map...\n')
-            # Resize cells datasets if necessary. Must cover both the raw
-            # segmentation index space (read below via valid_cell_idxs) and the
-            # track id space (written below); either can be the larger of the two.
-            # Datasets narrower than the raw index space exist when a segmenter
-            # leaves a feature unfilled (e.g. cellpose never writes
-            # 'Confidence Score'), and short movies can yield fewer tracks than
-            # the peak number of cells in a frame.
             required_width = max(self.max_track_id + 1,
                                  self.track_id_map.shape[1])
             for feature_data in f[self.cells_group].values():

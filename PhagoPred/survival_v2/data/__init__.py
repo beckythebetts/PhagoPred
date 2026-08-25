@@ -17,6 +17,14 @@ from .survival_dataset import (
     SurvivalCell,
     survival_collate_fn,
 )
+
+from .binary_class_dataset import (
+    BinaryClassSample,
+    BinaryClassBatch,
+    BinaryClassDataset,
+    BinaryClassCell,
+    binary_class_collate_fn,
+)
 from .synthetic_data.synthetic_data import create_synthetic_dataset
 from .synthetic_data.generate_synthetic_datasets import generate_all_datasets
 
