@@ -14,6 +14,20 @@ import time
 import kornia
 import matplotlib.pyplot as plt
 import skan  #skeletonising
+import ctypes
+from pathlib import Path
+
+# CuPy/cuCIM load libnvrtc.so.12 via ctypes at runtime, but the version pip
+# installs (nvidia-cuda-nvrtc-cu12) sits in a package directory that isn't on
+# the dynamic linker's search path. Preload it explicitly so CuPy finds it
+# regardless of LD_LIBRARY_PATH.
+import nvidia.cuda_nvrtc
+
+ctypes.CDLL(
+    str(Path(nvidia.cuda_nvrtc.__file__).parent / 'lib' / 'libnvrtc.so.12'),
+    mode=ctypes.RTLD_GLOBAL,
+)
+
 import cupy
 import cucim.skimage.measure
 
@@ -752,13 +766,15 @@ class Perimeter(BaseFeature):
         if mask.shape[1] < 3 or mask.shape[2] < 3:
             return np.full((mask.shape[0], ), np.nan)
 
-        mask_cupy = cupy.asarray(mask.contiguous())
+        mask_cupy = cupy.asarray(mask.to(torch.uint8).contiguous())
 
         result = np.full((mask.shape[0], ), np.nan)
         for i in range(mask.shape[0]):
             crop = mask_cupy[i]
             if crop.any():
                 result[i] = float(cucim.skimage.measure.perimeter(crop))
+
+        result[result == 0] = np.nan
 
         return result
 
