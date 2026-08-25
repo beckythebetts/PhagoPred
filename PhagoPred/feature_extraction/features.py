@@ -744,29 +744,55 @@ class Perimeter(BaseFeature):
     def compute(self, mask: torch.tensor, image: torch.tensor,
                 epi_image: torch.tensor,
                 binary_mask: torch.tensor) -> np.array:
+        if mask.ndim == 2:
+            mask = mask.unsqueeze(0)
 
         if mask.shape[1] < 3 or mask.shape[2] < 3:
             return np.full((mask.shape[0], ), np.nan)
 
-        if mask.ndim == 2:
-            mask = mask.unsqueeze(0)
+        mask = mask.float()
+        padded = torch.nn.functional.pad(mask, (1, 1, 1, 1),
+                                         mode='constant',
+                                         value=0)
 
-        kernel = torch.tensor([[1, 1, 1], [1, 9, 1], [1, 1,
-                                                      1]]).to(mask.device)
+        up = padded[:, :-2, 1:-1]
+        down = padded[:, 2:, 1:-1]
+        left = padded[:, 1:-1, :-2]
+        right = padded[:, 1:-1, 2:]
 
-        padded_masks = torch.nn.functional.pad(mask, (1, 1, 1, 1),
-                                               mode='constant',
-                                               value=0)
-        conv_result = torch.nn.functional.conv2d(
-            padded_masks.unsqueeze(1).float(),
-            kernel.unsqueeze(0).unsqueeze(0).float(),
-            padding=0).squeeze(1)
+        exposed_edges = ((up == 0).float() + (down == 0).float() +
+                         (left == 0).float() + (right == 0).float()) * mask
 
-        result = torch.sum((conv_result >= 10) & (conv_result <= 16),
-                           dim=(1, 2)).float().cpu().numpy()
+        result = exposed_edges.sum(dim=(1, 2)).cpu().numpy()
         result[result == 0] = np.nan
 
         return result
+
+    # def compute(self, mask: torch.tensor, image: torch.tensor,
+    #             epi_image: torch.tensor,
+    #             binary_mask: torch.tensor) -> np.array:
+    #     if mask.ndim == 2:
+    #         mask = mask.unsqueeze(0)
+
+    #     if mask.shape[1] < 3 or mask.shape[2] < 3:
+    #         return np.full((mask.shape[0], ), np.nan)
+
+    #     kernel = torch.tensor([[1, 1, 1], [1, 9, 1], [1, 1,
+    #                                                   1]]).to(mask.device)
+
+    #     padded_masks = torch.nn.functional.pad(mask, (1, 1, 1, 1),
+    #                                            mode='constant',
+    #                                            value=0)
+    #     conv_result = torch.nn.functional.conv2d(
+    #         padded_masks.unsqueeze(1).float(),
+    #         kernel.unsqueeze(0).unsqueeze(0).float(),
+    #         padding=0).squeeze(1)
+
+    #     result = torch.sum((conv_result >= 9) & (conv_result <= 16),
+    #                        dim=(1, 2)).float().cpu().numpy()
+    #     result[result == 0] = np.nan
+
+    #     return result
 
 
 class Circularity(BaseFeature):
