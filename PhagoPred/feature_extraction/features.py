@@ -14,6 +14,8 @@ import time
 import kornia
 import matplotlib.pyplot as plt
 import skan  #skeletonising
+import cupy
+import cucim.skimage.measure
 
 from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
 from PhagoPred.feature_extraction.morphology.UMAP import load_UMAP, UMAP_embedding
@@ -750,21 +752,13 @@ class Perimeter(BaseFeature):
         if mask.shape[1] < 3 or mask.shape[2] < 3:
             return np.full((mask.shape[0], ), np.nan)
 
-        mask = mask.float()
-        padded = torch.nn.functional.pad(mask, (1, 1, 1, 1),
-                                         mode='constant',
-                                         value=0)
+        mask_cupy = cupy.asarray(mask.contiguous())
 
-        up = padded[:, :-2, 1:-1]
-        down = padded[:, 2:, 1:-1]
-        left = padded[:, 1:-1, :-2]
-        right = padded[:, 1:-1, 2:]
-
-        exposed_edges = ((up == 0).float() + (down == 0).float() +
-                         (left == 0).float() + (right == 0).float()) * mask
-
-        result = exposed_edges.sum(dim=(1, 2)).cpu().numpy()
-        result[result == 0] = np.nan
+        result = np.full((mask.shape[0], ), np.nan)
+        for i in range(mask.shape[0]):
+            crop = mask_cupy[i]
+            if crop.any():
+                result[i] = float(cucim.skimage.measure.perimeter(crop))
 
         return result
 
