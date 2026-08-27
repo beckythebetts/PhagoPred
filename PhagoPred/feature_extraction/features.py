@@ -30,6 +30,7 @@ ctypes.CDLL(
 
 import cupy
 import cucim.skimage.measure
+import cupyx.scipy.ndimage as cndi
 
 from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
 from PhagoPred.feature_extraction.morphology.UMAP import load_UMAP, UMAP_embedding
@@ -903,7 +904,7 @@ class ExternalFluorescence(BaseFeature):
         return results.cpu().numpy()
 
 
-class Fluorescence(BaseFeature):
+class FluorescenceRadial(BaseFeature):
     """Quantify and describe distribution of fluorescence wihtin cells"""
     primary_feature = True
     crop = True
@@ -918,8 +919,9 @@ class Fluorescence(BaseFeature):
             'Total Fluorescence',
             'Fluorescence Distance Mean',
             'Fluorescence Distance Variance',
-            'Inner Total Fluorescnece',
-            'Outer Total FLuorescence',
+
+            # 'Inner Total Fluorescnece',
+            # 'Outer Total FLuorescence',
         ]
 
     def compute(self,
@@ -929,7 +931,7 @@ class Fluorescence(BaseFeature):
                 binary_mask: torch.tensor = None) -> np.ndarray:
         num_cells, H, W = mask.shape
 
-        results = np.full((num_cells, 5), np.nan)
+        results = np.full((num_cells, len(self.get_names())), np.nan)
 
         valid = torch.sum(mask, dim=(1, 2)) > 0
         num_valid = torch.sum(valid).item()
@@ -938,7 +940,7 @@ class Fluorescence(BaseFeature):
             epi_image = epi_image[valid]
             mask = mask[valid]
 
-            temp_mask = (~mask).unsqueeze(0).to(
+            temp_mask = mask.unsqueeze(0).to(
                 torch.float)  # (1, num_cells_in_batch, H, W)
             # mask = mask.unsqueeze(0).to(torch.float) #(1, num_cells_in_batch, H, W)
             dist_transform = kornia.contrib.distance_transform(image=temp_mask)
@@ -951,8 +953,8 @@ class Fluorescence(BaseFeature):
             max_dist = max_dist.unsqueeze(1).unsqueeze(1).expand(-1, H, W)
             dist_transform = dist_transform / (max_dist + 1e-6)
 
-            inner_mask = dist_transform > 0.5
-            outer_mask = (dist_transform <= 0.5) & (dist_transform > 0)
+            # inner_mask = dist_transform > 0.5
+            # outer_mask = (dist_transform <= 0.5) & (dist_transform > 0)
 
             total_fluorescence = torch.sum(epi_image * mask, dim=(1, 2))
             dist_mean = torch.sum(epi_image * mask * dist_transform,
@@ -960,28 +962,143 @@ class Fluorescence(BaseFeature):
             dist_variance = torch.sum(
                 epi_image * mask * dist_transform**2,
                 dim=(1, 2)) / total_fluorescence - dist_mean**2
-            inner_fluorescence = torch.sum(epi_image * inner_mask, dim=(1, 2))
-            outer_fluorescence = torch.sum(epi_image * outer_mask, dim=(1, 2))
+            # inner_fluorescence = torch.sum(epi_image * inner_mask, dim=(1, 2))
+            # outer_fluorescence = torch.sum(epi_image * outer_mask, dim=(1, 2))
 
             results = np.full((num_cells, 5), np.nan)
             valid_np = valid.cpu().numpy()
             results[valid_np, 0] = total_fluorescence.cpu().numpy()
             results[valid_np, 1] = dist_mean.cpu().numpy()
             results[valid_np, 2] = dist_variance.cpu().numpy()
-            results[valid_np, 3] = inner_fluorescence.cpu().numpy()
-            results[valid_np, 4] = outer_fluorescence.cpu().numpy()
+            # results[valid_np, 3] = inner_fluorescence.cpu().numpy()
+            # results[valid_np, 4] = outer_fluorescence.cpu().numpy()
 
         return results
 
 
-# class MinorMajorAxes(BaseFeature):
-#     def get_names(self):
-#         return ['Major Axis Length', 'Minor Axis Length']
-#     def compute(self,
-#                 mask: torch.tensor = None,
-#                 image: torch.tensor = None,
-#                 epi_image: torch.tensor = None,
-#                 binary_mask: torch.tensor = None) -> np.ndarray:
+class RegionProps(BaseFeature):
+    primary_feature = True
+    crop = False
+    # Names passed straight to regionprops_table. centroid_local /
+    # centroid_weighted_local each expand to '<name>-0' and '<name>-1' columns.
+    prop_names = [
+        'axis_major_length',
+        'axis_minor_length',
+        'eccentricity',
+        'intensity_mean',
+        'centroid_local',
+        'centroid_weighted_local',
+        'area',
+        'intensity_mean',
+        'intensity_std',
+        # 'solidity',
+    ]
+
+    def get_names(self):
+        return [
+            'Major Axis Length',
+            'Minor Axis Length',
+            'Eccentricity',
+            'Fluor Mean',
+            'Fluor Total',
+            'Fluor Dist Mean',
+            'Fluor Dist Std',
+            'Fluor Asymmetry',
+            'Fluor CV',
+            # 'Solidity',
+        ]
+
+    def compute(self,
+                mask: torch.tensor = None,
+                image: torch.tensor = None,
+                epi_image: torch.tensor = None,
+                binary_mask: torch.tensor = None) -> np.ndarray:
+
+        # Unexpand mask :/ change this later
+        batch_size = len(mask)
+        mask = mask * torch.arange(1, batch_size + 1,
+                                   device=mask.get_device()).view(
+                                       batch_size, 1, 1)
+        mask = torch.sum(mask, dim=0)
+
+        vals = torch.unique(mask)
+        vals = vals[vals > 0]
+
+        results = np.full((batch_size, len(self.get_names())), np.nan)
+        if len(vals) == 0:
+            return results
+
+        mask = cupy.asarray(mask.detach())
+        epi = cupy.asarray(epi_image.detach())
+
+        region_props = cucim.skimage.measure.regionprops_table(
+            mask,
+            intensity_image=epi,
+            properties=self.prop_names,
+            extra_properties=[fluor_radial])
+
+        fluor_asymmetry = asymmetry(
+            region_props['centroid_local-0'],
+            region_props['centroid_local-1'],
+            region_props['centroid_weighted_local-0'],
+            region_props['centroid_weighted_local-1'],
+            region_props['area'],
+        )
+        fluor_cv = coefficient_of_variation(region_props['intensity_mean'],
+                                            region_props['intensity_std'])
+
+        row = cupy.stack([
+            region_props['axis_major_length'],
+            region_props['axis_minor_length'],
+            region_props['eccentricity'],
+            region_props['intensity_mean'],
+            region_props['fluor_radial-0'],
+            region_props['fluor_radial-1'],
+            region_props['fluor_radial-2'],
+            fluor_asymmetry,
+            fluor_cv,
+        ],
+                         axis=1)
+
+        results[(vals - 1).cpu().numpy()] = cupy.asnumpy(row)
+
+        return results
+
+
+def fluor_radial(mask: cupy.array, intensity: cupy.array) -> cupy.array:
+    """Extra property in reginprops, calculate [total, dist_mean, dist_var], with dist_mean and sit_var weighted by raidal distance from cell edge."""
+    intensity = intensity * mask
+    total = intensity.sum()
+    if total <= 0:
+        return cupy.array([0.0, 0.0, 0.0])
+    dt = cndi.distance_transform_edt(mask)
+
+    dt /= (dt.max() + 1e-6)
+
+    mean = (intensity * dt).sum() / total
+    var = (intensity * dt**2).sum() / total - mean**2
+    var = cupy.clip(var, 0.0, None)
+
+    return cupy.stack([total, mean, var])
+
+
+def asymmetry(cy: cupy.ndarray, cx: cupy.ndarray, wcy: cupy.ndarray,
+              wcx: cupy.ndarray, areas: cupy.ndarray) -> cupy.ndarray:
+    """Fluorescence distribution asymmetry.
+    """
+    dy = cy - wcy
+    dx = cx - wcx
+    return cupy.hypot(dy, dx) / cupy.sqrt(areas / np.pi)
+
+
+def coefficient_of_variation(means: cupy.array,
+                             stds: cupy.array) -> cupy.array:
+    """Realative spread.
+    Low = diffuse, High = punctate.
+    """
+    min_mean = 1
+    cv = cupy.where(means > min_mean, stds / means, 0)
+    return cv
 
 
 def crop_masks_images(
@@ -991,7 +1108,7 @@ def crop_masks_images(
         binary_mask: torch.tensor,
         x_centres: torch.tensor,
         y_centres=torch.tensor,
-        crop_size=200) -> tuple[torch.tensor, torch.tensor, torch.tensor]:
+        crop_size=1000) -> tuple[torch.tensor, torch.tensor, torch.tensor]:
 
     num_cells = expanded_mask.shape[0]
 

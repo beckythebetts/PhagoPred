@@ -268,7 +268,8 @@ class FeaturesExtraction:
                         x_centres, y_centres = x_centres.to(
                             self.DEVICE), y_centres.to(self.DEVICE)
 
-                    for frame_idx in tqdm(range(self.num_frames)):
+                    for frame_idx in tqdm(range(self.num_frames),
+                                          desc=f'Cropped = {crop}'):
 
                         mask = cell_type.get_masks(f, frame_idx)
                         num_cells = np.max(mask) + 1

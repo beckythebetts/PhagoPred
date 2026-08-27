@@ -44,10 +44,12 @@ if __name__ == '__main__':
         # dataset = Path(dataset)
         # if dataset.name != '10_02_26_1':
         #     continue
-        if dataset.name == 'Test':
+        if not dataset.name == 'A.h5':
             continue
-        if not dataset.is_dir():
-            continue
+        # if dataset.name in ['Test', 'A', 'B', 'C', 'D', 'E']:
+        #     continue
+        # if not dataset.is_dir():
+        #     continue
         # if dataset.stem in [
         #         'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
         #         'N', 'O'
@@ -55,41 +57,43 @@ if __name__ == '__main__':
         #     continue
 
         print(f'Processing dataset: {dataset.name}')
-        h5_file = Path('PhagoPred') / 'Datasets' / f'{dataset.stem}.h5'
-        hdf5_from_tiffs(dataset, h5_file, frame_steps={'Phase': 3, 'Fluor': 1})
-        rename_group(h5_file,
-                     old_group_name='Images/Fluor',
-                     new_group_name='Images/Epi')
+        # h5_file = Path('PhagoPred') / 'Datasets' / f'{dataset.stem}.h5'
+        # hdf5_from_tiffs(dataset, h5_file, frame_steps={'Phase': 3, 'Fluor': 1})
+        # rename_group(h5_file,
+        #              old_group_name='Images/Fluor',
+        #              new_group_name='Images/Epi')
 
-        with h5py.File(h5_file, 'r') as f:
-            SETTINGS.IMAGE_SIZE = f['Images'].attrs['Image size / pixels']
-        dataset = h5_file
+        # with h5py.File(h5_file, 'r') as f:
+        #     SETTINGS.IMAGE_SIZE = f['Images'].attrs['Image size / pixels']
+        # dataset = h5_file
 
-        # segment.seg_dataset(dataset=dataset)
-        cellpose_segment.seg_dataset(dataset)
-        trackpy_2_stage.run_tracking(dataset=dataset)
-        extract_features.extract_features(
-            dataset=dataset, phase_features=[features.FirstLastFrame()])
+        # # segment.seg_dataset(dataset=dataset)
+        # cellpose_segment.seg_dataset(dataset)
+        # trackpy_2_stage.run_tracking(dataset=dataset)
+        # extract_features.extract_features(
+        #     dataset=dataset, phase_features=[features.FirstLastFrame()])
 
-        fill_missing_cells(dataset=dataset)
+        # fill_missing_cells(dataset=dataset)
 
         # One frame per chunk + gzip on Segmentations/Phase. Skipped automatically if
         # already done, so this is a one-off cost per dataset. Mask reads were 68% of
         # extraction runtime over sshfs before this.
         # rechunk_hdf5(dataset)
 
-        extract_features.extract_features(dataset=dataset)
+        # extract_features.extract_features(dataset=dataset)
         # extract_features.extract_features(dataset=h5_file,
         #                                   phase_features=[
         #                                       features.Fluorescence(),
         #                                       features.ExternalFluorescence()
         #                                   ])
-        shutil.move(h5_file, dataset)
-        shutil.move(
-            dataset,
-            Path('~/thor_server/MacrophageData/14_08/').expanduser() /
-            dataset.name)
-
+        # shutil.move(h5_file, dataset)
+        # shutil.move(
+        #     dataset,
+        #     Path('~/thor_server/MacrophageData/14_08/').expanduser() /
+        #     dataset.name)
+        extract_features.extract_features(dataset, [
+            features.RegionProps(),
+        ])
         # GUI.run(dataset=dataset)
         # truncate_hdf5(dataset, dataset.parent / f"truncated_{dataset.name}", start_frame = 0, end_frame=300)
 
