@@ -5,7 +5,7 @@ from itertools import product
 from .models import MODELS, ModelCfg
 from .attention import ATTENTION, AttentionCfg
 from .losses import LOSSES, LossCfg
-from .datasets import DATASETS, FEATURE_COMBOS, DatasetCfg
+from .datasets import DATASETS, FEATURE_COMBOS, get_kfold_dataset, DatasetCfg
 from .training import TRAINING, TrainingCfg
 from .calibration import CALIBRATION, CalibrationCfg
 
@@ -122,7 +122,7 @@ EXPERIMENT_SUITES = {
         ExperimentCfg(model=[MODELS['CNN Medium'], MODELS['LSTM Medium']],
                       attention=ATTENTION['Last'],
                       loss=LOSSES['BCE'],
-                      dataset=DATASETS['24_07_test'],
+                      dataset=get_kfold_dataset(),
                       training=TRAINING['Standard'],
                       feature_combo=FEATURE_COMBOS['All'])),
     'Quick Survival Test':

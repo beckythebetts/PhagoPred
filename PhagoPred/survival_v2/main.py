@@ -107,8 +107,8 @@ def plot():
 
 if __name__ == '__main__':
     # plot()
-    # train()
-    eval()
+    train()
+    # eval()
 
     # for h5_file in Path(
     #         '/home/ubuntu/PhagoPred/PhagoPred/Datasets/graph_synthetic/shap_samples'

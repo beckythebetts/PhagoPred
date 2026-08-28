@@ -1,7 +1,14 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Union
+from typing import Union, Type
+from collections import defaultdict
+import numpy as np
+import h5py
+
+from PhagoPred.utils.logger import get_logger
+
+log = get_logger()
 
 
 @dataclass
@@ -58,6 +65,90 @@ DATASET_TYPES: dict[str, type[DatasetCfg]] = {
     'binary': BinaryDatasetCfg,
     'binary_class': BinaryClassDatasetCfg,
 }
+
+
+def generate_kfold_dataset_configs(all_paths: list[Path], num_folds: int,
+                                   cfg_type: type[DatasetCfg], name: str,
+                                   **kwargs) -> list[DatasetCfg]:
+    log.info('Generating kfold datset config')
+    cfgs = []
+    all_paths = list(all_paths)
+    np.random.shuffle(all_paths)
+
+    class_dict = kwargs.get('class_dict')
+
+    if class_dict is None:
+        split = np.array_split(all_paths, num_folds)
+        for k in range(num_folds):
+            val_paths = split[k].tolist()
+            train_paths = np.concatenate(
+                [a for i, a in enumerate(split) if i != k]).tolist()
+            cfgs.append(
+                cfg_type(
+                    train_paths=train_paths,
+                    val_paths=val_paths,
+                    calibrate_paths=val_paths,
+                    name=f'{name}',
+                    **kwargs,
+                ))
+    else:
+        # Stratified smapling, ensuring always even number of datsets per class, if class_dict exists
+        label_to_paths = defaultdict(list)
+        for path, label in class_dict.items():
+            label_to_paths[label].append(path)
+
+        splits = {}
+        for label, paths in label_to_paths.items():
+            paths = list(paths)
+            np.random.shuffle(paths)
+            splits[label] = np.array_split(paths, num_folds)
+
+        for k in range(num_folds):
+            val_paths = np.concatenate([split[k] for split in splits.values()
+                                        ]).tolist()
+            train_paths = np.concatenate([
+                a for split in splits.values() for i, a in enumerate(split)
+                if i != k
+            ]).tolist()
+            np.random.shuffle(train_paths)
+            cfgs.append(
+                cfg_type(
+                    train_paths=train_paths,
+                    val_paths=val_paths,
+                    calibrate_paths=val_paths,
+                    name=f'{name}',
+                    **kwargs,
+                ))
+
+    return cfgs
+
+
+def generate_fluor_class_dict(paths: list[Path]) -> dict[Path, str]:
+    log.info('Generating class dict for dataset')
+    fluor = 1
+    no_fluor = 0
+    class_dict = {}
+    for path in paths:
+        with h5py.File(path, 'r') as f:
+            if 'Epi' in f['Images']:
+                class_dict[path] = fluor
+            else:
+                class_dict[path] = no_fluor
+    return class_dict
+
+
+def get_kfold_dataset() -> list:
+    paths = list(
+        Path('~/thor_server/MacrophageData/24_07/').expanduser().glob('*.h5'))
+    return generate_kfold_dataset_configs(
+        all_paths=paths,
+        num_folds=4,
+        cfg_type=BinaryClassDatasetCfg,
+        name='24_07',
+        min_length=50,
+        class_dict=generate_fluor_class_dict(paths),
+    )
+
 
 DATASETS = {
     '24_07_test':
