@@ -19,12 +19,15 @@ class DatasetCfg:
     loaded back as the same type (see DATASET_TYPES and configs.io).
     """
     dataset_type: str = field(default='', init=False)
-    train_paths: list[Union[Path, str]]
-    val_paths: list[Union[Path, str]]
-    min_length: int
     num_bins: int
+    train_paths: list[Union[Path, str]] = field(default=list, compare=False)
+    val_paths: list[Union[Path, str]] = field(default=list, compare=False)
+    min_length: int = 50
+
     name: str = ''
-    calibrate_paths: list[Union[Path, str]] | None = None
+    calibrate_paths: list[Union[Path, str]] = field(default=list,
+                                                    compare=False)
+
     num_cells: int | None = None
 
     normalisation_means: list[float] = field(default=None,

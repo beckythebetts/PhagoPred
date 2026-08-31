@@ -101,13 +101,13 @@ def view_dataset_distributions():
 def plot():
     plot_experiment_results(
         Path(
-            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Nonlinear Chain AR Binary_23072026_173331'
+            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/24_07_test_28082026_144811'
         ))
 
 
 if __name__ == '__main__':
-    # plot()
-    train()
+    plot()
+    # train()
     # eval()
 
     # for h5_file in Path(
