@@ -372,6 +372,7 @@ def extract_features(
         features.Perimeter(),
         features.Circularity(),
         features.Skeleton(),
+        features.RegionProps(),
         # features.CellDeath(),
         features.FirstLastFrame(),
         # features.ExternalFluorescence(),
