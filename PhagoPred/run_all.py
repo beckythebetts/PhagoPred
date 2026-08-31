@@ -22,7 +22,7 @@ from PhagoPred.survival_analysis.models import losses
 
 if __name__ == '__main__':
     datasets = Path(
-        '~/thor_server/MacrophageData/21_08/').expanduser().iterdir()
+        '~/thor_server/MacrophageData/14_08/').expanduser().iterdir()
     # dataset
     h5_paths = [
         Path('PhagoPred') / 'Datasets' / 'B.h5',
@@ -44,12 +44,12 @@ if __name__ == '__main__':
         # dataset = Path(dataset)
         # if dataset.name != '10_02_26_1':
         #     continue
-        if dataset.name == 'Test.h5':
+        if not dataset.name == 'A.h5':
             continue
-        # if dataset.name in ['Test', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']:
+        # if dataset.name in ['Test', 'A', 'B', 'C', 'D', 'E']:
         #     continue
-        if not dataset.is_dir():
-            continue
+        # if not dataset.is_dir():
+        #     continue
         # if dataset.stem in [
         #         'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
         #         'N', 'O'
@@ -82,17 +82,13 @@ if __name__ == '__main__':
         #                                       features.ExternalFluorescence()
         #                                   ])
         # shutil.move(h5_file, dataset)
-        shutil.move(
-            dataset,
-            Path('~/thor_server/MacrophageData/21_08/').expanduser() /
-            dataset.name)
-        # extract_features.extract_features(dataset, [
-        #     features.RegionProps(),
-        #     features.Skeleton(),
-        #     features.Perimeter(),
-        #     features.Circularity(),
-        # ])
-
+        # shutil.move(
+        #     dataset,
+        #     Path('~/thor_server/MacrophageData/14_08/').expanduser() /
+        #     dataset.name)
+        extract_features.extract_features(dataset, [
+            features.RegionProps(),
+        ])
         # GUI.run(dataset=dataset)
         # truncate_hdf5(dataset, dataset.parent / f"truncated_{dataset.name}", start_frame = 0, end_frame=300)
 
