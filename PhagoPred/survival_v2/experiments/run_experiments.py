@@ -360,7 +360,7 @@ def run_experiment_suite(
         result, exp_dir = run_single_experiment(exp_config, output_dir, device)
         results.append(result)
         if shap_interpret:
-            interpret(exp_dir, device=device, num_segments=8)
+            interpret(exp_dir, device=device, num_smaples=1000)
 
     plot_experiment_results(output_dir, ignore_params=['feature_combo'])
     # plot_confusion_matrices(output_dir)

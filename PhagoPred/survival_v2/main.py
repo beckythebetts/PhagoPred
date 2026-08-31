@@ -31,7 +31,7 @@ def train():
             output_dir='PhagoPred/survival_v2/experiments/results',
             device='cuda',
             repeats=1,
-            shap_interpret=False)
+            shap_interpret=True)
     # _ = run_experiment_suite(
     #     suite_name='Graph Survival',
     #     output_dir='PhagoPred/survival_v2/experiments/results',
@@ -106,8 +106,12 @@ def plot():
 
 
 if __name__ == '__main__':
-    plot()
-    # train()
+    # interpret_suite(
+    #     Path(
+    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/24_07_test_28082026_144811'
+    #     ))
+    # plot()
+    train()
     # eval()
 
     # for h5_file in Path(

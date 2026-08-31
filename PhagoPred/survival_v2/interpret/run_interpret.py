@@ -7,6 +7,7 @@ import re
 
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 
 from PhagoPred.utils.logger import get_logger
 from PhagoPred.survival_v2.utils.io import load_model, load_dataset
@@ -43,7 +44,7 @@ def interpret(
     compute_temporal: bool = True,
     compute_feature: bool = True,
     compute_temporal_feature: bool = True,
-    device: str = "cpu",
+    device: str = None,
 ) -> Optional[KernelSHAPResults]:
     """
     Run perturbation-based SHAP interpretation for a trained model.
@@ -76,6 +77,8 @@ def interpret(
     Returns:
         KernelSHAPResults with aggregated importance values across all samples.
     """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log.info(f'Starting kernel SHAP on {experiment_dir}, on device {device}')
     experiment_dir = Path(experiment_dir)
     output_dir = Path(

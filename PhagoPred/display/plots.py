@@ -68,41 +68,6 @@ def load_per_well_statistics(
     return medians, iqrs, feature_names
 
 
-def bootstrap_difference_ci(a: np.ndarray,
-                            b: np.ndarray,
-                            confidence: float = 0.95,
-                            n_resamples: int = 9999,
-                            seed: int = 0) -> tuple[float, float, float]:
-    """Difference in means of ``b`` and ``a``, with a bootstrap interval.
-
-    Bootstrapped rather than assuming normality, since there are only a
-    handful of wells per group. Returns ``(difference, low, high)``.
-    """
-    a = np.asarray(a)[np.isfinite(a)]
-    b = np.asarray(b)[np.isfinite(b)]
-    difference = np.mean(b) - np.mean(a) if len(a) and len(b) else np.nan
-
-    if len(a) < 2 or len(b) < 2:
-        return difference, np.nan, np.nan
-
-    def statistic(x, y, axis=-1):
-        return np.mean(y, axis=axis) - np.mean(x, axis=axis)
-
-    for method in ('BCa', 'percentile'):
-        try:
-            interval = bootstrap((a, b),
-                                 statistic,
-                                 method=method,
-                                 confidence_level=confidence,
-                                 n_resamples=n_resamples,
-                                 random_state=seed).confidence_interval
-            return difference, interval.low, interval.high
-        except Exception:
-            continue
-
-    return difference, np.nan, np.nan
-
-
 def plot_per_well_summary(
     save_as: Path,
     hdf5_files: list[Union[str, Path]],
@@ -112,22 +77,6 @@ def plot_per_well_summary(
     annotate_wells: bool = False,
 ) -> plt.Figure:
     """One point per well (hdf5 file), grouped by label.
-
-    ``annotate_wells`` labels each point with the stem of its hdf5 file, which
-    is how an outlying well gets traced back to the dataset it came from.
-
-    Treats the well, not the cell, as the unit of replication. Pooling millions
-    of cells makes vanishingly small group differences look overwhelming, but
-    cells within a well are not independent samples of "with fluorescence" -
-    the wells are. The spread of the points within a group is the noise any
-    real group difference has to beat, and it is readable directly off the
-    plot.
-
-    Top row is each well's median for a feature, bottom row its interquartile
-    range (i.e. whether the spread differs, not just the centre). A box
-    summarises each group, but the wells stay plotted on top of it: with ~12
-    per group, the box's five numbers would hide the very spread the plot
-    exists to show.
     """
     group_labels, group_indices = group_wells_by_label(hdf5_files, labels)
     num_groups = len(group_labels)
@@ -231,118 +180,35 @@ def plot_per_well_summary(
     return fig
 
 
-def plot_per_well_intervals(
-    save_as: Path,
-    hdf5_files: list[Union[str, Path]],
-    feature_names: Optional[list[str]] = None,
-    labels: Optional[list[str]] = None,
-    equivalence_percent: Optional[float] = None,
-    confidence: float = 0.95,
-    n_resamples: int = 9999,
-    seed: int = 0,
-) -> plt.Figure:
-    """Group difference per feature, with a bootstrap confidence interval.
-
-    The companion to plot_per_well_summary. That plot shows whether the groups
-    look different; this one says how large a difference the data still allow,
-    which is the question a non-significant test leaves open - failing to
-    detect a difference is not evidence that there is none.
-
-    Differences are shown as a percentage of the pooled value so that features
-    on different scales sit on one axis. ``equivalence_percent`` optionally
-    shades a band of differences small enough not to matter; choosing that
-    bound is a scientific judgement, so there is no default.
-    """
-    group_labels, group_indices = group_wells_by_label(hdf5_files, labels)
-    if len(group_labels) != 2:
-        raise ValueError("Confidence intervals need exactly two groups, got "
-                         f"{len(group_labels)}: {group_labels}")
-
-    medians, iqrs, feature_names = load_per_well_statistics(
-        hdf5_files, feature_names)
-
-    num_features = len(feature_names)
-    fig, ax = plt.subplots(figsize=(9, 0.62 * num_features + 2.6))
-
-    for offset, (statistic, values_by_feature, marker,
-                 color) in enumerate([('Median', medians, 'o', 'k'),
-                                      ('IQR', iqrs, 's', 'grey')]):
-        centres, lows, highs, positions = [], [], [], []
-
-        for index, feat in enumerate(feature_names):
-            values = np.array(values_by_feature[feat])
-            difference, low, high = bootstrap_difference_ci(
-                values[group_indices == 0],
-                values[group_indices == 1],
-                confidence=confidence,
-                n_resamples=n_resamples,
-                seed=seed)
-
-            # Relative to the pooled value, so features are comparable
-            scale = np.nanmean(values)
-            if not np.isfinite([difference, low, high, scale]).all() or (scale
-                                                                         == 0):
-                continue
-
-            centres.append(100 * difference / scale)
-            lows.append(max(0.0, 100 * (difference - low) / scale))
-            highs.append(max(0.0, 100 * (high - difference) / scale))
-            positions.append(index + (offset - 0.5) * 0.3)
-
-        ax.errorbar(centres,
-                    positions,
-                    xerr=[lows, highs],
-                    fmt=marker,
-                    color=color,
-                    markersize=6,
-                    capsize=4,
-                    linewidth=1.4,
-                    linestyle='None',
-                    label=f'Per-well {statistic}')
-
-    if equivalence_percent is not None:
-        ax.axvspan(-equivalence_percent,
-                   equivalence_percent,
-                   color='grey',
-                   alpha=0.15,
-                   zorder=0,
-                   label=f'±{equivalence_percent:g}% bound')
-    ax.axvline(0, color='k', linewidth=1)
-
-    ax.set_yticks(range(num_features))
-    ax.set_yticklabels(feature_names, fontsize=11)
-    ax.set_ylim(num_features - 0.5, -0.5)
-    ax.set_xlabel(
-        f'{group_labels[1]} - {group_labels[0]} '
-        f'(% of pooled value, {confidence:.0%} bootstrap CI)',
-        fontsize=11)
-    ax.set_title(
-        'An interval spanning 0 means no evidence of a difference, not '
-        'evidence the groups match:\nits width is how large a difference the '
-        'data still allow',
-        fontsize=10,
-        color='dimgrey')
-    ax.grid(axis='x', alpha=0.3)
-    ax.legend(fontsize=10, frameon=False, loc='best')
-
-    plt.tight_layout()
-    plt.savefig(save_as, dpi=150, bbox_inches='tight')
-
-    return fig
-
-
 def main():
     feature_names = [
+        # 'Area',
+        # 'Circularity',
+        # 'Perimeter',
+        # 'Speed',
+        # 'Skeleton Length',
         'Area',
         'Circularity',
+        'Displacement',
         'Perimeter',
-        'Speed',
+        'Phagocytes within 100 pixels',
+        'Phagocytes within 250 pixels',
+        'Phagocytes within 500 pixels',
+        'Skeleton Branch Length Mean',
+        'Skeleton Branch Length Max',
+        'Skeleton Branch Length Std',
+        'Skeleton Branches',
         'Skeleton Length',
+        'Speed',
+        'Major Axis Length',
+        'Minor Axis Length',
+        'Eccentricity',
     ]
     hdf5_files = [
         Path('~/thor_server/MacrophageData/24_07/').expanduser() / f'{_}.h5'
-        for _ in ('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L',
-                  'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X')
+        for _ in ('A2', 'B2', 'C2', 'D2', 'E2', 'F2', 'G2', 'H2', 'I2', 'J2',
+                  'K2', 'L2', 'M2', 'N2', 'O2', 'P2', 'Q2', 'R2', 'S2', 'T2',
+                  'U2', 'V2', 'W2', 'X2')
     ]
     labels = (['No Fluor'] * 3 + ['Fluor'] * 6 + ['No Fluor'] * 6 +
               ['Fluor'] * 6 + ['No Fluor'] * 3)
@@ -353,12 +219,6 @@ def main():
         feature_names=feature_names,
         labels=labels,
         annotate_wells=False,
-    )
-    plot_per_well_intervals(
-        save_as=Path('temp') / 'per_well_intervals.png',
-        hdf5_files=hdf5_files,
-        feature_names=feature_names,
-        labels=labels,
     )
 
 
