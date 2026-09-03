@@ -1,8 +1,30 @@
+import argparse
 import napari
 from pathlib import Path
 
 from PhagoPred.display.GUI.all_cells import AllCellsViewer
 from PhagoPred import SETTINGS
+
+
+def find_dataset(name: str) -> Path:
+    path = Path(name)
+    if path.is_file():
+        return path
+
+    if not name.endswith('.h5'):
+        name += '.h5'
+        if Path(name).is_file():
+            return Path(name)
+
+    matches = list(Path.cwd().rglob(name))
+    if not matches:
+        raise FileNotFoundError(f"No dataset named '{name}' found under {Path.cwd()}")
+    if len(matches) > 1:
+        raise FileNotFoundError(
+            f"Multiple datasets named '{name}' found under {Path.cwd()}:\n"
+            + '\n'.join(str(m) for m in matches)
+        )
+    return matches[0]
 
 
 def run(dataset=SETTINGS.DATASET):
@@ -19,4 +41,16 @@ def run(dataset=SETTINGS.DATASET):
     napari.run()
     
 if __name__ == '__main__':
-    run()
+    parser = argparse.ArgumentParser(description='Launch the PhagoPred GUI.')
+    parser.add_argument(
+        'dataset',
+        nargs='?',
+        default=None,
+        help='Name of the dataset .h5 file to search for in the current directory (defaults to SETTINGS.DATASET).',
+    )
+    args = parser.parse_args()
+
+    if args.dataset is None:
+        run()
+    else:
+        run(find_dataset(args.dataset))

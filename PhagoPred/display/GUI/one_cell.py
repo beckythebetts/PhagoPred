@@ -37,12 +37,14 @@ class CellViewer(QWidget):
             self.hdf5_file['Cells']['Phase']['First Frame'][0, self.cell_idx])
         self.last_frame = int(
             self.hdf5_file['Cells']['Phase']['Last Frame'][0, self.cell_idx])
-        self.cell_death = self.hdf5_file['Cells']['Phase']['CellDeath'][
-            0, self.cell_idx]
+
         try:
+
+            self.cell_death = self.hdf5_file['Cells']['Phase']['CellDeath'][
+                0, self.cell_idx]
             self.cell_death = int(self.cell_death)
-        except ValueError:
-            pass
+        except (ValueError, KeyError):
+            self.cell_death = None
 
         # Feature names from HDF5
         self.progress_bar = None
