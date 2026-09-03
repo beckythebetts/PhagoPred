@@ -153,8 +153,14 @@ class BinaryCellDataset(CellDataset):
 
     def _load_true_variances(self) -> None:
         file_path = self.hdf5_paths[0]
+        # Match on the '<cfg.filename>_{train,val,cal}' stem exactly, not a
+        # substring: e.g. 'linear_chain_high_ar' is a substring of
+        # 'nonlinear_chain_high_ar_train.h5' (via "non" + "linear..."), so a
+        # plain `in` check would silently pick the wrong scenario's graph and
+        # calibration.
+        stem_prefix = Path(file_path).stem.rsplit('_', 1)[0]
         for cfg in ALL_CFGS:
-            if cfg.filename in Path(file_path).name:
+            if cfg.filename == stem_prefix:
                 cfg.load(Path(file_path).parent)
 
                 variances = estimate_variances(
