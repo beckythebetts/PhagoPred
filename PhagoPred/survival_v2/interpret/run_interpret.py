@@ -1,3 +1,4 @@
+from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional, Union
@@ -8,12 +9,28 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import h5py
+from tqdm import tqdm
 
 from PhagoPred.utils.logger import get_logger
 from PhagoPred.survival_v2.utils.io import load_model, load_dataset
+from PhagoPred.survival_v2.configs import ExperimentCfg
 from PhagoPred.survival_v2.configs.models import RSFCfg
 from PhagoPred.survival_v2.configs.losses import BinaryLossCfg
+from PhagoPred.survival_v2.models import SurvivalModel
+from PhagoPred.survival_v2.data import (
+    CellDataset,
+    CellSample,
+    BinaryCellDataset,
+    BinaryClassDataset,
+    SurvivalCellDataset,
+)
 from .SHAP_kernel import KernelSHAP, KernelSHAPResults
+from .importance_plots import (
+    MODEL_ONLY_PANELS,
+    plot_dataset_average,
+    plot_samples,
+)
 
 log = get_logger()
 
@@ -28,295 +45,127 @@ class RSFImportanceResults:
     window_starts_by_scale: dict  # {ws: np.ndarray (num_windows,)}
 
 
+OUTPUT_TYPE = {
+    BinaryClassDataset: 'binary',
+    BinaryCellDataset: 'binary',
+    SurvivalCellDataset: 'expected_time'
+}
+
+
 def interpret(
-    experiment_dir: Union[str, Path],
-    output_dir: Optional[Union[str, Path]] = None,
-    split: Literal["train", "val"] = "val",
-    hdf5_paths: Optional[list[Union[str, Path]]] = None,
-    num_samples: int = 100,
+    experiment_dir: Path | str,
+    num_samples: int = 10,
+    num_shap_samples: int | None = None,
+    num_plt_samples: int = 10,
+    num_background_samples: int = 8,
     num_segments: int = 50,
-    nsamples_temporal: int = 300,
-    nsamples_feature: int = 200,
-    nsamples_temporal_feature: Optional[int] = None,
-    output_type: str = "expected_time",
-    target_bin: Optional[int] = None,
-    mask_value: float = 0.0,
-    compute_temporal: bool = True,
-    compute_feature: bool = True,
-    compute_temporal_feature: bool = True,
-    device: str = None,
-) -> Optional[KernelSHAPResults]:
-    """
-    Run perturbation-based SHAP interpretation for a trained model.
-
-    Loads the model and dataset from an experiment directory, runs KernelSHAP
-    across a batch of samples, saves importance plots and a results summary
-    to output_dir (defaults to experiment_dir/interpret/).
-
-    Args:
-        experiment_dir: Path to experiment directory with config.json + model.pkl.
-        output_dir: Where to save plots and results. Defaults to
-                    experiment_dir/interpret/.
-        split: Which dataset split to use ('train' or 'val'). Ignored if
-               hdf5_paths is provided.
-        hdf5_paths: Override dataset paths (e.g. a held-out test set).
-        num_samples: Number of cells to sample from the dataset.
-        num_segments: Number of temporal segments for KernelSHAP.
-        nsamples_temporal: KernelExplainer perturbation budget for temporal analysis.
-        nsamples_feature: KernelExplainer perturbation budget for feature analysis.
-        nsamples_temporal_feature: KernelExplainer perturbation budget for joint
-            temporal-feature analysis. Defaults to 2 * num_segments * num_features + 2048.
-        output_type: Model output to explain ('expected_time', 'cif', 'pmf').
-        target_bin: Target bin index when output_type is 'cif' or 'pmf'.
-        mask_value: Value substituted when a segment/feature is masked out.
-        compute_temporal: Whether to compute temporal importance.
-        compute_feature: Whether to compute feature importance.
-        compute_temporal_feature: Whether to compute joint temporal-feature importance.
-        device: Torch device for deep models.
-
-    Returns:
-        KernelSHAPResults with aggregated importance values across all samples.
-    """
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    log.info(f'Starting kernel SHAP on {experiment_dir}, on device {device}')
+) -> None:
+    log.info(f'Starting interpret on {experiment_dir}')
     experiment_dir = Path(experiment_dir)
-    output_dir = Path(
-        output_dir) if output_dir else experiment_dir / "interpret"
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Loading model from {experiment_dir}...")
-    model, cfg, _ = load_model(experiment_dir, device=device)
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    log.info(f'Using device {device}')
 
-    if isinstance(cfg.model, RSFCfg):
-        log.info("Skipping interpretation for RSF model (not supported).")
-        return None
+    # === GET MODEL / CONFIG ===
+    model, cfg, checkpoint = load_model(experiment_dir, device)
 
-    print(f"Loading dataset ({split} split)...")
-    dataset = load_dataset(experiment_dir, split=split, hdf5_paths=hdf5_paths)
+    dataset = load_dataset(experiment_dir, 'val')
+    hazard_bins = None
+    if hasattr(dataset, 'event_time_bins'):
+        hazard_bins = dataset.event_time_bins
 
-    explainer = KernelSHAP(
-        model=model,
-        feature_names=cfg.feature_combo,
-        device=device,
-    )
+    model_feat_names: list[str] = cfg.feature_combo
+    means, stds = np.array(checkpoint.get('normalalisation_means'),
+                           dtype=np.float32), np.array(
+                               checkpoint.get('normalalisation_stds'),
+                               dtype=np.float32)
 
-    if output_type == "expected_time" and isinstance(cfg.loss, BinaryLossCfg):
-        output_type = "binary"
-        print("Binary model detected: using output_type='binary'")
+    kernel_shap = KernelSHAP(model, model_feat_names, device)
 
-    print(f"Running KernelSHAP on {num_samples} samples...")
-    results = explainer.analyse_batch(
-        dataset=dataset,
+    results, batch = kernel_shap.analyse_batch(
+        dataset,
         device=device,
         num_samples=num_samples,
         num_segments=num_segments,
-        nsamples_temporal=nsamples_temporal,
-        nsamples_feature=nsamples_feature,
-        nsamples_temporal_feature=nsamples_temporal_feature,
-        output_type=output_type,
-        target_bin=target_bin,
-        mask_value=mask_value,
-        compute_temporal=compute_temporal,
-        compute_feature=compute_feature,
-        compute_temporal_feature=compute_temporal_feature,
-    )
+        nsamples_temporal_feature=num_shap_samples,
+        output_type=OUTPUT_TYPE[type(dataset)],
+        time_bins=hazard_bins,
+        return_batch=True)
 
-    _save_results(results, output_dir)
-    _save_plots(explainer, results, output_dir)
+    _create_shap_file(experiment_dir / 'SHAP.h5', results, batch,
+                      dataset.feature_names)
 
-    print(f"Results saved to {output_dir}")
-    log.info(f'Kenrel SHAP results: {results}')
-    return results
+    plot_interpret(experiment_dir, num_plt_samples)
 
 
-def _save_results(results: KernelSHAPResults, output_dir: Path) -> None:
-    """Save importance arrays as .npy files and a JSON summary."""
-    summary = {}
+def _create_shap_file(path: Path, results: KernelSHAPResults, batch: dict,
+                      feature_names: list[str]) -> None:
+    log.info(f'Writing SHAP reuslts to {path}')
+    with h5py.File(path, 'w') as f:
+        for i in tqdm(range(len(batch['landmark_frame'])),
+                      desc='Writing SHAP results'):
 
-    if results.temporal_importance is not None:
-        np.save(output_dir / "temporal_importance.npy",
-                results.temporal_importance)
-        np.save(output_dir / "temporal_shap_values.npy",
-                results.temporal_shap_values)
-        np.save(output_dir / "segment_boundaries.npy",
-                results.segment_boundaries)
-        summary["temporal_baseline"] = float(
-            results.temporal_baseline
-        ) if results.temporal_baseline is not None else np.nan
+            group = f.create_group(str(i))
+            group.attrs['Features'] = feature_names
+            group.attrs['Landmark Frame'] = batch['landmark_frame'][i]
 
-    if results.feature_importance is not None:
-        np.save(output_dir / "feature_importance.npy",
-                results.feature_importance)
-        np.save(output_dir / "feature_shap_values.npy",
-                results.feature_shap_values)
-        summary["feature_baseline"] = float(
-            results.feature_baseline
-        ) if results.feature_baseline is not None else np.nan
-        summary["feature_names"] = results.feature_names
-        summary["feature_importance"] = {
-            name: float(imp)
-            for name, imp in zip(results.feature_names,
-                                 results.feature_importance)
-        }
+            if 'death_frame' in batch.keys():
+                group.attrs['Death Frame'] = batch['death_frame'][i]
 
-    if results.temporal_feature_importance is not None:
-        np.save(
-            output_dir / "temporal_feature_importance.npy",
-            results.temporal_feature_importance,
-        )
-        np.save(
-            output_dir / "temporal_feature_shap_values.npy",
-            results.temporal_feature_shap_values,
-        )
-        summary["temporal_feature_baseline"] = float(
-            results.temporal_feature_baseline
-        ) if results.temporal_feature_baseline is not None else np.nan
-
-    with (output_dir / "summary.json").open("w") as f:
-        json.dump(summary, f, indent=2)
+            if 'target_class' in batch.keys():
+                group.attrs['Target Class'] = batch['target_class'].cpu()[i]
+            # (feature, frame) to match importance_data.load_sample_importances,
+            # which slices Signals as ``[:, :lf]``. The collated tensor is
+            # (sample, frame, feature).
+            group.create_dataset('Signals',
+                                 data=np.asarray(batch['features'].cpu()[i]).T,
+                                 dtype=float)
+            _write_model_shap_results(f, i, results, feature_names)
 
 
-def _save_plots(
-    explainer: KernelSHAP,
-    results: KernelSHAPResults,
-    output_dir: Path,
-) -> None:
-    """Save all available importance plots."""
-    if results.temporal_importance is not None:
-        fig = explainer.plot_temporal_importance(results)
-        fig.savefig(output_dir / "temporal_importance.png",
-                    dpi=150,
-                    bbox_inches="tight")
-
-    if results.feature_importance is not None:
-        fig = explainer.plot_feature_importance(results)
-        fig.savefig(output_dir / "feature_importance.png",
-                    dpi=150,
-                    bbox_inches="tight")
-
-    if results.temporal_feature_importance is not None:
-        fig = explainer.plot_temporal_feature_importance(results)
-        fig.savefig(output_dir / "temporal_feature_importance.png",
-                    dpi=150,
-                    bbox_inches="tight")
-
-    if results.temporal_importance is not None and results.feature_importance is not None:
-        fig = explainer.plot_summary(results)
-        fig.savefig(output_dir / "summary.png", dpi=150, bbox_inches="tight")
+def _write_model_shap_results(h5_file: h5py.File, sample_idx: int,
+                              shap_results: KernelSHAPResults,
+                              model_featurre_names: list[str]) -> None:
+    # analyse_batch aggregates every sample into these arrays (sample-major), so
+    # each group is indexed by sample_idx — not 0, which would store sample 0's
+    # map under every group.
+    f = h5_file
+    sample = f[str(sample_idx)]
+    model = sample.create_dataset(
+        'Model',
+        data=shap_results.temporal_feature_shap_values[sample_idx],
+        dtype=float)
+    model.attrs['Temporal'] = shap_results.temporal_shap_values[sample_idx]
+    model.attrs['Feature'] = shap_results.feature_shap_values[sample_idx]
+    model.attrs['Segment Boundaries'] = shap_results.segment_boundaries
+    model.attrs['Feature Names'] = model_featurre_names
 
 
-# ─── RSF-specific interpretation ────────────────────────────────────────────
-
-_WS_RE = re.compile(r'_ws(\d+)_wi(?:dx)?(\d+)$')
-
-
-def _interpret_rsf(model, output_dir: Path) -> RSFImportanceResults:
-    """Derive feature and temporal importance from RSF feature_importances_."""
-    feature_names_all = model.get_feature_names()
-    importances_arr = model.model.feature_importances_
-    importance_dict = dict(zip(feature_names_all, importances_arr))
-    ts = model.temporal_summariser
-
-    base_feat_imp: dict[str, float] = {}
-    temporal_imp: dict[int, dict[int, float]] = {
-        ws: {}
-        for ws in ts.window_sizes
-    }
-
-    for name, imp in importance_dict.items():
-        m = _WS_RE.search(name)
-        if not m:
-            continue
-        ws = int(m.group(1))
-        widx = int(m.group(2))
-        base = name[:m.start()]  # e.g. 'mean_frame_count' or 'missingness'
-
-        base_feat_imp[base] = base_feat_imp.get(base, 0.0) + imp
-        temporal_imp[ws][widx] = temporal_imp[ws].get(widx, 0.0) + imp
-
-    feature_names = sorted(base_feat_imp)
-    feature_importance = np.array([base_feat_imp[n] for n in feature_names])
-
-    temporal_by_scale: dict[int, np.ndarray] = {}
-    window_starts_by_scale: dict[int, np.ndarray] = {}
-    for ws in ts.window_sizes:
-        stride = int(ws * ts.window_overlap)
-        num_windows = (ts.full_seq_len - ws) // stride + 1
-        temporal_by_scale[ws] = np.array(
-            [temporal_imp[ws].get(i, 0.0) for i in range(num_windows)])
-        window_starts_by_scale[ws] = np.arange(num_windows) * stride
-
-    results = RSFImportanceResults(
-        feature_importance=feature_importance,
-        feature_names=feature_names,
-        temporal_importance_by_scale=temporal_by_scale,
-        window_starts_by_scale=window_starts_by_scale,
-    )
-    _save_rsf_results(results, output_dir)
-    _save_rsf_plots(results, output_dir)
-    print(f"RSF importance results saved to {output_dir}")
-    return results
+# ─────────────────────────── plotting ───────────────────────────
+# Same figures as ground_truth_importance, minus the ground-truth panels: there
+# is no causal graph behind a real dataset, so SHAP.h5 stores model SHAP only.
+# The assembly is shared from importance_plots; MODEL_ONLY_PANELS drops the
+# interventional / observational / outputs axes.
 
 
-def _save_rsf_results(results: RSFImportanceResults, output_dir: Path) -> None:
-    np.save(output_dir / "feature_importance.npy", results.feature_importance)
-    for ws, imp in results.temporal_importance_by_scale.items():
-        np.save(output_dir / f"temporal_importance_ws{ws}.npy", imp)
+def plot_interpret(experiment_dir: Path | str,
+                   num_plot_samples: int = 10) -> None:
+    """Write per-sample and dataset-average model-SHAP figures for SHAP.h5."""
+    experiment_dir = Path(experiment_dir)
+    h5_path = experiment_dir / 'SHAP.h5'
+    if not h5_path.is_file():
+        log.warning(f'{h5_path} not found; skipping interpret plots')
+        return
 
-    summary = {
-        "feature_importance":
-        dict(zip(results.feature_names, results.feature_importance.tolist())),
-        "temporal_importance_by_scale": {
-            str(ws): imp.tolist()
-            for ws, imp in results.temporal_importance_by_scale.items()
-        },
-    }
-    with (output_dir / "summary.json").open("w") as f:
-        json.dump(summary, f, indent=2)
+    save_dir = experiment_dir / 'shap'
+    plot_samples(h5_path,
+                 save_dir,
+                 num_plot_samples,
+                 title_prefix=experiment_dir.name,
+                 panels=MODEL_ONLY_PANELS)
 
-
-def _save_rsf_plots(results: RSFImportanceResults, output_dir: Path) -> None:
-    # Feature importance
-    n = len(results.feature_names)
-    fig, ax = plt.subplots(figsize=(10, max(4, n * 0.35)))
-    idx = np.argsort(results.feature_importance)
-    ax.barh(range(n), results.feature_importance[idx], color='steelblue')
-    ax.set_yticks(range(n))
-    ax.set_yticklabels([results.feature_names[i] for i in idx])
-    ax.set_xlabel("Summed importance (across all window scales and positions)")
-    ax.set_title("RSF Feature Importance")
-    ax.grid(axis='x', alpha=0.3)
-    plt.tight_layout()
-    fig.savefig(output_dir / "feature_importance.png",
-                dpi=150,
-                bbox_inches="tight")
-    plt.close(fig)
-
-    # Temporal importance — one subplot per window scale
-    scales = sorted(results.temporal_importance_by_scale)
-    fig, axes = plt.subplots(len(scales),
-                             1,
-                             figsize=(12, 3 * len(scales)),
-                             squeeze=False)
-    for ax, ws in zip(axes[:, 0], scales):
-        starts = results.window_starts_by_scale[ws]
-        imp = results.temporal_importance_by_scale[ws]
-        stride = starts[1] - starts[0] if len(starts) > 1 else ws
-        ax.bar(starts,
-               imp,
-               width=stride * 0.9,
-               align='edge',
-               color='coral',
-               edgecolor='darkred',
-               alpha=0.7)
-        ax.set_xlabel("Time (frames)")
-        ax.set_ylabel("Summed importance")
-        ax.set_title(f"Window scale ws={ws}")
-        ax.grid(axis='y', alpha=0.3)
-    plt.suptitle("RSF Temporal Importance by Window Scale", fontweight='bold')
-    plt.tight_layout()
-    fig.savefig(output_dir / "temporal_importance.png",
-                dpi=150,
-                bbox_inches="tight")
-    plt.close(fig)
+    average_fig = plot_dataset_average(h5_path, title=experiment_dir.name)
+    average_path = save_dir / 'dataset_average.png'
+    average_fig.savefig(average_path, bbox_inches='tight', dpi=120)
+    plt.close(average_fig)
+    log.info(f'Saved interpret figures to {save_dir}')

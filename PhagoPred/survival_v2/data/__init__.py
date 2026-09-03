@@ -1,7 +1,7 @@
 """
 Dataset utilities for survival analysis.
 """
-from .dataset import CellDataset, collate_fn
+from .dataset import CellDataset, collate_fn, CellSample
 from .temporal_summaries import TemporalSummary, BinaryTemporalSummaryDataset, SurvivalTemopralSummaryDataset
 from .binary_dataset import (
     BinaryCellSample,

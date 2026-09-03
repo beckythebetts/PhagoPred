@@ -12,11 +12,15 @@ from concurrent.futures import ThreadPoolExecutor
 import cv2
 import math
 import basicpy
+import logging
 
 from PhagoPred import SETTINGS
 from .fluor_background_removal import (replace_hot_pixels, bg_removal,
                                        rolling_ball_background, n2v_denoise)
 from .tools import remake_dir
+from .logger import get_logger
+
+log = get_logger()
 
 N2V_MODEL_DIR = Path('/home/ubuntu/PhagoPred/PhagoPred/Datasets/nv2_model')
 
@@ -24,6 +28,8 @@ N2V_MODEL_DIR = Path('/home/ubuntu/PhagoPred/PhagoPred/Datasets/nv2_model')
 def truncate_hdf5(dataset_path: Path, new_path: Path, start_frame: int,
                   end_frame: int) -> None:
     """Truncate given hdf5 path to only include frames from start_frame to end_frame."""
+    if not new_path.parent.exists():
+        os.makedirs(new_path.parent)
     with h5py.File(dataset_path, 'r') as orig:
         with h5py.File(new_path, 'x') as new:
             for group in ['Segmentations', 'Images']:
@@ -32,13 +38,13 @@ def truncate_hdf5(dataset_path: Path, new_path: Path, start_frame: int,
 
                 for name, dataset in orig_group.items():
                     if isinstance(dataset, h5py.Dataset):
-                        print(
+                        log.info(
                             f"Copying dataset '{name}' from frames {start_frame} to {end_frame}"
                         )
                         try:
                             # Extract the slice of data
                             sliced_data = dataset[start_frame:end_frame].copy()
-                            print(
+                            log.info(
                                 f"{name} sliced data shape: {sliced_data.shape}, dtype: {sliced_data.dtype}"
                             )
                             # Get creation properties
@@ -91,7 +97,9 @@ def truncate_hdf5(dataset_path: Path, new_path: Path, start_frame: int,
                     compression=orig_dset.compression,
                     compression_opts=orig_dset.compression_opts,
                     data=sliced_data)
-                # new_dset[:] = sliced_data
+
+
+# new_dset[:] = sliced_data
 
 
 def compute_percentile_limits(
@@ -274,6 +282,8 @@ def make_short_test_copy(orig_file: Path,
     """
     Copy the images group from the orig_file, taking only frames from start_frame to end_frame
     """
+    if not short_file.parent.exists():
+        os.makedirs(short_file.parent)
     group_name = 'Images'
     with h5py.File(orig_file, 'r') as orig:
         with h5py.File(short_file, 'x') as short:
@@ -647,7 +657,22 @@ def rename_group(hdf5_file: Path, old_group_name: str,
     )
 
 
+def split_datasets_by_time(parent_path: Path, num_splits: int) -> None:
+    splits = None
+    paths = list(parent_path.glob('*.h5'))
+    for path in tqdm(paths, desc='Splitting datasets'):
+        if splits is None:
+            with h5py.File(path, 'r') as f:
+                length = f['Images']['Phase'].shape[0]
+                splits = np.linspace(0, length, num_splits + 1)
+        for i, (start, stop) in enumerate(zip(splits[:-1], splits[1:])):
+            new_path = path.parent / f'split_{i}' / path.name
+            truncate_hdf5(path, new_path, int(start), int(stop))
+
+
 if __name__ == '__main__':
+    split_datasets_by_time(
+        Path('~/thor_server/MacrophageData/24_07').expanduser(), 3)
     # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/07_10_0.h5")
     # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_5min.h5")
     # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min.h5")
@@ -666,12 +691,12 @@ if __name__ == '__main__':
     # rename_group(Path("~/PhagoPred/PhagoPred/Datasets/10_02_26_1.h5").expanduser(), 'Images/Phase', 'Images/Phase0')
     # rename_group(Path("~/PhagoPred/PhagoPred/Datasets/10_02_26_1.h5").expanduser(), 'Images/Epi', 'Images/Phase')
     # rename_group(Path("~/PhagoPred/PhagoPred/Datasets/10_02_26_1.h5").expanduser(), 'Images/Phase0', 'Images/Epi')
-    make_short_test_copy(
-        Path("~/PhagoPred/PhagoPred/Datasets/10_02_26_1.h5").expanduser(),
-        Path(
-            "~/PhagoPred/PhagoPred/Datasets/10_02_26_1_short.h5").expanduser(),
-        start_frame=0,
-        end_frame=200)
+    # make_short_test_copy(
+    #     Path("~/PhagoPred/PhagoPred/Datasets/10_02_26_1.h5").expanduser(),
+    #     Path(
+    #         "~/PhagoPred/PhagoPred/Datasets/10_02_26_1_short.h5").expanduser(),
+    #     start_frame=0,
+    #     end_frame=200)
     # hdf5_from_tiffs(Path("~/thor_server/MacrophageData/28_10_no_staph_1").expanduser(),
     #             # Path('D:/27_05.h5'),
     #             Path("~/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min.h5").expanduser(),

@@ -154,6 +154,45 @@ def get_kfold_dataset() -> list:
 
 
 DATASETS = {
+    '24_07_0':
+    generate_kfold_dataset_configs(
+        all_paths=list(
+            Path('~/thor_server/MacrophageData/24_07/split_0').expanduser().
+            glob('*.h5')),
+        num_folds=4,
+        cfg_type=BinaryClassDatasetCfg,
+        name='Day 1',
+        min_length=50,
+        class_dict=generate_fluor_class_dict(
+            list(
+                Path('~/thor_server/MacrophageData/24_07/split_0').expanduser(
+                ).glob('*.h5')))),
+    '24_07_1':
+    generate_kfold_dataset_configs(
+        all_paths=list(
+            Path('~/thor_server/MacrophageData/24_07/split_1').expanduser().
+            glob('*.h5')),
+        num_folds=4,
+        cfg_type=BinaryClassDatasetCfg,
+        name='Day 2',
+        min_length=50,
+        class_dict=generate_fluor_class_dict(
+            list(
+                Path('~/thor_server/MacrophageData/24_07/split_1').expanduser(
+                ).glob('*.h5')))),
+    '24_07_2':
+    generate_kfold_dataset_configs(
+        all_paths=list(
+            Path('~/thor_server/MacrophageData/24_07/split_2').expanduser().
+            glob('*.h5')),
+        num_folds=4,
+        cfg_type=BinaryClassDatasetCfg,
+        name='Day 3',
+        min_length=50,
+        class_dict=generate_fluor_class_dict(
+            list(
+                Path('~/thor_server/MacrophageData/24_07/split_2').expanduser(
+                ).glob('*.h5')))),
     '24_07_test':
     BinaryClassDatasetCfg(
         train_paths=[

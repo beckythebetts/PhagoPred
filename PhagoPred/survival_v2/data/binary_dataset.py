@@ -104,7 +104,7 @@ class BinaryCellDataset(CellDataset):
         return BinaryCellSample(
             features=features,
             mask=~nan_mask,
-            length=landmark_frame - cell_metadata.start_frames + 1,
+            length=landmark_frame - cell_metadata.start_frames,
             cell_idx=cell_metadata.local_cell_idxs,
             hdf5_path=self.hdf5_paths[cell_metadata.file_idxs],
             start_frame=cell_metadata.start_frames,
