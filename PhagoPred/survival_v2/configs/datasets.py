@@ -143,14 +143,17 @@ def generate_fluor_class_dict(paths: list[Path]) -> dict[Path, str]:
 def get_kfold_dataset() -> list:
     paths = list(
         Path('~/thor_server/MacrophageData/24_07/').expanduser().glob('*.h5'))
-    return generate_kfold_dataset_configs(
-        all_paths=paths,
-        num_folds=4,
-        cfg_type=BinaryClassDatasetCfg,
-        name='24_07',
-        min_length=50,
-        class_dict=generate_fluor_class_dict(paths),
-    )
+    try:
+        return generate_kfold_dataset_configs(
+            all_paths=paths,
+            num_folds=4,
+            cfg_type=BinaryClassDatasetCfg,
+            name='24_07',
+            min_length=50,
+            class_dict=generate_fluor_class_dict(paths),
+        )
+    except ValueError:
+        return []
 
 
 DATASETS = {

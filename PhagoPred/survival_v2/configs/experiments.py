@@ -327,7 +327,7 @@ EXPERIMENT_SUITES = {
                           CALIBRATION['Platt Scaling'],
                       ])),
     # Compare nonlinear chain scenario at different autocorrelation levels.
-    'Graph Nonlinear Chain AR Binary':
+    'Graph Linear AR Binary':
     generate_experiment_grid(
         ExperimentCfg(model=[
             MODELS['CNN Medium'],
@@ -336,9 +336,9 @@ EXPERIMENT_SUITES = {
                       attention=ATTENTION['Last'],
                       loss=LOSSES['Weighted BCE'],
                       dataset=[
-                          DATASETS['Binary Graph Nonlinear Chain Low AR'],
-                          DATASETS['Binary Graph Nonlinear Chain Med AR'],
-                          DATASETS['Binary Graph Nonlinear Chain High AR'],
+                          DATASETS['Binary Graph Linear Low AR'],
+                          DATASETS['Binary Graph Linear Med AR'],
+                          DATASETS['Binary Graph Linear High AR'],
                       ],
                       training=TRAINING['Standard'],
                       feature_combo=['A', 'B', 'C', 'D'],

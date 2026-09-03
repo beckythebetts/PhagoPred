@@ -26,12 +26,13 @@ def train():
         # 'Graph Nonlinear Chain AR Binary',
         '24_07_time_split', )
     for suite in suites:
-        run_experiment_suite(
+        output_dir = run_experiment_suite(
             suite_name=suite,
             output_dir='PhagoPred/survival_v2/experiments/results',
             device='cuda',
-            repeats=1,
+            repeats=3,
             shap_interpret=True)
+    return output_dir
     # _ = run_experiment_suite(
     #     suite_name='Graph Survival',
     #     output_dir='PhagoPred/survival_v2/experiments/results',
@@ -73,7 +74,7 @@ def shap_comparison(suite_dir: Path):
 def eval():
     evaluate_suite(
         Path(
-            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/24_07_test_13082026_133851'
+            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Scenario Types Binary_01092026_095604'
         ))
     # evaluate_suite(
     #     Path(
@@ -111,7 +112,12 @@ if __name__ == '__main__':
     #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/24_07_test_28082026_144811'
     #     ))
     # plot()
-    train()
+    # suite_dir = train()
+    eval()
+    shap_comparison(
+        Path(
+            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Scenario Types Binary_01092026_095604'
+        ))
     # eval()
     # interpret_suite(
     #     Path(
