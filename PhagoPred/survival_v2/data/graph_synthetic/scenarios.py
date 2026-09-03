@@ -320,7 +320,7 @@ _AR_VARIANTS = (
     (_low_ar_coeff, 'low_ar'),
     (_med_ar_coeff, 'med_ar'),
     (_high_ar_coeff, 'high_ar'),
-    )
+)
 
 ALL_CFGS: list[ScenarioCfg] = [
     ScenarioCfg(f'{name}_{ar_name}',
