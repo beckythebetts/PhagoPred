@@ -285,7 +285,8 @@ def mean_reversion(feature_params: dict[str, tuple] = None) -> list[Rule]:
 
 def _linear(ar_coeff: float) -> list[Rule]:
     return [
-        Rule(target='Hazard', expr=Var('A', 25) + Var('B', 50) + Var('C', 100))
+        Rule(target='Hazard',
+             expr=Var('A', 50) + Var('B', 100) + Var('C', 150))
     ] + auto_correlate(ar_coeff=ar_coeff)
 
 
@@ -301,7 +302,7 @@ def _nonlinear_chain(ar_coeff: float) -> list[Rule]:
     return [
         Rule(target='B', expr=Sin(Var('A', 50))),
         Rule(target='C', expr=Sin(Var('B', 50))),
-        Rule(target='Hazard', expr=Var('C', 50)),
+        Rule(target='Hazard', expr=Sin(Var('C', 50))),
     ] + auto_correlate(ar_coeff=ar_coeff)
 
 

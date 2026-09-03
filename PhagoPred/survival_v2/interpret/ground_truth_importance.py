@@ -16,18 +16,9 @@ from PhagoPred.survival_v2.data.graph_synthetic.scenarios import ALL_CFGS, Scena
 from PhagoPred.survival_v2.data.graph_synthetic.analytic_estimates import sampleWithImportances, generate_sample_with_importances
 from PhagoPred.survival_v2.interpret.SHAP_kernel import KernelSHAP, KernelSHAPResults
 from PhagoPred.survival_v2.interpret.importance_plots import (
-    feature_panel,
-    heatmap_panel,
-    outputs_panel,
-    series_rows,
-    temporal_panel,
-)
-from PhagoPred.survival_v2.interpret.importance_data import (
-    dataset_average,
-    horizon_outputs,
-    load_sample_importances,
-    read_root_attrs,
-    sample_indices,
+    plot_dataset_average as _plot_dataset_average,
+    plot_sample as _plot_sample,
+    plot_samples as _plot_samples,
 )
 
 log = get_logger()
@@ -120,7 +111,8 @@ def compare_importance(
     # KernelSHAP background is real cells from the dataset (never the graph) — it
     # must be model-agnostic. Loaded once; sliced per sample below.
     background_pool = _load_background_pool(
-        dataset_dir / f'{scenario.filename}_train.h5', model_feat_names,
+        dataset_dir / f'{scenario.filename}_train.h5',
+        model_feat_names,
         num_candidates=max(512, num_background_samples * 16))
     kernel_shap = KernelSHAP(model, model_feat_names, device)
     for sample_idx in range(num_samples):
@@ -142,8 +134,9 @@ def compare_importance(
         # completeness sum (pred - E[f]) matches the ground-truth Shapley scale —
         # rather than a mask-to-0 baseline, which gives f(mean) != E[f].
         value_background = _model_value_background(background_pool,
-                                                   sample.landmark_frame, means,
-                                                   stds, num_background_samples)
+                                                   sample.landmark_frame,
+                                                   means, stds,
+                                                   num_background_samples)
         shap_results = kernel_shap.analyse(
             model_input,
             torch.tensor([sample.landmark_frame]),
@@ -180,8 +173,8 @@ def _model_prediction(
     """The model's own prediction for this sample, to sit alongside the truth.
 
     Binary models emit a single P(event within horizon); survival models emit a
-    per-bin PMF. Both are compared in plot_sample_on_axes against the quantity
-    derived from the sample's stored ``horizon_hazard``.
+    per-bin PMF. Both are compared in importance_plots.outputs_panel against the
+    quantity derived from the sample's stored ``horizon_hazard``.
     """
     with torch.no_grad():
         logits = model(model_input.to(device),
@@ -484,227 +477,36 @@ def backfill_horizon_hazard(
 
 
 # ─────────────────────────── plotting ───────────────────────────
-# Panel primitives live in importance_plots so experiments.plots can reuse them
-# without importing torch. Per-sample panels are signed; dataset averages use
-# mean |SHAP| (signed values from different samples cancel).
+# The figure assembly lives in importance_plots (torch-free) so run_interpret and
+# experiments.plots reuse it. These wrappers pin the shap_samples.h5 location and
+# the experiment-named titles / output dir that compare_importance expects.
+
+_COMPARISON_DIRNAME = 'ground_truth_comparison'
 
 
-def plot_sample_on_axes(
-    experiment_dir: Path,
-    axes: list[plt.axes],
-    sample_idx: int | None,
-    signals: bool = True,
-    interventional: bool = True,
-    observational: bool = True,
-    model: bool = True,
-    temporal: bool = True,
-    feature: bool = True,
-    outputs: bool = True,
-    normalise: bool = True,
-) -> None:
-    """Draw one stored sample across ``axes``, straight from shap_samples.h5.
-
-    Panels are consumed in the order signals, interventional, observational,
-    model, temporal, feature, outputs — one axis per enabled flag. The heatmaps
-    share a [0, lf) frame axis so they can be read column-wise against each
-    other; model SHAP is per-segment and is spread onto that frame grid.
-
-    The temporal and feature panels collapse the model's joint (segment x
-    feature) map. Ground-truth temporal curves are summed over the model's
-    features only, so both sides sum over the same set; Hazard still appears in
-    the heatmaps and the per-feature bars.
-
-    ``sample_idx=None`` reads a single-sample file written at the h5 root.
-    Panels whose data is absent are annotated rather than raising.
-    """
-    flags = [
-        signals, interventional, observational, model, temporal, feature,
-        outputs
-    ]
-    assert np.sum(flags) == len(axes)
-
-    h5_path = Path(experiment_dir) / 'shap_samples.h5'
-    root = read_root_attrs(h5_path)
-    sample = load_sample_importances(h5_path, sample_idx)
-
-    lf = sample.landmark_frame
-    death_str = ('censored' if sample.death_frame is None else
-                 f'{sample.death_frame:.0f}')
-    remaining = list(axes)
-
-    def _next() -> plt.Axes:
-        return remaining.pop(0)
-
-    def _norm(values):
-        values = np.asarray(values, dtype=float)
-        total = np.nansum(np.abs(values))
-        return values / total if (normalise and total > 0) else values
-
-    def _missing(ax: plt.Axes, what: str) -> None:
-        ax.text(0.5,
-                0.5,
-                f'No {what} in\n{h5_path.name}',
-                ha='center',
-                va='center',
-                fontsize=8,
-                transform=ax.transAxes)
-        ax.set_axis_off()
-
-    if signals:
-        heatmap_panel(_next(),
-                      sample.signals,
-                      sample.feature_names,
-                      lf,
-                      f'Signals (row-normalised)  lf={lf}  death={death_str}',
-                      row_normalise=True)
-
-    for enabled, key in ((interventional, 'Interventional'),
-                         (observational, 'Observational')):
-        if not enabled:
-            continue
-        ax = _next()
-        if key not in sample.ground_truth:
-            _missing(ax, f'{key} importances')
-        else:
-            heatmap_panel(ax, sample.ground_truth[key], sample.feature_names,
-                          lf, f'{key} GT SHAP')
-
-    if model:
-        ax = _next()
-        if sample.model_map is None:
-            _missing(ax, 'Model SHAP (run compare_importance)')
-        else:
-            n_segments = len(sample.segment_boundaries) - 1
-            heatmap_panel(
-                ax, sample.model_map, sample.model_feature_names, lf,
-                f'Model KernelSHAP ({n_segments} segments, per-frame)')
-
-    unit = ' (relative)' if normalise else ''
-    if temporal:
-        ax = _next()
-        series = {
-            k: _norm(sample.ground_truth_temporal(k))
-            for k in sample.ground_truth
-        }
-        if sample.model_map is not None:
-            series['Model'] = _norm(sample.model_temporal_from_map())
-        temporal_panel(ax,
-                       series, f'Temporal importance{unit} (summed over '
-                       f'{", ".join(sample.shared_feature_names)})',
-                       n_frames=lf)
-
-    if feature:
-        ax = _next()
-        series = {
-            k: (sample.feature_names, _norm(sample.ground_truth_feature(k)))
-            for k in sample.ground_truth
-        }
-        if sample.model_map is not None:
-            series['Model'] = (sample.model_feature_names,
-                               _norm(sample.model_feature_from_map()))
-        feature_panel(ax, series, f'Feature importance{unit} (separate game)')
-
-    if outputs:
-        outputs_panel(
-            _next(),
-            root['output_type'],
-            ground_truth=horizon_outputs(sample.horizon_hazard,
-                                         root['output_type'],
-                                         root['hazard_bins']),
-            model_prediction=sample.model_prediction,
-            hazard_bins=root['hazard_bins'],
-            horizon=root['horizon'],
-            death_offset=(None if sample.death_frame is None else
-                          sample.death_frame - lf),
-        )
-
-
-def plot_sample(experiment_dir: Path, sample_idx: int) -> plt.Figure:
-    """Full seven-panel figure for one sample."""
-    fig, axes = plt.subplots(1, 7, figsize=(36, 4))
-    plot_sample_on_axes(experiment_dir, list(axes), sample_idx)
-    fig.suptitle(f'Sample {sample_idx} — {Path(experiment_dir).name}',
-                 fontweight='bold',
-                 fontsize=11)
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
-    return fig
-
-
-def plot_samples(experiment_dir: Path, num_plot_samples: int) -> list[Path]:
-    """Save one figure per sample into ``<experiment_dir>/ground_truth_comparison``."""
+def plot_sample(experiment_dir: Path | str,
+                sample_idx: int | None) -> plt.Figure:
+    """Full seven-panel comparison figure for one stored sample."""
     experiment_dir = Path(experiment_dir)
-    save_dir = experiment_dir / 'ground_truth_comparison'
-    save_dir.mkdir(parents=True, exist_ok=True)
-
-    indices = sample_indices(experiment_dir / 'shap_samples.h5')
-    indices = indices[:num_plot_samples] if indices else [None]
-
-    saved = []
-    for sample_idx in indices:
-        fig = plot_sample(experiment_dir, sample_idx)
-        path = save_dir / f'sample_{sample_idx:02d}.png'
-        fig.savefig(path, bbox_inches='tight', dpi=120)
-        plt.close(fig)
-        saved.append(path)
-    log.info(f'Saved {len(saved)} sample figures to {save_dir}')
-    return saved
+    return _plot_sample(experiment_dir / 'shap_samples.h5',
+                        sample_idx,
+                        title=f'Sample {sample_idx} — {experiment_dir.name}')
 
 
-def plot_dataset_average(experiment_dir: Path,
+def plot_samples(experiment_dir: Path | str,
+                 num_plot_samples: int) -> list[Path]:
+    """Save one comparison figure per sample into ``<experiment_dir>/ground_truth_comparison``."""
+    experiment_dir = Path(experiment_dir)
+    return _plot_samples(experiment_dir / 'shap_samples.h5',
+                         experiment_dir / _COMPARISON_DIRNAME,
+                         num_plot_samples,
+                         title_prefix=experiment_dir.name)
+
+
+def plot_dataset_average(experiment_dir: Path | str,
                          normalise: bool = True) -> plt.Figure:
-    """Mean |SHAP| over every stored sample: heatmaps, then temporal and feature bars.
-
-    Samples have different landmark frames, so maps are stacked on an absolute
-    frame axis and NaN-padded; the shaded band on the temporal panel is how many
-    samples reach each frame. The right-hand columns average over the handful of
-    long-lf samples and are correspondingly noisy.
-
-    ``normalise`` (default) rescales each estimator's values in each panel to sum
-    to 1, so model and ground truth are compared on *relative* importance — the
-    baseline choice (mask vs. distributional) and the model's larger output range
-    otherwise leave the model 2-3x the ground-truth scale and visually dominant.
-    """
+    """Mean |SHAP| over every stored sample, model vs ground truth."""
     experiment_dir = Path(experiment_dir)
-    average = dataset_average(experiment_dir / 'shap_samples.h5')
-
-    def norm(values: np.ndarray) -> np.ndarray:
-        values = np.asarray(values, dtype=float)
-        total = np.nansum(np.abs(values))
-        return values / total if (normalise and total > 0) else values
-
-    unit = 'relative' if normalise else 'mean |SHAP|'
-    map_keys = list(average.maps)
-    fig, axes = plt.subplots(1,
-                             len(map_keys) + 2,
-                             figsize=(6 * (len(map_keys) + 2), 4))
-    axes = list(axes)
-
-    for key in map_keys:
-        rows = series_rows(key, average.feature_names,
-                           average.model_feature_names)
-        heatmap_panel(axes.pop(0),
-                      norm(average.maps[key]),
-                      rows,
-                      average.max_landmark_frame,
-                      f'{key}  {unit}',
-                      diverging=False)
-
-    temporal_panel(axes.pop(0),
-                   {k: norm(v) for k, v in average.temporal.items()},
-                   f'Temporal importance  {unit}',
-                   support=average.support)
-
-    feature_series = {}
-    for key, values in average.feature.items():
-        rows = series_rows(key, average.feature_names,
-                           average.model_feature_names)
-        feature_series[key] = (rows, norm(values))
-    feature_panel(axes.pop(0), feature_series, f'Feature importance  {unit}')
-
-    fig.suptitle(
-        f'Dataset average over {average.num_samples} samples — '
-        f'{experiment_dir.name}',
-        fontweight='bold',
-        fontsize=11)
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
-    return fig
+    return _plot_dataset_average(experiment_dir / 'shap_samples.h5',
+                                 title=experiment_dir.name,
+                                 normalise=normalise)

@@ -173,7 +173,7 @@ def plot_per_well_summary(
                fontsize=11,
                frameon=False)
 
-    fig.suptitle('Per well feature comparison', fontsize=14)
+    fig.suptitle('Per well feature comparison, day 3', fontsize=14)
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.savefig(save_as, dpi=150, bbox_inches='tight')
 
@@ -191,24 +191,24 @@ def main():
         'Circularity',
         'Displacement',
         'Perimeter',
-        'Phagocytes within 100 pixels',
-        'Phagocytes within 250 pixels',
-        'Phagocytes within 500 pixels',
-        'Skeleton Branch Length Mean',
-        'Skeleton Branch Length Max',
-        'Skeleton Branch Length Std',
+        # 'Phagocytes within 100 pixels',
+        # 'Phagocytes within 250 pixels',
+        # 'Phagocytes within 500 pixels',
+        # 'Skeleton Branch Length Mean',
+        # 'Skeleton Branch Length Max',
+        # 'Skeleton Branch Length Std',
         'Skeleton Branches',
-        'Skeleton Length',
-        'Speed',
-        'Major Axis Length',
-        'Minor Axis Length',
+        # 'Skeleton Length',
+        # 'Speed',
+        # 'Major Axis Length',
+        # 'Minor Axis Length',
         'Eccentricity',
     ]
     hdf5_files = [
-        Path('~/thor_server/MacrophageData/24_07/').expanduser() / f'{_}.h5'
-        for _ in ('A2', 'B2', 'C2', 'D2', 'E2', 'F2', 'G2', 'H2', 'I2', 'J2',
-                  'K2', 'L2', 'M2', 'N2', 'O2', 'P2', 'Q2', 'R2', 'S2', 'T2',
-                  'U2', 'V2', 'W2', 'X2')
+        Path('~/thor_server/MacrophageData/24_07/split_2').expanduser() /
+        f'{_}.h5' for _ in ('A2', 'B2', 'C2', 'D2', 'E2', 'F2', 'G2', 'H2',
+                            'I2', 'J2', 'K2', 'L2', 'M2', 'N2', 'O2', 'P2',
+                            'Q2', 'R2', 'S2', 'T2', 'U2', 'V2', 'W2', 'X2')
     ]
     labels = (['No Fluor'] * 3 + ['Fluor'] * 6 + ['No Fluor'] * 6 +
               ['Fluor'] * 6 + ['No Fluor'] * 3)

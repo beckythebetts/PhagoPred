@@ -201,6 +201,20 @@ def read_root_attrs(h5_path: Path | str) -> dict:
         }
 
 
+def read_root_attrs_optional(h5_path: Path | str) -> dict | None:
+    """``read_root_attrs`` for files that may not carry the ground-truth root
+    metadata.
+
+    ``run_interpret`` writes a ``SHAP.h5`` with per-sample model SHAP only and no
+    scenario / horizon / hazard-bin attrs at the root. Returns None in that case
+    so the plotting stack can drop the outputs panel rather than raise.
+    """
+    try:
+        return read_root_attrs(h5_path)
+    except (KeyError, OSError):
+        return None
+
+
 def sample_indices(h5_path: Path | str) -> list[int]:
     """Numerically sorted sample ids (h5py iterates keys lexically: 0, 1, 10...)."""
     with h5py.File(h5_path, 'r') as f:

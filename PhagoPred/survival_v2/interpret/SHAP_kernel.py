@@ -1,3 +1,4 @@
+from __future__ import annotations
 from abc import abstractmethod
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -80,12 +81,9 @@ class MaskWrapperBase:
         self.target_bin = target_bin
         self.mask_value = mask_value
         self.time_bins = time_bins
-        # Cap on coalitions evaluated in a single forward pass (bounds memory).
+
         self.max_batch = max_batch
-        # Optional (nbg, T, F) background draws: masked features are replaced by
-        # each draw and the prediction is *averaged*, so v(S) = E_bg[f(x_S, bg)]
-        # — the distributional baseline. When None, masked -> ``mask_value``
-        # (a single point), which for a nonlinear model gives f(mean) != E[f].
+
         self.value_background = (None if value_background is None else
                                  value_background.to(device).to(
                                      self.base_input.dtype))
@@ -113,7 +111,6 @@ class MaskWrapperBase:
                 v = self._predict(self.base_input * keep + self.mask_value *
                                   (1 - keep))
             else:
-                # v(S) = mean over background draws of f(x_S kept, bg elsewhere)
                 acc = None
                 for bg in self.value_background:  # (T, F)
                     p = self._predict(self.base_input * keep + bg[None] *
@@ -122,7 +119,6 @@ class MaskWrapperBase:
                 v = acc / self.value_background.shape[0]
             preds.append(v.detach().cpu().numpy())
 
-        # Return shape (N, 1) - KernelExplainer requires 2D output
         return np.concatenate(preds, axis=0).reshape(n, -1)[:, :1]
 
     def _predict(self, masked_input: torch.Tensor) -> torch.Tensor:
@@ -484,7 +480,8 @@ class KernelSHAP:
         compute_temporal_feature: bool = True,
         max_len: int = 1000,
         time_bins: Optional[np.ndarray] = None,
-    ) -> KernelSHAPResults:
+        return_batch: bool = False,
+    ) -> KernelSHAPResults | tuple[KernelSHAPResults, dict]:
         """
         Analyse multiple samples and aggregate results.
 
@@ -572,7 +569,7 @@ class KernelSHAP:
             tf_shap = np.vstack(all_temporal_feature)
             tf_importance = np.abs(tf_shap).mean(axis=0)
 
-        return KernelSHAPResults(
+        results = KernelSHAPResults(
             temporal_shap_values=temporal_shap,
             temporal_importance=np.abs(temporal_shap).mean(
                 axis=0) if temporal_shap is not None else None,
@@ -584,6 +581,10 @@ class KernelSHAP:
             temporal_feature_shap_values=tf_shap,
             temporal_feature_importance=tf_importance,
         )
+        if return_batch:
+            return results, batch
+        else:
+            return results
 
     # ==================== Visualization Methods ====================
 

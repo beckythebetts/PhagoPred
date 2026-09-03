@@ -10,8 +10,21 @@ average would understate importance.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
+
+from PhagoPred.utils.logger import get_logger
+from PhagoPred.survival_v2.interpret.importance_data import (
+    dataset_average,
+    horizon_outputs,
+    load_sample_importances,
+    read_root_attrs_optional,
+    sample_indices,
+)
+
+log = get_logger()
 
 # Series whose feature axis is the model's, not the graph's (no Hazard node).
 MODEL_KEYS = ('Model', )
@@ -255,8 +268,296 @@ def feature_panel(
                alpha=0.9)
 
     ax.set_xticks(positions)
-    ax.set_xticklabels(names, fontsize=8)
+    # Feature names run long; vertical labels keep them from overlapping.
+    ax.set_xticklabels(names, fontsize=7, rotation=90, ha='center')
     ax.axhline(0.0, color='black', lw=0.5, alpha=0.4)
     ax.set_ylabel('importance', fontsize=8)
     ax.set_title(title, fontsize=8)
     ax.legend(fontsize=6)
+
+
+# ─────────────────────────── figures ───────────────────────────
+# The panel primitives above are assembled into whole figures here, straight from
+# an h5 file of stored SHAP samples. Both interpret entry points share this:
+#
+#   * ground_truth_importance -> shap_samples.h5: Interventional / Observational
+#     ground-truth maps, root scenario/horizon/hazard-bin metadata, model SHAP,
+#     model prediction. All seven panels.
+#   * run_interpret -> SHAP.h5: model SHAP only, no causal graph to compare to.
+#     Pass ``MODEL_ONLY_PANELS`` to draw just signals + model + temporal + feature.
+#
+# Panels whose data is absent from the file are annotated, never raised, so the
+# same call works on either file.
+
+PANEL_ORDER = ('signals', 'interventional', 'observational', 'model',
+               'temporal', 'feature', 'outputs')
+DEFAULT_PANELS = {name: True for name in PANEL_ORDER}
+MODEL_ONLY_PANELS = {
+    'signals': True,
+    'interventional': False,
+    'observational': False,
+    'model': True,
+    'temporal': True,
+    'feature': True,
+    'outputs': False,
+}
+
+
+def _resolve_panels(panels: dict | None) -> dict:
+    merged = dict(DEFAULT_PANELS)
+    if panels:
+        merged.update(panels)
+    return merged
+
+
+def plot_sample_on_axes(
+    h5_path: Path | str,
+    axes: list[plt.Axes],
+    sample_idx: int | None,
+    panels: dict | None = None,
+    normalise: bool = True,
+) -> None:
+    """Draw one stored sample across ``axes``, straight from an h5 SHAP file.
+
+    Panels are consumed in the order signals, interventional, observational,
+    model, temporal, feature, outputs — one axis per enabled panel (see
+    ``PANEL_ORDER`` / ``DEFAULT_PANELS``). The heatmaps share a [0, lf) frame
+    axis so they can be read column-wise against each other; model SHAP is
+    per-segment and is spread onto that frame grid.
+
+    The temporal and feature panels collapse the model's joint (segment x
+    feature) map. Ground-truth temporal curves are summed over the model's
+    features only, so both sides sum over the same set; Hazard still appears in
+    the heatmaps and the per-feature bars.
+
+    ``sample_idx=None`` reads a single-sample file written at the h5 root. Panels
+    whose data is absent are annotated rather than raising.
+    """
+    flags = _resolve_panels(panels)
+    enabled = [flags[name] for name in PANEL_ORDER]
+    assert sum(enabled) == len(axes), (
+        f'{sum(enabled)} panels enabled but {len(axes)} axes given')
+
+    h5_path = Path(h5_path)
+    root = read_root_attrs_optional(h5_path)
+    sample = load_sample_importances(h5_path, sample_idx)
+
+    lf = sample.landmark_frame
+    death_str = ('censored' if sample.death_frame is None else
+                 f'{sample.death_frame:.0f}')
+    remaining = list(axes)
+
+    def _next() -> plt.Axes:
+        return remaining.pop(0)
+
+    def _norm(values):
+        values = np.asarray(values, dtype=float)
+        total = np.nansum(np.abs(values))
+        return values / total if (normalise and total > 0) else values
+
+    def _missing(ax: plt.Axes, what: str) -> None:
+        ax.text(0.5,
+                0.5,
+                f'No {what} in\n{h5_path.name}',
+                ha='center',
+                va='center',
+                fontsize=8,
+                transform=ax.transAxes)
+        ax.set_axis_off()
+
+    if flags['signals']:
+        ax = _next()
+        if sample.signals is None:
+            _missing(ax, 'signals')
+        else:
+            heatmap_panel(
+                ax, sample.signals, sample.feature_names, lf,
+                f'Signals (row-normalised)  lf={lf}  death={death_str}',
+                row_normalise=True)
+
+    for key in ('Interventional', 'Observational'):
+        if not flags[key.lower()]:
+            continue
+        ax = _next()
+        if key not in sample.ground_truth:
+            _missing(ax, f'{key} importances')
+        else:
+            heatmap_panel(ax, sample.ground_truth[key], sample.feature_names,
+                          lf, f'{key} GT SHAP')
+
+    if flags['model']:
+        ax = _next()
+        if sample.model_map is None:
+            _missing(ax, 'Model SHAP')
+        else:
+            n_segments = len(sample.segment_boundaries) - 1
+            heatmap_panel(
+                ax, sample.model_map, sample.model_feature_names, lf,
+                f'Model KernelSHAP ({n_segments} segments, per-frame)')
+
+    unit = ' (relative)' if normalise else ''
+    if flags['temporal']:
+        ax = _next()
+        series = {
+            k: _norm(sample.ground_truth_temporal(k))
+            for k in sample.ground_truth
+        }
+        if sample.model_map is not None:
+            series['Model'] = _norm(sample.model_temporal_from_map())
+        if series:
+            # Feature names can be long; don't spell them into the title (it
+            # overflows and collides with the neighbouring panel titles).
+            temporal_panel(
+                ax, series,
+                f'Temporal importance{unit} '
+                f'(summed over {len(sample.shared_feature_names)} features)',
+                n_frames=lf)
+        else:
+            _missing(ax, 'temporal importance')
+
+    if flags['feature']:
+        ax = _next()
+        series = {
+            k: (sample.feature_names, _norm(sample.ground_truth_feature(k)))
+            for k in sample.ground_truth
+        }
+        if sample.model_map is not None:
+            series['Model'] = (sample.model_feature_names,
+                               _norm(sample.model_feature_from_map()))
+        if series:
+            feature_panel(ax, series,
+                          f'Feature importance{unit} (separate game)')
+        else:
+            _missing(ax, 'feature importance')
+
+    if flags['outputs']:
+        ax = _next()
+        if root is None:
+            _missing(ax, 'output metadata')
+        else:
+            outputs_panel(
+                ax,
+                root['output_type'],
+                ground_truth=horizon_outputs(sample.horizon_hazard,
+                                             root['output_type'],
+                                             root['hazard_bins']),
+                model_prediction=sample.model_prediction,
+                hazard_bins=root['hazard_bins'],
+                horizon=root['horizon'],
+                death_offset=(None if sample.death_frame is None else
+                              sample.death_frame - lf),
+            )
+
+
+def plot_sample(
+    h5_path: Path | str,
+    sample_idx: int | None,
+    title: str | None = None,
+    panels: dict | None = None,
+) -> plt.Figure:
+    """One row of panels for a single stored sample."""
+    flags = _resolve_panels(panels)
+    n_panels = sum(flags[name] for name in PANEL_ORDER)
+    fig, axes = plt.subplots(1, n_panels, figsize=(5.2 * n_panels, 4),
+                             squeeze=False)
+    plot_sample_on_axes(h5_path, list(axes[0]), sample_idx, panels=flags)
+    if title:
+        fig.suptitle(title, fontweight='bold', fontsize=11)
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    return fig
+
+
+def plot_samples(
+    h5_path: Path | str,
+    save_dir: Path | str,
+    num_plot_samples: int,
+    title_prefix: str = '',
+    panels: dict | None = None,
+) -> list[Path]:
+    """Save one figure per stored sample into ``save_dir``."""
+    h5_path = Path(h5_path)
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    indices = sample_indices(h5_path)
+    indices = indices[:num_plot_samples] if indices else [None]
+
+    saved = []
+    for sample_idx in indices:
+        label = 'sample' if sample_idx is None else f'sample {sample_idx}'
+        title = f'{title_prefix} — {label}' if title_prefix else label
+        fig = plot_sample(h5_path, sample_idx, title=title, panels=panels)
+        name = ('sample.png'
+                if sample_idx is None else f'sample_{sample_idx:02d}.png')
+        path = save_dir / name
+        fig.savefig(path, bbox_inches='tight', dpi=120)
+        plt.close(fig)
+        saved.append(path)
+    log.info(f'Saved {len(saved)} sample figures to {save_dir}')
+    return saved
+
+
+def plot_dataset_average(
+    h5_path: Path | str,
+    title: str | None = None,
+    normalise: bool = True,
+) -> plt.Figure:
+    """Mean |SHAP| over every stored sample: heatmaps, then temporal and feature bars.
+
+    Samples have different landmark frames, so maps are stacked on an absolute
+    frame axis and NaN-padded; the shaded band on the temporal panel is how many
+    samples reach each frame. The right-hand columns average over the handful of
+    long-lf samples and are correspondingly noisy.
+
+    ``normalise`` (default) rescales each estimator's values in each panel to sum
+    to 1, so model and ground truth are compared on *relative* importance — the
+    baseline choice (mask vs. distributional) and the model's larger output range
+    otherwise leave the model 2-3x the ground-truth scale and visually dominant.
+
+    One heatmap per stored estimator: ``{Interventional, Observational, Model}``
+    for a ground-truth file, just ``Model`` for run_interpret's SHAP.h5.
+    """
+    h5_path = Path(h5_path)
+    average = dataset_average(h5_path)
+
+    def norm(values: np.ndarray) -> np.ndarray:
+        values = np.asarray(values, dtype=float)
+        total = np.nansum(np.abs(values))
+        return values / total if (normalise and total > 0) else values
+
+    unit = 'relative' if normalise else 'mean |SHAP|'
+    map_keys = list(average.maps)
+    fig, axes = plt.subplots(1,
+                             len(map_keys) + 2,
+                             figsize=(6 * (len(map_keys) + 2), 4),
+                             squeeze=False)
+    axes = list(axes[0])
+
+    for key in map_keys:
+        rows = series_rows(key, average.feature_names,
+                           average.model_feature_names)
+        heatmap_panel(axes.pop(0),
+                      norm(average.maps[key]),
+                      rows,
+                      average.max_landmark_frame,
+                      f'{key}  {unit}',
+                      diverging=False)
+
+    temporal_panel(axes.pop(0),
+                   {k: norm(v) for k, v in average.temporal.items()},
+                   f'Temporal importance  {unit}',
+                   support=average.support)
+
+    feature_series = {}
+    for key, values in average.feature.items():
+        rows = series_rows(key, average.feature_names,
+                           average.model_feature_names)
+        feature_series[key] = (rows, norm(values))
+    feature_panel(axes.pop(0), feature_series, f'Feature importance  {unit}')
+
+    suptitle = f'Dataset average over {average.num_samples} samples'
+    if title:
+        suptitle += f' — {title}'
+    fig.suptitle(suptitle, fontweight='bold', fontsize=11)
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    return fig

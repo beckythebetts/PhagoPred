@@ -394,8 +394,7 @@ def _crop_and_pad(values: list[np.ndarray], samples_list: list[CellSample],
     # else:
     #     values_padded = torch.zeros(len(values), max_seq_len, device=device)
     for idx, (sample_values, sample) in enumerate(zip(values, samples_list)):
-        sample_values = sample_values[sample.
-                                      start_frame:sample.landmark_frame + 1]
+        sample_values = sample_values[sample.start_frame:sample.landmark_frame]
         sample_len = sample_values.shape[0]
         if pad_at == 'start':
             values_padded[idx, -sample_len:] = torch.tensor(sample_values,

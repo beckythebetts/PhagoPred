@@ -360,12 +360,17 @@ def run_experiment_suite(
         result, exp_dir = run_single_experiment(exp_config, output_dir, device)
         results.append(result)
         if shap_interpret:
-            interpret(exp_dir, device=device, num_smaples=1000)
+            interpret(exp_dir, device=device, num_samples=1000)
 
     plot_experiment_results(output_dir, ignore_params=['feature_combo'])
     # plot_confusion_matrices(output_dir)
     # plot_experiment_losses(output_dir)
     return output_dir
+
+
+def interpret_suite(directory: Path) -> None:
+    for exp in directory.glob('*'):
+        interpret(exp)
 
 
 def _build_cal_dataset(cfg: ExperimentCfg) -> CellDataset:

@@ -119,10 +119,21 @@ def collapse_experiment_grid(
 EXPERIMENT_SUITES = {
     '24_07_test':
     generate_experiment_grid(
-        ExperimentCfg(model=[MODELS['CNN Medium'], MODELS['LSTM Medium']],
+        ExperimentCfg(
+            model=[MODELS['CNN Medium'], MODELS['LSTM Medium']],
+            attention=ATTENTION['Last'],
+            loss=LOSSES['BCE'],
+            dataset=get_kfold_dataset(),
+            training=TRAINING['Standard'],
+            feature_combo=FEATURE_COMBOS['All'],
+        )),
+    '24_07_time_split':
+    generate_experiment_grid(
+        ExperimentCfg(model=MODELS['CNN Medium'],
                       attention=ATTENTION['Last'],
                       loss=LOSSES['BCE'],
-                      dataset=get_kfold_dataset(),
+                      dataset=DATASETS['24_07_0'] + DATASETS['24_07_1'] +
+                      DATASETS['24_07_2'],
                       training=TRAINING['Standard'],
                       feature_combo=FEATURE_COMBOS['All'])),
     'Quick Survival Test':
@@ -316,7 +327,7 @@ EXPERIMENT_SUITES = {
                           CALIBRATION['Platt Scaling'],
                       ])),
     # Compare nonlinear chain scenario at different autocorrelation levels.
-    'Graph Nonlinear Chain AR Binary':
+    'Graph Linear AR Binary':
     generate_experiment_grid(
         ExperimentCfg(model=[
             MODELS['CNN Medium'],
@@ -325,9 +336,9 @@ EXPERIMENT_SUITES = {
                       attention=ATTENTION['Last'],
                       loss=LOSSES['Weighted BCE'],
                       dataset=[
-                          DATASETS['Binary Graph Nonlinear Chain Low AR'],
-                          DATASETS['Binary Graph Nonlinear Chain Med AR'],
-                          DATASETS['Binary Graph Nonlinear Chain High AR'],
+                          DATASETS['Binary Graph Linear Low AR'],
+                          DATASETS['Binary Graph Linear Med AR'],
+                          DATASETS['Binary Graph Linear High AR'],
                       ],
                       training=TRAINING['Standard'],
                       feature_combo=['A', 'B', 'C', 'D'],
