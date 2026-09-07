@@ -1,22 +1,3 @@
-"""Reading and aggregating SHAP importance maps from a shap_samples.h5 file.
-
-Pure numpy/h5py so both the per-experiment plots in ``ground_truth_importance``
-and the cross-model plots in ``experiments.plots`` can share it without pulling
-in torch.
-
-Three grids are in play:
-
-* ground truth importances are per (feature, frame) over ``[0, lf)``
-* model KernelSHAP is per (segment, model feature), 50 segments spanning
-  ``[0, lf)``
-* samples have different ``lf``
-
-``spread_segments`` puts the model on the frame grid by dividing each segment's
-attribution by its length and repeating it across the segment's frames, so the
-per-frame values are densities and the total attribution is preserved.
-``DatasetAverage`` then stacks samples on an absolute frame axis, NaN-padding
-short ones, so column ``j`` averages only the samples whose ``lf`` reaches it.
-"""
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +6,11 @@ import warnings
 import h5py
 import numpy as np
 
+from PhagoPred.utils.logger import get_logger
+from PhagoPred.survival_v2.configs import ExperimentCfg
+
+log = get_logger()
+
 GROUND_TRUTH_KEYS = ('Interventional', 'Observational')
 
 
@@ -32,8 +18,7 @@ def as_str(name) -> str:
     return name.decode() if isinstance(name, bytes) else str(name)
 
 
-def spread_segments(values: np.ndarray,
-                    boundaries: np.ndarray) -> np.ndarray:
+def spread_segments(values: np.ndarray, boundaries: np.ndarray) -> np.ndarray:
     """``(..., n_segments)`` -> ``(..., lf)`` per-frame attribution density.
 
     Each segment's value is divided by its frame count and repeated across those
@@ -43,6 +28,23 @@ def spread_segments(values: np.ndarray,
     values = np.asarray(values, dtype=float)
     density = values / np.where(lengths == 0, 1, lengths)
     return np.repeat(density, lengths, axis=-1)
+
+
+# def horizon_outputs(
+#     horizon_hazard: np.ndarray | None,
+#     cfg: ExperimentCfg,
+# ) -> float | np.ndarray | None:
+#     if horizon_hazard is None:
+#         return None
+#     hazard = np.clip(np.asarray(horizon_hazard, dtype=float), 0.0, 1.0)
+#     # survival[t] = P(survive frames 0 .. t-1); survival[0] = 1 by definition
+#     survival = np.concatenate([[1.0], np.cumprod(1.0 - hazard)])
+
+#     if cfg.dataset.num_bins == 1:
+#         return float(1.0 - survival[-1])
+
+#     edges = np.asarray(cfg.dataset.bins, dtype=int)
+#     return survival[edges[:-1]] - survival[edges[1:]]
 
 
 def horizon_outputs(
@@ -129,7 +131,8 @@ class SampleImportances:
     death_frame: float | None
     feature_names: list[str]
     signals: np.ndarray | None  # (n_features, lf)
-    ground_truth: dict[str, np.ndarray]  # name -> (n_features, lf) joint 2D map
+    ground_truth: dict[str,
+                       np.ndarray]  # name -> (n_features, lf) joint 2D map
     # Ground-truth temporal/feature marginals computed as *separate* Shapley
     # games (not projections of the 2D map), one per estimator. Empty if the
     # sample predates the three-axis estimator, in which case the accessors fall
@@ -154,8 +157,7 @@ class SampleImportances:
         heatmaps and the per-feature bars, where it is not being summed against
         anything.
         """
-        return (self.feature_names
-                if self.model_feature_names is None else
+        return (self.feature_names if self.model_feature_names is None else
                 self.model_feature_names)
 
     def ground_truth_temporal(self, key: str) -> np.ndarray:
@@ -189,43 +191,34 @@ class SampleImportances:
             self.model_map)
 
 
-def read_root_attrs(h5_path: Path | str) -> dict:
+def read_root_attrs(h5_path: Path | str) -> dict | None:
+    """Get features from synthetic shap smaples file (or None if real data)"""
     with h5py.File(h5_path, 'r') as f:
-        bins = np.asarray(f.attrs['Hazard Bins'])
-        return {
-            'scenario': as_str(f.attrs['Scenario']),
-            'output_type': as_str(f.attrs['Output type']),
-            'horizon': int(f.attrs['Horizon']),
-            'hazard_bins': None if bins.size == 0 else bins,
-            'num_permutations': int(f.attrs['Num Permutations']),
-        }
-
-
-def read_root_attrs_optional(h5_path: Path | str) -> dict | None:
-    """``read_root_attrs`` for files that may not carry the ground-truth root
-    metadata.
-
-    ``run_interpret`` writes a ``SHAP.h5`` with per-sample model SHAP only and no
-    scenario / horizon / hazard-bin attrs at the root. Returns None in that case
-    so the plotting stack can drop the outputs panel rather than raise.
-    """
-    try:
-        return read_root_attrs(h5_path)
-    except (KeyError, OSError):
-        return None
+        try:
+            bins = np.asarray(f.attrs['Hazard Bins'])
+            return {
+                'scenario': as_str(f.attrs['Scenario']),
+                'output_type': as_str(f.attrs['Output type']),
+                'horizon': int(f.attrs['Horizon']),
+                'hazard_bins': None if bins.size == 0 else bins,
+                'num_permutations': int(f.attrs['Num Permutations']),
+            }
+        except (KeyError, OSError):
+            log.warning(f'Could not read attributes from {h5_path}')
+            return None
 
 
 def sample_indices(h5_path: Path | str) -> list[int]:
-    """Numerically sorted sample ids (h5py iterates keys lexically: 0, 1, 10...)."""
+    """Numerically sorted sample ids."""
     with h5py.File(h5_path, 'r') as f:
         if 'Signals' in f:
             return []  # single-sample file written at the root
         return sorted(int(k) for k in f.keys())
 
 
-def load_sample_importances(h5_path: Path | str,
-                            sample_idx: int | None = None
-                            ) -> SampleImportances:
+def load_sample_importances(
+        h5_path: Path | str,
+        sample_idx: int | None = None) -> SampleImportances:
     with h5py.File(h5_path, 'r') as f:
         group = f[str(sample_idx)] if sample_idx is not None else f
 
@@ -244,9 +237,11 @@ def load_sample_importances(h5_path: Path | str,
             ds = group[key]
             ground_truth[key] = ds[:]
             if 'Temporal' in ds.attrs:  # separate temporal game (lf,) density
-                ground_truth_temporal_game[key] = np.asarray(ds.attrs['Temporal'])
+                ground_truth_temporal_game[key] = np.asarray(
+                    ds.attrs['Temporal'])
             if 'Feature' in ds.attrs:  # separate feature game (n_features,)
-                ground_truth_feature_game[key] = np.asarray(ds.attrs['Feature'])
+                ground_truth_feature_game[key] = np.asarray(
+                    ds.attrs['Feature'])
         horizon_hazard = (group['Horizon Hazard'][:]
                           if 'Horizon Hazard' in group else None)
         model_prediction = (group['Model Prediction'][:]
@@ -352,7 +347,16 @@ def dataset_average(h5_path: Path | str,
         support=support,
         feature_names=feature_names,
         model_feature_names=model_feature_names,
-        maps={k: _nanmean(np.stack(v)) for k, v in maps.items()},
-        temporal={k: _nanmean(np.stack(v)) for k, v in temporal.items()},
-        feature={k: np.mean(np.stack(v), axis=0) for k, v in feature.items()},
+        maps={
+            k: _nanmean(np.stack(v))
+            for k, v in maps.items()
+        },
+        temporal={
+            k: _nanmean(np.stack(v))
+            for k, v in temporal.items()
+        },
+        feature={
+            k: np.mean(np.stack(v), axis=0)
+            for k, v in feature.items()
+        },
     )

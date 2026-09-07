@@ -20,7 +20,7 @@ from PhagoPred.survival_v2.interpret.importance_data import (
     dataset_average,
     horizon_outputs,
     load_sample_importances,
-    read_root_attrs_optional,
+    read_root_attrs,
     sample_indices,
 )
 
@@ -74,7 +74,8 @@ def heatmap_panel(
                        cmap='RdBu_r',
                        vmin=-vmax,
                        vmax=vmax,
-                       extent=extent)
+                       extent=extent,
+                       interpolation='nearest')
     else:
         im = ax.imshow(m,
                        aspect='auto',
@@ -82,7 +83,8 @@ def heatmap_panel(
                        cmap='Greys',
                        vmin=0.0,
                        vmax=max(float(np.nanmax(m)), 1e-9),
-                       extent=extent)
+                       extent=extent,
+                       interpolation='nearest')
     ax.set_yticks(range(len(row_labels)))
     ax.set_yticklabels(row_labels, fontsize=8)
     ax.set_xlabel('frame', fontsize=8)
@@ -96,21 +98,34 @@ def temporal_panel(
     title: str,
     n_frames: int | None = None,
     support: np.ndarray | None = None,
+    err: dict[str, np.ndarray] | None = None,
 ) -> None:
     """Per-frame importance curves, one line per estimator.
 
     Lines rather than bars: with landmark frames up to ~400, several overlaid bar
     series are unreadable. ``support`` (dataset averages only) shades how many
     samples reach each frame — the right-hand columns average over the handful of
-    long-``lf`` samples and are correspondingly noisy.
+    long-``lf`` samples and are correspondingly noisy. ``err`` (fold averages
+    only) shades mean +/- err as a band per series, e.g. the std across
+    kfold/repeat runs being averaged together.
     """
     for name, values in series.items():
         if values is None:
             continue
+        color = SERIES_STYLE.get(name, {}).get('color')
         ax.plot(np.arange(len(values)),
                 values,
                 label=name,
                 **SERIES_STYLE.get(name, {}))
+        spread = None if err is None else err.get(name)
+        if spread is not None:
+            x = np.arange(len(values))
+            ax.fill_between(x,
+                            values - spread,
+                            values + spread,
+                            color=color,
+                            alpha=0.2,
+                            linewidth=0)
     if support is not None:
         twin = ax.twinx()
         twin.fill_between(np.arange(len(support)),
@@ -241,12 +256,14 @@ def feature_panel(
     ax: plt.Axes,
     series: dict[str, tuple[list[str], np.ndarray]],
     title: str,
+    err: dict[str, tuple[list[str], np.ndarray]] | None = None,
 ) -> None:
     """Grouped per-feature bars; series may cover different feature sets.
 
     Ground truth carries a Hazard bar the model has no counterpart for. It is
     left as a gap rather than dropped, so the feature axis stays aligned across
-    series and across models.
+    series and across models. ``err`` (fold averages only) draws error bars,
+    e.g. the std across kfold/repeat runs being averaged together.
     """
     names: list[str] = []
     for feature_names, _ in series.values():
@@ -259,9 +276,16 @@ def feature_panel(
     for i, (label, (feature_names, values)) in enumerate(series.items()):
         lookup = dict(zip(feature_names, values))
         heights = [lookup.get(n, np.nan) for n in names]
+        yerr = None
+        if err is not None and label in err:
+            err_names, err_values = err[label]
+            err_lookup = dict(zip(err_names, err_values))
+            yerr = [err_lookup.get(n, 0.0) for n in names]
         offset = (i - (len(series) - 1) / 2) * width
         ax.bar(positions + offset,
                heights,
+               yerr=yerr,
+               capsize=2,
                width=width,
                label=label,
                color=SERIES_STYLE.get(label, {}).get('color'),
@@ -339,7 +363,7 @@ def plot_sample_on_axes(
         f'{sum(enabled)} panels enabled but {len(axes)} axes given')
 
     h5_path = Path(h5_path)
-    root = read_root_attrs_optional(h5_path)
+    root = read_root_attrs(h5_path)
     sample = load_sample_importances(h5_path, sample_idx)
 
     lf = sample.landmark_frame
@@ -371,7 +395,10 @@ def plot_sample_on_axes(
             _missing(ax, 'signals')
         else:
             heatmap_panel(
-                ax, sample.signals, sample.feature_names, lf,
+                ax,
+                sample.signals,
+                sample.feature_names,
+                lf,
                 f'Signals (row-normalised)  lf={lf}  death={death_str}',
                 row_normalise=True)
 
@@ -408,8 +435,8 @@ def plot_sample_on_axes(
             # Feature names can be long; don't spell them into the title (it
             # overflows and collides with the neighbouring panel titles).
             temporal_panel(
-                ax, series,
-                f'Temporal importance{unit} '
+                ax,
+                series, f'Temporal importance{unit} '
                 f'(summed over {len(sample.shared_feature_names)} features)',
                 n_frames=lf)
         else:
@@ -458,7 +485,9 @@ def plot_sample(
     """One row of panels for a single stored sample."""
     flags = _resolve_panels(panels)
     n_panels = sum(flags[name] for name in PANEL_ORDER)
-    fig, axes = plt.subplots(1, n_panels, figsize=(5.2 * n_panels, 4),
+    fig, axes = plt.subplots(1,
+                             n_panels,
+                             figsize=(5.2 * n_panels, 4),
                              squeeze=False)
     plot_sample_on_axes(h5_path, list(axes[0]), sample_idx, panels=flags)
     if title:
@@ -543,8 +572,10 @@ def plot_dataset_average(
                       f'{key}  {unit}',
                       diverging=False)
 
-    temporal_panel(axes.pop(0),
-                   {k: norm(v) for k, v in average.temporal.items()},
+    temporal_panel(axes.pop(0), {
+        k: norm(v)
+        for k, v in average.temporal.items()
+    },
                    f'Temporal importance  {unit}',
                    support=average.support)
 

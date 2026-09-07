@@ -16,53 +16,15 @@ from PhagoPred.survival_v2.utils.dataset_analysis import analyse_suite_datasets,
 
 
 def train():
-    suites = (
-        # 'Graph Survival',
-        # 'Graph Binary',
-        # 'Graph Noise Survival',
-        # 'Graph Noise Binary',
-        # 'Learning Curve Survival',
-        # 'Graph Scenario Types Binary',
-        # 'Graph Nonlinear Chain AR Binary',
-        '24_07_time_split', )
+    suites = ('24_07_test', )
     for suite in suites:
         output_dir = run_experiment_suite(
             suite_name=suite,
             output_dir='PhagoPred/survival_v2/experiments/results',
             device='cuda',
-            repeats=3,
+            repeats=1,
             shap_interpret=True)
     return output_dir
-    # _ = run_experiment_suite(
-    #     suite_name='Graph Survival',
-    #     output_dir='PhagoPred/survival_v2/experiments/results',
-    #     device='cuda',
-    #     repeats=1,
-    #     shap_interpret=True)
-    # _ = run_experiment_suite(
-    #     suite_name='Graph Binary',
-    #     output_dir='PhagoPred/survival_v2/experiments/results',
-    #     device='cuda',
-    #     repeats=3,
-    #     shap_interpret=True)
-    # _ = run_experiment_suite(
-    #     suite_name='Graph Noise Survival',
-    #     output_dir='PhagoPred/survival_v2/experiments/results',
-    #     device='cuda',
-    #     repeats=3,
-    #     shap_interpret=True)
-    # _ = run_experiment_suite(
-    #     suite_name='Graph Noise Binary',
-    #     output_dir='PhagoPred/survival_v2/experiments/results',
-    #     device='cuda',
-    #     repeats=3,
-    #     shap_interpret=True)
-    # # results = run_experiment_suite(
-    #     suite_name='Quick Binary Test',
-    #     output_dir='PhagoPred/survival_v2/experiments/results',
-    #     device='cuda',
-    #     repeats=2,
-    # )
 
 
 def shap_comparison(suite_dir: Path):
@@ -76,10 +38,6 @@ def eval():
         Path(
             '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Scenario Types Binary_01092026_095604'
         ))
-    # evaluate_suite(
-    #     Path(
-    #         'PhagoPred/survival_v2/experiments/results/Graph Survival_24042026_094729'
-    #     ))
 
 
 def interpret_suite(suite_dir: Path):
@@ -100,132 +58,14 @@ def view_dataset_distributions():
 
 
 def plot():
-    plot_experiment_results(
-        Path(
-            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/24_07_test_28082026_144811'
-        ))
+    plot_experiment_results(Path(
+        '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/24_07_time_split_03092026_155758'
+    ),
+                            order_dict={
+                                'dataset': ['Day 1', 'Day 2', 'Day 3']
+                            })
 
 
 if __name__ == '__main__':
-    # interpret_suite(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/24_07_test_28082026_144811'
-    #     ))
+    train()
     # plot()
-    # suite_dir = train()
-    eval()
-    shap_comparison(
-        Path(
-            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Scenario Types Binary_01092026_095604'
-        ))
-    # eval()
-    # interpret_suite(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/24_07_test_31082026_155946'
-    #     ))
-
-    # for h5_file in Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/Datasets/graph_synthetic/shap_samples'
-    # ).iterdir():
-    #     backfill_horizon_hazard(
-    #         h5_file,
-    #         Path('/home/ubuntu/PhagoPred/PhagoPred/Datasets/graph_synthetic'),
-    #         force=True)
-    # shap_comparison(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Binary_07072026_164403'
-    #     ))
-
-    # plot()
-    # compare_importance(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Binary_29062026_215207_high_auto_corr/experiment_05'
-    #     ),
-    #     n_samples=5,
-    #     num_permutations=500,
-    #     nsamples_shap="auto",
-    #     num_segments=50,
-    #     show_feature_values=True,
-    # )
-    # shap_comparison(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Nonlinear Chain AR Binary_23072026_173331'
-    #     ))
-    # shap_comparison(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Scenario Types Binary_23072026_143610'
-    #     ))
-    # shap_comparison(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Binary_29062026_215207_high_auto_corr'
-    #     ))
-    # interpret_suite(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Binary_02072026_085002'
-    #     ), )
-    # compare_importance(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Learning Curve Survival_29062026_134821/experiment_00'
-    #     ),
-    #     n_samples=10,
-    #     num_permutations=1000,
-    #     nsamples_shap="auto",
-    #     show_variance_bounds=True,
-    #     show_feature_totals=False,
-    #     # show_feature_values=True,
-    #     #    show_base_noise=True,
-    #     num_segments=100)
-    # compare_importance(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Binary_26062026_142217/experiment_01'
-    #     ),
-    #     n_samples=10,
-    #     num_permutations=500,
-    #     nsamples_shap=100000,
-    #     show_variance_bounds=True,
-    #     # show_feature_values=True,
-    #     #    show_base_noise=True,
-    #     show_feature_totals=False,
-    #     num_segments=100)
-    # compare_importance(
-    #     '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Survival_29062026_162358_high_auto_corr/experiment_06',
-    #     n_samples=5,
-    #     num_permutations=500,
-    #     nsamples_shap="auto",
-    #     num_segments=50,
-    #     show_feature_values=True,
-    #     show_conditional=True)
-
-    # train()
-    # eval()
-    # plot_experiment_results(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Learning Curve Survival_11062026_121151'
-    #     ))
-    # plot()
-    # eval()
-    # evaluate_suite(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Survival_29052026_200757'
-    #     ))
-    # evaluate_suite(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Survival_02062026_120922'
-    #     ))
-
-    # test_variances(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Survival_29052026_200757/experiment_00'
-    #     ))
-    # evaluate_suite(
-    #     Path(
-    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/BinaryTest_24032026_144422'
-    #     ))
-    # interpret()
-    # results = run_experiment_suite(
-    #     suite_name=
-    # )
-    # view_dataset_distributions()
-    # evaluate_suite(
-    #     Path('/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/framecount_feature_comparison_20260113_165826')
-    # )

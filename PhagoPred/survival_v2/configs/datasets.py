@@ -54,6 +54,9 @@ class BinaryDatasetCfg(DatasetCfg):
     prediction_horizon: int = 0
     num_bins: int = field(default=1, init=False)
     name: str = ''
+    class_names: list[str] = field(
+        default_factory=lambda: ['No Event', 'Event'])
+    #
 
 
 @dataclass
@@ -61,6 +64,8 @@ class BinaryClassDatasetCfg(DatasetCfg):
     dataset_type: str = field(default='binary_class', init=False)
     num_bins: int = field(default=1, init=False)
     class_dict: dict = field(default_factory=dict)
+    class_names: list[str] = field(
+        default_factory=lambda: ['No Fluor', 'Fluor'])
 
 
 DATASET_TYPES: dict[str, type[DatasetCfg]] = {
@@ -106,22 +111,26 @@ def generate_kfold_dataset_configs(all_paths: list[Path], num_folds: int,
             np.random.shuffle(paths)
             splits[label] = np.array_split(paths, num_folds)
 
-        for k in range(num_folds):
-            val_paths = np.concatenate([split[k] for split in splits.values()
-                                        ]).tolist()
-            train_paths = np.concatenate([
-                a for split in splits.values() for i, a in enumerate(split)
-                if i != k
-            ]).tolist()
-            np.random.shuffle(train_paths)
-            cfgs.append(
-                cfg_type(
-                    train_paths=train_paths,
-                    val_paths=val_paths,
-                    calibrate_paths=val_paths,
-                    name=f'{name}',
-                    **kwargs,
-                ))
+        if len(splits) > 0:
+            for k in range(num_folds):
+                val_paths = np.concatenate(
+                    [split[k] for split in splits.values()]).tolist()
+                train_paths = np.concatenate([
+                    a for split in splits.values() for i, a in enumerate(split)
+                    if i != k
+                ]).tolist()
+                np.random.shuffle(train_paths)
+                cfgs.append(
+                    cfg_type(
+                        train_paths=train_paths,
+                        val_paths=val_paths,
+                        calibrate_paths=val_paths,
+                        name=f'{name}',
+                        **kwargs,
+                    ))
+        else:
+            log.warning(
+                f'No datasets found fro kfold creation from {all_paths}')
 
     return cfgs
 
@@ -196,6 +205,19 @@ DATASETS = {
             list(
                 Path('~/thor_server/MacrophageData/24_07/split_2').expanduser(
                 ).glob('*.h5')))),
+    '24_07':
+    generate_kfold_dataset_configs(
+        all_paths=list(
+            Path('~/thor_server/MacrophageData/24_07').expanduser().glob(
+                '*.h5')),
+        num_folds=4,
+        cfg_type=BinaryClassDatasetCfg,
+        name='Day 3',
+        min_length=50,
+        class_dict=generate_fluor_class_dict(
+            list(
+                Path('~/thor_server/MacrophageData/24_07').expanduser().glob(
+                    '*.h5')))),
     '24_07_test':
     BinaryClassDatasetCfg(
         train_paths=[

@@ -120,17 +120,26 @@ EXPERIMENT_SUITES = {
     '24_07_test':
     generate_experiment_grid(
         ExperimentCfg(
-            model=[MODELS['CNN Medium'], MODELS['LSTM Medium']],
-            attention=ATTENTION['Last'],
+            model=MODELS['LSTM Medium'],
+            attention=[
+                ATTENTION['Last'],
+                ATTENTION['Mean Pooling'],
+                ATTENTION['Vector'],
+                ATTENTION['FC Small'],
+                ATTENTION['FC Medium'],
+                ATTENTION['Multihead'],
+            ],
             loss=LOSSES['BCE'],
-            dataset=get_kfold_dataset(),
+            dataset=DATASETS['24_07'],
             training=TRAINING['Standard'],
             feature_combo=FEATURE_COMBOS['All'],
         )),
     '24_07_time_split':
     generate_experiment_grid(
         ExperimentCfg(model=MODELS['CNN Medium'],
-                      attention=ATTENTION['Last'],
+                      attention=[
+                          ATTENTION['Last'],
+                      ],
                       loss=LOSSES['BCE'],
                       dataset=DATASETS['24_07_0'] + DATASETS['24_07_1'] +
                       DATASETS['24_07_2'],

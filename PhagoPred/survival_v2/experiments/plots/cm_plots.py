@@ -60,7 +60,9 @@ def _plot_cm_on_ax(
     ax.set_xticks(np.arange(num_bins))
     ax.set_yticks(np.arange(num_bins))
 
-    if num_bins == 2:
+    if hasattr(experiments[0].experiemnt_cfg.dataset, 'class_names'):
+        bin_names = experiments[0].experiemnt_cfg.dataset.class_names
+    elif num_bins == 2:
         bin_names = ['No Event', 'Event']
     else:
         bin_names = [f'Bin {i}' for i in range(num_bins)]

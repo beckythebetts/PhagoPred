@@ -20,6 +20,7 @@ from .plot_brier_scores import plot_brier_scores
 from .plot_c_idxs import plot_c_idxs_scores
 from .plot_variance_mse import plot_variance_mse
 from .plot_shap_importance import (plot_shap_average_across_models,
+                                   plot_shap_fold_average_across_models,
                                    plot_shap_samples_across_models)
 
 log = get_logger()
@@ -28,7 +29,8 @@ plt.rcParams['font.family'] = 'serif'
 
 
 def plot_experiment_results(experiments_dir: Path,
-                            ignore_params: list[str] | None = None) -> None:
+                            ignore_params: list[str] | None = None,
+                            order_dict: dict | None = None) -> None:
     """Plot metrics for all experiments in a directory."""
     all_experiemnts = []
     varying_params = {f.name: [] for f in fields(ExperimentCfg)}
@@ -62,7 +64,9 @@ def plot_experiment_results(experiments_dir: Path,
             #     variances = {k: npz[k] for k in npz.files}
 
             all_experiemnts.append(
-                ExperimentRecord(config, results, training_history,
+                ExperimentRecord(config,
+                                 results,
+                                 training_history,
                                  experiment_dir=experiment_path))
             log.info(f'Gathered resulsts for experiment {asdict(config)}')
             for f in fields(ExperimentCfg):
@@ -76,6 +80,20 @@ def plot_experiment_results(experiments_dir: Path,
             k: v
             for k, v in varying_params.items() if k not in ignore_params
         }
+    if order_dict is not None:
+        for k, v in order_dict.items():
+            if k in list(varying_params.keys()):
+                names = set([x.name for x in varying_params[k]])
+                if names == set(v):
+                    varying_params[k] = sorted(varying_params[k],
+                                               key=lambda x: x.name)
+                else:
+                    log.warning(
+                        f'Skipping order params, values requisted are {v}, existing values are {varying_params[k]}'
+                    )
+            else:
+                log.warning(
+                    f'Skipping ordering of {k}, not found in parameters list')
     log.info(f'Got {len(varying_params)} varying paramaters {varying_params}')
 
     _plot_and_save(plot_box_plots, all_experiemnts, varying_params,
@@ -107,6 +125,8 @@ def plot_experiment_results(experiments_dir: Path,
     # functions return None (and log) when no shap_samples.h5 is present.
     _plot_and_save(plot_shap_average_across_models, all_experiemnts,
                    varying_params, experiments_dir / 'shap_average.png')
+    _plot_and_save(plot_shap_fold_average_across_models, all_experiemnts,
+                   varying_params, experiments_dir / 'shap_average_folds.png')
     _plot_and_save(plot_shap_samples_across_models, all_experiemnts,
                    varying_params, experiments_dir / 'shap_sample.png')
 
