@@ -905,7 +905,7 @@ class ExternalFluorescence(BaseFeature):
 
 
 class FluorescenceRadial(BaseFeature):
-    """Quantify and describe distribution of fluorescence wihtin cells"""
+    """SLOWQuantify and describe distribution of fluorescence wihtin cells"""
     primary_feature = True
     crop = True
 

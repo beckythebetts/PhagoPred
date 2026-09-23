@@ -43,7 +43,8 @@ from PhagoPred.survival_v2.data import (
     binary_class_collate_fn,
 )
 from PhagoPred.survival_v2.utils.plots import plot_losses
-from PhagoPred.survival_v2.interpret.run_interpret import interpret
+# from PhagoPred.survival_v2.interpret.run_interpret import interpret
+from PhagoPred.survival_v2.interpret import run_shap
 from PhagoPred.utils.logger import get_logger
 from PhagoPred.utils.tools import highlight_str
 from .plots.plot_experiments import (
@@ -360,7 +361,7 @@ def run_experiment_suite(
         result, exp_dir = run_single_experiment(exp_config, output_dir, device)
         results.append(result)
         if shap_interpret:
-            interpret(exp_dir, device=device, num_samples=1000)
+            run_shap(exp_dir)
 
     plot_experiment_results(output_dir, ignore_params=['feature_combo'])
     # plot_confusion_matrices(output_dir)
@@ -370,7 +371,7 @@ def run_experiment_suite(
 
 def interpret_suite(directory: Path) -> None:
     for exp in directory.glob('*'):
-        interpret(exp)
+        run_shap(exp)
 
 
 def _build_cal_dataset(cfg: ExperimentCfg) -> CellDataset:

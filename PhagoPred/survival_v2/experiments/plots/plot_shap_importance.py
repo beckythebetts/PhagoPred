@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from PhagoPred.utils.logger import get_logger
-from PhagoPred.survival_v2.interpret.importance_data import (
+from PhagoPred.survival_v2.interpret_old.importance_data import (
     dataset_average,
     horizon_outputs,
     load_sample_importances,
@@ -16,7 +16,7 @@ from PhagoPred.survival_v2.interpret.importance_data import (
     read_root_attrs,
     sample_indices,
 )
-from PhagoPred.survival_v2.interpret.importance_plots import (
+from PhagoPred.survival_v2.interpret_old.importance_plots import (
     feature_panel,
     heatmap_panel,
     outputs_panel,
