@@ -904,76 +904,118 @@ class ExternalFluorescence(BaseFeature):
         return results.cpu().numpy()
 
 
-class FluorescenceRadial(BaseFeature):
-    """Quantify and describe distribution of fluorescence wihtin cells"""
-    primary_feature = True
-    crop = True
+# class FluorescenceRadial(BaseFeature):
+#     """Quantify and describe distribution of fluorescence wihtin cells"""
+#     primary_feature = True
+#     crop = True
 
-    def __init__(self):
-        super().__init__()
-        # self.crop_size = 300
-        # self.pad = self.crop_size // 2
+#     def __init__(self):
+#         super().__init__()
+#         # self.crop_size = 300
+#         # self.pad = self.crop_size // 2
 
-    def get_names(self):
-        return [
-            'Total Fluorescence',
-            'Fluorescence Distance Mean',
-            'Fluorescence Distance Variance',
+#     def get_names(self):
+#         return [
+#             'Total Fluorescence',
+#             'Fluorescence Distance Mean',
+#             'Fluorescence Distance Variance',
 
-            # 'Inner Total Fluorescnece',
-            # 'Outer Total FLuorescence',
-        ]
+#             # 'Inner Total Fluorescnece',
+#             # 'Outer Total FLuorescence',
+#         ]
 
-    def compute(self,
-                mask: torch.tensor = None,
-                image: torch.tensor = None,
-                epi_image: torch.tensor = None,
-                binary_mask: torch.tensor = None) -> np.ndarray:
-        num_cells, H, W = mask.shape
+#     def compute(self,
+#                 mask: torch.tensor = None,
+#                 image: torch.tensor = None,
+#                 epi_image: torch.tensor = None,
+#                 binary_mask: torch.tensor = None) -> np.ndarray:
+#         num_cells, H, W = mask.shape
 
-        results = np.full((num_cells, len(self.get_names())), np.nan)
+#         results = np.full((num_cells, len(self.get_names())), np.nan)
 
-        valid = torch.sum(mask, dim=(1, 2)) > 0
-        num_valid = torch.sum(valid).item()
-        if num_valid > 0:
+#         valid = torch.sum(mask, dim=(1, 2)) > 0
+#         num_valid = torch.sum(valid).item()
+#         if num_valid > 0:
 
-            epi_image = epi_image[valid]
-            mask = mask[valid]
+#             epi_image = epi_image[valid]
+#             mask = mask[valid]
 
-            temp_mask = mask.unsqueeze(0).to(
-                torch.float)  # (1, num_cells_in_batch, H, W)
-            # mask = mask.unsqueeze(0).to(torch.float) #(1, num_cells_in_batch, H, W)
-            dist_transform = kornia.contrib.distance_transform(image=temp_mask)
-            # mask = mask.squeeze(0)
-            dist_transform = dist_transform.squeeze(0)  # (num_cells, H, W)
+#             temp_mask = mask.unsqueeze(0).to(
+#                 torch.float)  # (1, num_cells_in_batch, H, W)
+#             # mask = mask.unsqueeze(0).to(torch.float) #(1, num_cells_in_batch, H, W)
+#             dist_transform = kornia.contrib.distance_transform(image=temp_mask)
+#             # mask = mask.squeeze(0)
+#             dist_transform = dist_transform.squeeze(0)  # (num_cells, H, W)
 
-            max_dist, _ = torch.max(dist_transform.view(num_valid, H * W),
-                                    dim=1)  # (num_cells)
+#             max_dist, _ = torch.max(dist_transform.view(num_valid, H * W),
+#                                     dim=1)  # (num_cells)
 
-            max_dist = max_dist.unsqueeze(1).unsqueeze(1).expand(-1, H, W)
-            dist_transform = dist_transform / (max_dist + 1e-6)
+#             max_dist = max_dist.unsqueeze(1).unsqueeze(1).expand(-1, H, W)
+#             dist_transform = dist_transform / (max_dist + 1e-6)
 
-            # inner_mask = dist_transform > 0.5
-            # outer_mask = (dist_transform <= 0.5) & (dist_transform > 0)
+#             # inner_mask = dist_transform > 0.5
+#             # outer_mask = (dist_transform <= 0.5) & (dist_transform > 0)
 
-            total_fluorescence = torch.sum(epi_image * mask, dim=(1, 2))
-            dist_mean = torch.sum(epi_image * mask * dist_transform,
-                                  dim=(1, 2)) / total_fluorescence
-            dist_variance = torch.sum(
-                epi_image * mask * dist_transform**2,
-                dim=(1, 2)) / total_fluorescence - dist_mean**2
-            # inner_fluorescence = torch.sum(epi_image * inner_mask, dim=(1, 2))
-            # outer_fluorescence = torch.sum(epi_image * outer_mask, dim=(1, 2))
+#             total_fluorescence = torch.sum(epi_image * mask, dim=(1, 2))
+#             dist_mean = torch.sum(epi_image * mask * dist_transform,
+#                                   dim=(1, 2)) / total_fluorescence
+#             dist_variance = torch.sum(
+#                 epi_image * mask * dist_transform**2,
+#                 dim=(1, 2)) / total_fluorescence - dist_mean**2
+#             # inner_fluorescence = torch.sum(epi_image * inner_mask, dim=(1, 2))
+#             # outer_fluorescence = torch.sum(epi_image * outer_mask, dim=(1, 2))
 
-            results = np.full((num_cells, 5), np.nan)
-            valid_np = valid.cpu().numpy()
-            results[valid_np, 0] = total_fluorescence.cpu().numpy()
-            results[valid_np, 1] = dist_mean.cpu().numpy()
-            results[valid_np, 2] = dist_variance.cpu().numpy()
-            # results[valid_np, 3] = inner_fluorescence.cpu().numpy()
-            # results[valid_np, 4] = outer_fluorescence.cpu().numpy()
+#             results = np.full((num_cells, 5), np.nan)
+#             valid_np = valid.cpu().numpy()
+#             results[valid_np, 0] = total_fluorescence.cpu().numpy()
+#             results[valid_np, 1] = dist_mean.cpu().numpy()
+#             results[valid_np, 2] = dist_variance.cpu().numpy()
+#             # results[valid_np, 3] = inner_fluorescence.cpu().numpy()
+#             # results[valid_np, 4] = outer_fluorescence.cpu().numpy()
 
-        return results
+
+#         return results
+class EventDetection(BaseFeature):
+    derived_feature = True
+
+    smooth_window_size: int = 5
+    fit_window_size: int = 11
+    min_slope = 0.0
+    min_r2 = 0.9
+    min_mean_fluor = 150
+
+    def compute(self, phase_xr: xr.Dataset, epi_xr: xr.Dataset) -> np.array:
+        """Detect exponeontial increases in total fluorescence."""
+        total_fluor: xr.DataArray = phase_xr[
+            'Fluor Total']  # dims: (Frame, Cell Index)
+        not_nan = total_fluor.notnull()
+        total_fluor = (total_fluor.rolling(
+            Frame=self.smooth_window_size, center=True,
+            min_periods=1).mean().where(not_nan))
+        mean_fluor = (total_fluor.rolling(Frame=self.smooth_window_size,
+                                          center=True,
+                                          min_periods=1).mean().where(not_nan))
+
+        log_fluor: xr.DataArray = np.log(total_fluor.where(total_fluor > 0))
+
+        win = (log_fluor.chunk({
+            'Frame': -1
+        }).rolling(Frame=self.fit_window_size,
+                   center=True).construct('Window').assign_coords(
+                       Window=np.arange(self.fit_window_size)))
+
+        pf = win.polyfit('Window', deg=1, skipna=True, full=True)
+        slope = pf.polyfit_coefficients.sel(degree=1)
+        Syy = ((win - win.mean('Window'))**2).sum('Window')
+        r2 = 1 - pf.polyfit_residuals / Syy
+
+        full_window = win.notnull().sum('Window') == self.fit_window_size
+        event_windows = ((slope > self.min_slope) & (r2 > self.min_r2)
+                         & full_window & (mean_fluor > self.min_mean_fluor))
+        event_windows = (event_windows.where(not_nan, False).transpose(
+            'Frame', 'Cell Index'))
+
+        return event_windows.values.astype(float)[:, :, np.newaxis]
 
 
 class RegionProps(BaseFeature):
