@@ -31,7 +31,7 @@ from scipy import ndimage
 
 from PhagoPred import SETTINGS
 from PhagoPred.utils import tools
-from PhagoPred.detectron_segmentation.config import add_validation_config
+from PhagoPred.segmentation.detectron_segmentation.config import add_validation_config
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -95,7 +95,8 @@ def resolve_weights(cfg_dir: Path,
         fallback = cfg_dir / 'model_final.pth'
         if not fallback.exists():
             raise FileNotFoundError(
-                f'Found neither {weights} nor {fallback} to load weights from.')
+                f'Found neither {weights} nor {fallback} to load weights from.'
+            )
         print(f'Warning: {weights} not found, falling back to {fallback}.')
         weights = fallback
     return str(weights)
@@ -136,12 +137,12 @@ def get_predictor(
 
 
 def seg_image(
-        cfg_dir: Path,
-        im: np.ndarray,
-        train_metadata=None,
-        cfg=None,
-        predictor=None,
-        weights_name: str = 'model_final.pth'
+    cfg_dir: Path,
+    im: np.ndarray,
+    train_metadata=None,
+    cfg=None,
+    predictor=None,
+    weights_name: str = 'model_final.pth'
     #   categories: tuple[str, ...]
 ) -> dict[str, np.ndarray]:
     """

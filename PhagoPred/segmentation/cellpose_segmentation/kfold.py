@@ -6,7 +6,8 @@ import pandas as pd
 import json
 import matplotlib.pyplot as plt
 
-from PhagoPred.cellpose_segmentation import train, eval
+from PhagoPred.segmentation.cellpose_segmentation import train
+from PhagoPred.segmentation.cellpose_segmentation import eval
 from PhagoPred.utils import tools, mask_funcs
 
 

@@ -21,10 +21,10 @@ import pandas as pd
 from PIL import Image
 import seaborn as sns
 
-from PhagoPred.detectron_segmentation.train import train
-from PhagoPred.detectron_segmentation.eval import evaluator, Evaluator
-from PhagoPred.detectron_segmentation.segment import seg_image
-from PhagoPred.detectron_segmentation import fine_tune_class
+from PhagoPred.segmentation.detectron_segmentation.train import train
+from PhagoPred.segmentation.detectron_segmentation.eval import evaluator, Evaluator
+from PhagoPred.segmentation.detectron_segmentation.segment import seg_image
+from PhagoPred.segmentation.detectron_segmentation import fine_tune_class
 from PhagoPred import SETTINGS
 from PhagoPred.utils import tools, mask_funcs
 

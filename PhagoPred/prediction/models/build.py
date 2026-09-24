@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PhagoPred.survival_v2.configs.models import LSTMCfg, CNNCfg, RSFCfg
-from PhagoPred.survival_v2.configs.experiments import ModelCfg, AttentionCfg
+from PhagoPred.prediction.configs.models import LSTMCfg, CNNCfg, RSFCfg
+from PhagoPred.prediction.configs.experiments import ModelCfg, AttentionCfg
 from .lstm_survival import LSTMSurvival
 from .cnn_survival import CNNSurvival
 from .random_forest import RandomSurvivalForestModel

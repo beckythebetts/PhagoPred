@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 from PhagoPred.utils import get_logger
-from PhagoPred.survival_v2.probability_calib import (
+from PhagoPred.prediction.models.probability_calib import (
     TemperatureScalingResult,
     VectorScalingResult,
     PlattScalingResult,

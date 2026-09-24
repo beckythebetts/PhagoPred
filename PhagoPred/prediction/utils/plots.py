@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-from PhagoPred.survival_v2.data import BinaryCellSample, SurvivalCellSample, BinaryCell
+from PhagoPred.prediction.data import BinaryCellSample, SurvivalCellSample, BinaryCell
 from PhagoPred.utils.logger import get_logger
 
 log = get_logger()

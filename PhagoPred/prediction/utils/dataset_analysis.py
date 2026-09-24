@@ -10,9 +10,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
 
-from PhagoPred.survival_v2.configs.experiments import (MODELS, DATASETS,
-                                                       FEATURE_COMBOS)
-from PhagoPred.survival_v2.experiments.run_experiments import build_datasets
+from PhagoPred.prediction.configs.experiments import (MODELS, DATASETS,
+                                                      FEATURE_COMBOS)
+from PhagoPred.prediction.experiments.run_experiments import build_datasets
 
 
 def analyse_suite_datasets(suite_dir: Path, save: bool = True) -> dict:

@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from PhagoPred.survival_v2.probability_calib import (
+from PhagoPred.prediction.models.probability_calib import (
     CalibrationResult,
     TemperatureScalingResult,
     VectorScalingResult,

@@ -8,9 +8,9 @@ import numpy as np
 import torch
 import shap
 
-from PhagoPred.survival_v2.models import SurvivalModel
-from PhagoPred.survival_v2.interpret import (SampleWithSHAP, SHAPResult,
-                                             ExplainerEnum, BackgroundEnum)
+from PhagoPred.prediction.models import SurvivalModel
+from PhagoPred.prediction.interpret import (SampleWithSHAP, SHAPResult,
+                                            ExplainerEnum, BackgroundEnum)
 from .var_precision import VARFit, VARPrecision, build_precision, sample_conditional
 from .utils import align_sample_features
 
@@ -377,8 +377,8 @@ class KernelSHAP:
             time_bins=time_bins,
         )
 
-        if importance_type in ("temporal", "temporal_feature"
-                              ) and num_segments is not None:
+        if importance_type in (
+                "temporal", "temporal_feature") and num_segments is not None:
             # Clamp to the sample's own length, matching
             # ground_truth.generate_samples._axis_segments's min(num_segments,
             # lf) — otherwise np.linspace(0, T, num_segments+1) below produces

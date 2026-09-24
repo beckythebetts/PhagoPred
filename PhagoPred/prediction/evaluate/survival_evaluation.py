@@ -8,15 +8,15 @@ import numpy as np
 import torch
 from sklearn.metrics import confusion_matrix
 
-from PhagoPred.survival_v2.models import ClassicalSurvivalModel, SurvivalModel
-from PhagoPred.survival_v2.utils.plots import (
+from PhagoPred.prediction.models import ClassicalSurvivalModel, SurvivalModel
+from PhagoPred.prediction.utils.plots import (
     visualise_survival_prediction,
     plot_cm,
     plot_brier_scores,
 )
-from PhagoPred.survival_v2.configs.datasets import DatasetCfg
+from PhagoPred.prediction.configs.datasets import DatasetCfg
 from PhagoPred.utils.tools import to_json_safe
-from PhagoPred.survival_v2.data import SurvivalCellDataset, survival_collate_fn, SurvivalCell, SurvivalCellSample
+from PhagoPred.prediction.data import SurvivalCellDataset, survival_collate_fn, SurvivalCell, SurvivalCellSample
 from .metrics import (
     concordance_index,
     integrated_brier_score,

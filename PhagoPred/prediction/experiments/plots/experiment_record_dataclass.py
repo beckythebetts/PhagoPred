@@ -3,8 +3,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Union
 
-from PhagoPred.survival_v2.configs import ExperimentCfg
-from PhagoPred.survival_v2.evaluate import BinaryResults, SurvivalResults
+from PhagoPred.prediction.configs import ExperimentCfg
+from PhagoPred.prediction.evaluate import BinaryResults, SurvivalResults
 
 
 @dataclass

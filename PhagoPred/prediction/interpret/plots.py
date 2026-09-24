@@ -8,7 +8,7 @@ import numpy as np
 import h5py
 
 from PhagoPred.utils.logger import get_logger
-from PhagoPred.survival_v2.interpret.data_models import SampleWithSHAP, SHAPResult
+from PhagoPred.prediction.interpret.data_models import SampleWithSHAP, SHAPResult
 # from PhagoPred.survival_v2.interpret_old.importance_data import (
 #     dataset_average,
 #     horizon_outputs,
@@ -598,8 +598,7 @@ def dataset_average(h5_path: Path | str,
 
             if result.temporal_feature is not None:
                 tf = result.temporal_feature
-                if result.segment_boundaries is not None and tf.shape[
-                        -1] != lf:
+                if result.segment_boundaries is not None and tf.shape[-1] != lf:
                     tf = spread_segments(tf, result.segment_boundaries)
                 # Kernel SHAP's rows only cover the model's own input
                 # features (e.g. no Hazard), a subset/reorder of
@@ -613,15 +612,15 @@ def dataset_average(h5_path: Path | str,
 
             if result.temporal is not None:
                 values = result.temporal
-                if result.segment_boundaries is not None and len(
-                        values) != lf:
+                if result.segment_boundaries is not None and len(values) != lf:
                     values = spread_segments(values, result.segment_boundaries)
                 temp_stack[i, :lf] = np.abs(values[:lf])
 
             if result.feature is not None:
-                lookup = dict(zip(sample.feature_names, np.abs(
-                    result.feature)))
-                feat_rows.append([lookup.get(n, np.nan) for n in feature_names])
+                lookup = dict(zip(sample.feature_names,
+                                  np.abs(result.feature)))
+                feat_rows.append(
+                    [lookup.get(n, np.nan) for n in feature_names])
 
         heatmaps[key] = (None if np.all(np.isnan(heat_stack)) else _norm(
             np.nanmean(heat_stack, axis=0)))
@@ -668,7 +667,10 @@ def plot_dataset_average(
         if avg.heatmaps[key] is None:
             _missing(ax, f'{key} shap_vals')
             continue
-        heatmap_panel(ax, avg.heatmaps[key], avg.feature_names, avg.max_lf,
+        heatmap_panel(ax,
+                      avg.heatmaps[key],
+                      avg.feature_names,
+                      avg.max_lf,
                       f"{key.replace('_', ' ').capitalize()}  {unit}",
                       diverging=False)
 

@@ -5,10 +5,10 @@ Supports modular attention mechanisms.
 import torch
 import torch.nn as nn
 
-from PhagoPred.survival_v2.configs.attention import AttentionCfg
+from PhagoPred.prediction.configs.attention import AttentionCfg
 from PhagoPred.utils.logger import get_logger
 from .base import SurvivalModel, build_fc_layers
-from ..attention.mechanisms import get_attention_mechanism
+from .attention.mechanisms import get_attention_mechanism
 
 log = get_logger()
 

@@ -12,28 +12,28 @@ from torch.utils.data import DataLoader
 #                                                              TRAINING,
 #                                                              EXPERIMENT_SUITES,
 #                                                              FEATURE_COMBOS)
-from PhagoPred.survival_v2.configs.experiments import EXPERIMENT_SUITES, ExperimentCfg, ModelCfg, AttentionCfg, DatasetCfg
-from PhagoPred.survival_v2.configs.io import load_experiment_cfg, save_experiment_cfg
-from PhagoPred.survival_v2.configs.models import LSTMCfg, CNNCfg, RSFCfg
-from PhagoPred.survival_v2.configs.datasets import SurvivalDatasetCfg, BinaryDatasetCfg, BinaryClassDatasetCfg
-from PhagoPred.survival_v2.configs.calibration import (
+from PhagoPred.prediction.configs.experiments import EXPERIMENT_SUITES, ExperimentCfg, ModelCfg, AttentionCfg, DatasetCfg
+from PhagoPred.prediction.configs.io import load_experiment_cfg, save_experiment_cfg
+from PhagoPred.prediction.configs.models import LSTMCfg, CNNCfg, RSFCfg
+from PhagoPred.prediction.configs.datasets import SurvivalDatasetCfg, BinaryDatasetCfg, BinaryClassDatasetCfg
+from PhagoPred.prediction.configs.calibration import (
     CalibrationCfg,
     TemperatureScalingCfg,
     VectorScalingCfg,
     PlattScalingCfg,
     IsotonicScalingCfg,
 )
-from PhagoPred.survival_v2.probability_calib import (
+from PhagoPred.prediction.models.probability_calib import (
     fit_temperature_scaling,
     fit_vector_scaling,
     fit_platt_scaling,
     fit_isotonic_scaling,
 )
-from PhagoPred.survival_v2.models.build import build_model
-from PhagoPred.survival_v2.models.classical_base import ClassicalSurvivalModel
-from PhagoPred.survival_v2.train.train import train
-from PhagoPred.survival_v2.evaluate import evaluate
-from PhagoPred.survival_v2.data import (
+from PhagoPred.prediction.models.build import build_model
+from PhagoPred.prediction.models.classical_base import ClassicalSurvivalModel
+from PhagoPred.prediction.train.train import train
+from PhagoPred.prediction.evaluate import evaluate
+from PhagoPred.prediction.data import (
     CellDataset,
     SurvivalCellDataset,
     BinaryCellDataset,
@@ -42,9 +42,9 @@ from PhagoPred.survival_v2.data import (
     survival_collate_fn,
     binary_class_collate_fn,
 )
-from PhagoPred.survival_v2.utils.plots import plot_losses
+from PhagoPred.prediction.utils.plots import plot_losses
 # from PhagoPred.survival_v2.interpret.run_interpret import interpret
-from PhagoPred.survival_v2.interpret import run_shap
+from PhagoPred.prediction.interpret import run_shap
 from PhagoPred.utils.logger import get_logger
 from PhagoPred.utils.tools import highlight_str
 from .plots.plot_experiments import (
@@ -595,7 +595,7 @@ def _build_val_dataset(cfg: ExperimentCfg) -> CellDataset:
 def _load_model(cfg: ExperimentCfg, model_path: Path,
                 device: str) -> 'SurvivalModel | ClassicalSurvivalModel':
     """Load a saved model from disk using its experiment config."""
-    from PhagoPred.survival_v2.models.classical_base import ClassicalSurvivalModel
+    from PhagoPred.prediction.models.classical_base import ClassicalSurvivalModel
     num_features = len(cfg.feature_combo)
     num_bins = cfg.dataset.num_bins
     model = build_model(cfg.model,

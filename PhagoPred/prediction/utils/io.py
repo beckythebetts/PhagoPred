@@ -6,14 +6,14 @@ import torch
 import numpy as np
 
 from PhagoPred.utils.logger import get_logger
-from PhagoPred.survival_v2.configs.io import load_experiment_cfg
-from PhagoPred.survival_v2.configs.models import RSFCfg
-from PhagoPred.survival_v2.configs.datasets import BinaryDatasetCfg, BinaryClassDatasetCfg
-from PhagoPred.survival_v2.configs.experiments import ExperimentCfg
-from PhagoPred.survival_v2.models.base import SurvivalModel
-from PhagoPred.survival_v2.models.classical_base import ClassicalSurvivalModel
-from PhagoPred.survival_v2.data import CellDataset, SurvivalCellDataset, BinaryCellDataset, BinaryClassDataset
-from PhagoPred.survival_v2.models.build import build_model
+from PhagoPred.prediction.configs.io import load_experiment_cfg
+from PhagoPred.prediction.configs.models import RSFCfg
+from PhagoPred.prediction.configs.datasets import BinaryDatasetCfg, BinaryClassDatasetCfg
+from PhagoPred.prediction.configs.experiments import ExperimentCfg
+from PhagoPred.prediction.models.base import SurvivalModel
+from PhagoPred.prediction.models.classical_base import ClassicalSurvivalModel
+from PhagoPred.prediction.data import CellDataset, SurvivalCellDataset, BinaryCellDataset, BinaryClassDataset
+from PhagoPred.prediction.models.build import build_model
 
 log = get_logger()
 

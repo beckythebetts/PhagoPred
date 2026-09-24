@@ -4,10 +4,10 @@ import json
 
 from torch.utils.data import DataLoader
 import torch
-from PhagoPred.survival_v2.configs import TrainingCfg, LossCfg
-from PhagoPred.survival_v2.models import SurvivalModel, ClassicalSurvivalModel
-from PhagoPred.survival_v2.data import CellDataset, binary_collate_fn, survival_collate_fn, binary_class_collate_fn, BinaryCellDataset, SurvivalCellDataset, BinaryClassDataset
-from PhagoPred.survival_v2.utils.plots import plot_losses
+from PhagoPred.prediction.configs import TrainingCfg, LossCfg
+from PhagoPred.prediction.models import SurvivalModel, ClassicalSurvivalModel
+from PhagoPred.prediction.data import CellDataset, binary_collate_fn, survival_collate_fn, binary_class_collate_fn, BinaryCellDataset, SurvivalCellDataset, BinaryClassDataset
+from PhagoPred.prediction.utils.plots import plot_losses
 from PhagoPred.utils.tools import to_json_safe
 from .train_classical import train_classical
 from .train_deep import train_deep

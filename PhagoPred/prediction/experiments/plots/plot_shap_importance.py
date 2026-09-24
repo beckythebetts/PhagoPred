@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from PhagoPred.utils.logger import get_logger
-from PhagoPred.survival_v2.interpret.data_models import SampleWithSHAP
-from PhagoPred.survival_v2.interpret.plots import (
+from PhagoPred.prediction.interpret.data_models import SampleWithSHAP
+from PhagoPred.prediction.interpret.plots import (
     PANEL_ORDER,
     SHAP_PANELS,
     heatmap_panel,
@@ -25,7 +25,8 @@ log = get_logger()
 
 _SHAP_FILE = 'shap_samples.h5'
 _KEYS = [k for k in PANEL_ORDER if k in SHAP_PANELS]
-_N_COLS = len(_KEYS) + 2  # one heatmap per SHAP key, then temporal, then feature
+_N_COLS = len(
+    _KEYS) + 2  # one heatmap per SHAP key, then temporal, then feature
 
 
 def _model_label(record: ExperimentRecord, varying_params: dict) -> str:
@@ -168,8 +169,8 @@ def _get_shap_result(sample: SampleWithSHAP, key: str):
 
 def _sample_data(
     sample: SampleWithSHAP, normalise: bool
-) -> tuple[dict[str, np.ndarray | None], dict[str, np.ndarray | None],
-          dict[str, np.ndarray | None]]:
+) -> tuple[dict[str, np.ndarray | None], dict[str, np.ndarray | None], dict[
+        str, np.ndarray | None]]:
     """Signed, per-key heatmap/temporal/feature arrays for one sample (no
     averaging) — the row-comparison counterpart of
     ``interpret.plots.plot_sample_on_axes``."""
@@ -250,7 +251,8 @@ def plot_shap_average_across_models(
                  avg.heatmaps,
                  avg.feature_names,
                  avg.max_lf,
-                 lambda key, unit=unit: f"{key.replace('_', ' ').capitalize()}  {unit}",
+                 lambda key, unit=unit:
+                 f"{key.replace('_', ' ').capitalize()}  {unit}",
                  temporal_series,
                  feature_series,
                  diverging=False,
@@ -293,7 +295,9 @@ def plot_shap_fold_average_across_models(
                                  squeeze=False)
         for row, (key, group_records) in enumerate(groups.items()):
             label = _group_label(key, varying_params)
-            paths = [p for r in group_records if (p := _shap_path(r)) is not None]
+            paths = [
+                p for r in group_records if (p := _shap_path(r)) is not None
+            ]
             averages = [dataset_average(p, normalise=normalise) for p in paths]
             if not averages:
                 axes[row, 0].text(0.5,
@@ -320,7 +324,8 @@ def plot_shap_fold_average_across_models(
                     _pad(a.heatmaps[k], max_lf) for a in averages
                     if a.heatmaps.get(k) is not None
                 ]
-                heat_mean[k] = _nanmean(np.stack(heat_arrs)) if heat_arrs else None
+                heat_mean[k] = _nanmean(
+                    np.stack(heat_arrs)) if heat_arrs else None
 
                 temp_arrs = [
                     _pad(a.temporal[k], max_lf) for a in averages
@@ -334,7 +339,8 @@ def plot_shap_fold_average_across_models(
                     temporal_mean[k] = None
 
                 feat_arrs = [
-                    a.feature[k] for a in averages if a.feature.get(k) is not None
+                    a.feature[k] for a in averages
+                    if a.feature.get(k) is not None
                 ]
                 if feat_arrs:
                     feat_stack = np.stack(feat_arrs)
@@ -351,9 +357,9 @@ def plot_shap_fold_average_across_models(
                 heat_mean,
                 feature_names,
                 max_lf,
-                lambda key, unit=unit, n=len(averages): (
-                    f"{key.replace('_', ' ').capitalize()}  fold mean "
-                    f"({n} folds)  {unit}"),
+                lambda key, unit=unit, n=len(averages):
+                (f"{key.replace('_', ' ').capitalize()}  fold mean "
+                 f"({n} folds)  {unit}"),
                 temporal_mean,
                 feature_series,
                 diverging=False,

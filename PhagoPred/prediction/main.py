@@ -8,12 +8,12 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from PhagoPred.survival_v2.experiments.run_experiments import run_experiment_suite, evaluate_suite, interpret_suite
-from PhagoPred.survival_v2.experiments.plots.plot_experiments import plot_experiment_results
+from PhagoPred.prediction.experiments.run_experiments import run_experiment_suite, evaluate_suite, interpret_suite
+from PhagoPred.prediction.experiments.plots.plot_experiments import plot_experiment_results
 # from PhagoPred.survival_v2.interpret import interpret
 # from PhagoPred.survival_v2.interpret.ground_truth_importance import compare_importance, backfill_horizon_hazard
-from PhagoPred.survival_v2.utils.dataset_analysis import analyse_suite_datasets, plot_suite_event_distributions, plot_suite_absolute_distributions
-from PhagoPred.survival_v2.interpret import run_shap, plot_shap
+from PhagoPred.prediction.utils.dataset_analysis import analyse_suite_datasets, plot_suite_event_distributions, plot_suite_absolute_distributions
+from PhagoPred.prediction.interpret import run_shap, plot_shap
 
 
 def train():

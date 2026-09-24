@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from PhagoPred.utils.logger import get_logger
-from PhagoPred.survival_v2.configs import ExperimentCfg
+from PhagoPred.prediction.configs import ExperimentCfg
 from .experiment_record_dataclass import ExperimentRecord
 
 log = get_logger()

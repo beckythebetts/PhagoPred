@@ -6,7 +6,7 @@ import numpy as np
 import h5py
 
 from PhagoPred.utils.logger import get_logger
-from PhagoPred.survival_v2.data.graph_synthetic.scenarios import ALL_CFGS, ScenarioCfg
+from PhagoPred.prediction.data.graph_synthetic.scenarios import ALL_CFGS, ScenarioCfg
 from .generate_samples import generate_sample_with_importances
 
 log = get_logger()
@@ -84,8 +84,7 @@ def get_samples(
                 if n == num_samples:
                     file_name = file
                     break
-                if n > num_samples and (superset is None
-                                        or n < superset[0]):
+                if n > num_samples and (superset is None or n < superset[0]):
                     superset = (n, file)
     except KeyError:
         pass

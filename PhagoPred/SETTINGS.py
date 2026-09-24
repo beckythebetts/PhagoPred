@@ -1,94 +1,49 @@
 from pathlib import Path
-import h5py
 
-try:
-    # ******* GENERAL *******
-    # DATASET = Path('PhagoPred')/'Datasets'/'secondwithlight - Copy.h5'
-    # DATASET = Path('PhagoPred')/'Datasets'/'27_05_short_seg_test.h5'
-    # DATASET = Path('PhagoPred')/'Datasets'/'24_06.h5'
-    # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_2500.h5'
-    # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_5min.h5'
-    # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '28_10_10min.h5'
-    # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / 'old' / '03_10_2500.h5'
-    # DATASET = Path('PhagoPred')/'Datasets'/ 'ExposureTest' / '10_10_5000.h5'
-    # DATASET = Path('PhagoPred')/'Datasets'/ 'Prelims' / '16_09_3.h5'
-    # DATASET = Path('PhagoPred')/'Datasets'/'27_05_500.h5'
-    # DATASET = Path('PhagoPred')/'Datasets'/ 'Prelims' / '16_09_1_no_overlaps.h5'
-    # DATASET = Path('~/thor_server/24_02/24_02_D.h5').expanduser()
-    # DATASET = Path('PhagoPred') / 'Datasets' / '10_02_26_1_short.h5'
-    DATASET = Path("C:\\Users\\php23rjb\\Downloads\\D.h5")
-    # DATASET = Path("C:\Users\php23rjb\Downloads\A.h5")
-    with h5py.File(DATASET, 'r') as f:
-        NUM_FRAMES = f['Images'].attrs['Number of frames']
-        IMAGE_SIZE = f['Images'].attrs['Image size / pixels']
-        TIME_STEP = f['Images'].attrs['Time interval / s']
-except:
-    print(f"Dataset {DATASET} not found.")
-    DATASET = None
-    NUM_FRAMES = None
-    IMAGE_SIZE = None
-    TIME_STEP = None
-
-# DATASET = Path('PhagoPred')/'Datasets'/'mac_07_03_short.h5'
-# DATASET = Path('PhagoPred')/'Datasets'/'mac_short_seg.h5'
-# MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'mac_20x'
-
+# ******* SEGMENTATION MODELS *******
 MASK_RCNN_MODEL = Path(
     "PhagoPred") / 'detectron_segmentation' / 'models' / 'bio_20x_thp1'
 CELLPOSE_MODEL = Path(
     '/home/ubuntu/PhagoPred/PhagoPred/cellpose_segmentation/Models/bio_20x_thp1_clahe_withrescale'
 )
-UNET_MODEL = Path("PhagoPred") / 'unet_segmentation' / 'models' / '20x_flir_8'
-TRAINING_DATA = Path("PhagoPred") / 'segmentation' / 'models' / '20x_flir_8'
-CLASSES = {'phase': 'Amoeba', 'epi': 'Yeast'}
-REMOVE_EDGE_CELLS = True
-UMAP_MODEL = Path(
-    'PhagoPred') / 'feature_extraction' / 'morphology' / 'UMAP_model.pickle'
-
-# MODEL_IMAGE_SIZE = [5472, 3648]
-
-# ******* EPI THRESHOLDING *******
-THRESHOLD = 250
 
 # ******* TRACKING *******
 MAXIMUM_DISTANCE_THRESHOLD = 60
 FRAME_MEMORY = 8
-CLEAN_TRACKS = True
 MINIMUM_TRACK_LENGTH = 50
 
-VIEW_TRACKS = True  # Save labelled tracked images
-NUM_FRAMES_TO_VIEW = 50  # Set as None to view all (slow)
-
-# ******* FEATURE EXTRACTION *******
+# ******* UMAP FEATURE EXTRACTION *******
 NUM_TRAINING_FRAMES = 50
 NUM_CONTOUR_POINTS = 50
 PCA_COMPONENTS = 10
 KMEANS_CLUSTERS = 12
 
-BATCH_SIZE = 5
-PLOT_FEATURES = False
-TRACKS_PLOT = True
-SHOW_EATING = True
-NUM_FRAMES_EATEN_THRESHOLD = 10
-MINIMUM_PIXELS_PER_PATHOGEN = 10
+DATASET = None
+NUM_FRAMES = None
+IMAGE_SIZE = None
+TIME_STEP = None
 
-# ******* MASK R-CNN MODEL TRAINING DIRECTORY STRUCTURE *******
-# - 'Models'
-#   - model name
-#       - 'Training_Data'
-#           - 'train'
-#               - 'images' .jpegs
-#               - 'labels.json'
-#           - 'validate'
-#               - 'images' .jpegs
-#               - 'labels.json'
-
-# ******* CELLPOSE MODEL TRAINING DIRECTORY STRUCTURE *******
-# - 'cellpose_Models'
-#   - model name
-#           - 'train'
-#               - *im.png
-#               - *mask.png
-#           - 'validate'
-#               - *im.png
-#               - *mask.png
+ALL_FEATURES = [
+    'Area',
+    'Circularity',
+    'Displacement',
+    'Perimeter',
+    'Phagocytes within 100 pixels',
+    'Phagocytes within 250 pixels',
+    'Phagocytes within 500 pixels',
+    'Skeleton Branch Length Mean',
+    'Skeleton Branch Length Max',
+    'Skeleton Branch Length Std',
+    'Skeleton Branches',
+    'Skeleton Length',
+    'Speed',
+    'Major Axis Length',
+    'Minor Axis Length',
+    'Eccentricity',
+    'Fluor Asymmetry',
+    'Fluor CV',
+    'Fluor Dist Mean',
+    'Fluor Dist Std',
+    'Fluor Mean',
+    'Fluor Total',
+]

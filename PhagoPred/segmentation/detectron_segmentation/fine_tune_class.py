@@ -1,4 +1,5 @@
 import sys
+
 sys.path.insert(0, 'detectron2')
 
 from detectron2.engine import DefaultPredictor
@@ -58,23 +59,24 @@ from detectron2.layers import cat
 from detectron2.modeling.roi_heads import ROI_HEADS_REGISTRY
 
 from PhagoPred.utils import tools, mask_funcs
-from PhagoPred.detectron_segmentation import train
-from PhagoPred.detectron_segmentation.config import add_validation_config
+from PhagoPred.segmentation.detectron_segmentation import train
+from PhagoPred.segmentation.detectron_segmentation.config import add_validation_config
 from PhagoPred import SETTINGS
 
-
 import random
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
 def get_finetuning_dataset(
-        hdf5_files: list = [SETTINGS.DATASET], 
-        death_frames_files: list = [SETTINGS.MASK_RCNN_MODEL / 'death_frames.txt'],
-        model_dir: Path = SETTINGS.MASK_RCNN_MODEL,
-        include_no_cell: bool = True,
-        include_wrong_segs: bool = True,
-        include_merged: bool = True,
-        padding: int = 20,
-        ):
+    hdf5_files: list = [SETTINGS.DATASET],
+    death_frames_files: list = [SETTINGS.MASK_RCNN_MODEL / 'death_frames.txt'],
+    model_dir: Path = SETTINGS.MASK_RCNN_MODEL,
+    include_no_cell: bool = True,
+    include_wrong_segs: bool = True,
+    include_merged: bool = True,
+    padding: int = 20,
+):
     """For each cell in death_frames, take frames before and after cell death. 
     Crop images/masks to minimum required to cover cell.
     Split into train/val folders based on Cell Idx (~80:20).
@@ -105,8 +107,14 @@ def get_finetuning_dataset(
             "images": [],
             "annotations": [],
             "categories": [
-                {"id": 1, "name": "Macrophage"},
-                {"id": 2, "name": "Dead Macrophage"},
+                {
+                    "id": 1,
+                    "name": "Macrophage"
+                },
+                {
+                    "id": 2,
+                    "name": "Dead Macrophage"
+                },
             ]
         }
     }
@@ -116,36 +124,51 @@ def get_finetuning_dataset(
     annotation_id = 1
     image_id = 1
 
-    def crop_image_and_mask(image: np.ndarray, mask:np.ndarray, padding: int = padding) -> tuple[np.ndarray, np.ndarray]:
-            x_coords, y_coords = np.nonzero(mask)
-            crop_coords = [np.min(x_coords) - padding,
-                            np.max(x_coords) + 1 + padding,
-                            np.min(y_coords) - padding,
-                            np.max(y_coords) + 1 + padding,
-                            ]
-            crop_coords = np.clip(crop_coords, 0, mask.shape[0]) # Assuming square images
-            x_crop = slice(crop_coords[0], crop_coords[1])
-            y_crop = slice(crop_coords[2], crop_coords[3])
+    def crop_image_and_mask(
+            image: np.ndarray,
+            mask: np.ndarray,
+            padding: int = padding) -> tuple[np.ndarray, np.ndarray]:
+        x_coords, y_coords = np.nonzero(mask)
+        crop_coords = [
+            np.min(x_coords) - padding,
+            np.max(x_coords) + 1 + padding,
+            np.min(y_coords) - padding,
+            np.max(y_coords) + 1 + padding,
+        ]
+        crop_coords = np.clip(crop_coords, 0,
+                              mask.shape[0])  # Assuming square images
+        x_crop = slice(crop_coords[0], crop_coords[1])
+        y_crop = slice(crop_coords[2], crop_coords[3])
 
-            crop_shapes.append((x_crop.stop - x_crop.start, y_crop.stop - y_crop.start))
+        crop_shapes.append(
+            (x_crop.stop - x_crop.start, y_crop.stop - y_crop.start))
 
-            image = image[x_crop, y_crop]
-            mask = mask[x_crop, y_crop]
-            return image, mask
+        image = image[x_crop, y_crop]
+        mask = mask[x_crop, y_crop]
+        return image, mask
 
     for death_frames_file, hdf5_file in zip(death_frames_files, hdf5_files):
 
         # Load death_frames
-        death_frames_df = pd.read_csv(death_frames_file, sep='|', skiprows=1, engine='python', dtype=str)
+        death_frames_df = pd.read_csv(death_frames_file,
+                                      sep='|',
+                                      skiprows=1,
+                                      engine='python',
+                                      dtype=str)
         death_frames_df = death_frames_df.iloc[:, 1:3]
         death_frames_df.columns = ['Cell Idx', 'Death Frame']
-        death_frames_df = death_frames_df.map(lambda x: x.strip() if isinstance(x, str) else x)
+        death_frames_df = death_frames_df.map(lambda x: x.strip()
+                                              if isinstance(x, str) else x)
 
-        death_frames = death_frames_df[death_frames_df['Death Frame'].str.isnumeric()].astype(int)
-        wrong_segmentations = death_frames_df[death_frames_df['Death Frame'] == 'Wrong Segmentation']
-        wrong_segmentations['Cell Idx'] = wrong_segmentations['Cell Idx'].astype(int)
+        death_frames = death_frames_df[
+            death_frames_df['Death Frame'].str.isnumeric()].astype(int)
+        wrong_segmentations = death_frames_df[death_frames_df['Death Frame'] ==
+                                              'Wrong Segmentation']
+        wrong_segmentations['Cell Idx'] = wrong_segmentations[
+            'Cell Idx'].astype(int)
 
-        merged_cells = death_frames_df['Merge' in death_frames_df['Death Frame']]
+        merged_cells = death_frames_df['Merge' in
+                                       death_frames_df['Death Frame']]
         merged_cells['Cell Idx'] = merged_cells['Cell Idx'].astype(int)
 
         cell_ids = death_frames['Cell Idx'].unique()
@@ -154,20 +177,22 @@ def get_finetuning_dataset(
 
         # alive_frames_sample = np.array([1, 10, 100])
         # dead_frames_sample = np.array([1, 2, 3, 4,5 , 6, 7, 8, 9])
-       
 
-        pbar = tqdm(total=(len(death_frames))*1.5)
+        pbar = tqdm(total=(len(death_frames)) * 1.5)
 
         coco_json = settings['coco_json']
         images_dir = settings['images']
 
         with h5py.File(hdf5_file, 'r') as f:
-            
+
             num_frames, image_h, image_w = f['Images']['Phase'].shape
-            for cell_idx, death_frame in zip(death_frames['Cell Idx'], death_frames['Death Frame']):
+            for cell_idx, death_frame in zip(death_frames['Cell Idx'],
+                                             death_frames['Death Frame']):
                 # split = 'validate' if cell_idx in val_cell_ids else 'train'
-                
-                alive_frames_sample = np.random.choice(np.arange(1, 10), 2, replace=False)
+
+                alive_frames_sample = np.random.choice(np.arange(1, 10),
+                                                       2,
+                                                       replace=False)
                 alive_frames_sample = np.append(alive_frames_sample, 100)
 
                 # Alive frames
@@ -176,26 +201,39 @@ def get_finetuning_dataset(
                         # pbar.update(1)
                         continue
 
-                    mask = f['Segmentations']['Phase'][alive_frame][:] == cell_idx
+                    mask = f['Segmentations']['Phase'][
+                        alive_frame][:] == cell_idx
 
                     if not mask.any():
                         # find closest mask before and after and add to get crop coordinates
 
-                        prev_frames = np.clip(alive_frame - np.arange(20), a_min=0, a_max=num_frames - 1)
-                        prev_masks = f['Segmentations']['Phase'][prev_frames][:]  # fancy indexing on hdf5 5 files possible?
-                        valid_prev_frames = prev_frames[np.any(prev_masks == cell_idx, axis=(1, 2))]
+                        prev_frames = np.clip(alive_frame - np.arange(20),
+                                              a_min=0,
+                                              a_max=num_frames - 1)
+                        prev_masks = f['Segmentations']['Phase'][
+                            prev_frames][:]  # fancy indexing on hdf5 5 files possible?
+                        valid_prev_frames = prev_frames[np.any(
+                            prev_masks == cell_idx, axis=(1, 2))]
 
-                        next_frames = np.clip(alive_frame + np.arange(1, 21), a_min=0, a_max=num_frames - 1)
-                        next_masks = f['Segmentations']['Phase'][next_frames][:]    
-                        valid_next_frames = next_frames[np.any(next_masks == cell_idx, axis=(1, 2))]
+                        next_frames = np.clip(alive_frame + np.arange(1, 21),
+                                              a_min=0,
+                                              a_max=num_frames - 1)
+                        next_masks = f['Segmentations']['Phase'][
+                            next_frames][:]
+                        valid_next_frames = next_frames[np.any(
+                            next_masks == cell_idx, axis=(1, 2))]
 
-                        if len(valid_prev_frames) == 0 and len(valid_next_frames) == 0:
+                        if len(valid_prev_frames) == 0 and len(
+                                valid_next_frames) == 0:
                             continue
 
-                        prev_mask = f['Segmentations']['Phase'][np.max(valid_prev_frames)][:]
-                        next_mask = f['Segmentations']['Phase'][np.min(valid_next_frames)][:]
+                        prev_mask = f['Segmentations']['Phase'][np.max(
+                            valid_prev_frames)][:]
+                        next_mask = f['Segmentations']['Phase'][np.min(
+                            valid_next_frames)][:]
 
-                        crop_mask = np.logical_and(prev_mask == cell_idx, next_mask == cell_idx)
+                        crop_mask = np.logical_and(prev_mask == cell_idx,
+                                                   next_mask == cell_idx)
                     else:
                         crop_mask = mask
 
@@ -204,8 +242,10 @@ def get_finetuning_dataset(
                     image, mask = crop_image_and_mask(image, crop_mask)
 
                     image_file = f'{cell_idx}_{alive_frame}_alive.jpeg'
-                    
-                    seg_found = mask_funcs.add_coco_annotation(coco_json, image_file, mask, image_id, annotation_id, 1)
+
+                    seg_found = mask_funcs.add_coco_annotation(
+                        coco_json, image_file, mask, image_id, annotation_id,
+                        1)
 
                     if seg_found == 1:
                         image_file = f'{cell_idx}_{alive_frame}_alive.jpeg'
@@ -213,38 +253,54 @@ def get_finetuning_dataset(
                     else:
                         image_file = f'ANNOTATE_{cell_idx}_{alive_frame}_alive.jpeg'
 
-                    plt.imsave(images_dir / image_file, image / 255, cmap='gray')
-                    
+                    plt.imsave(images_dir / image_file,
+                               image / 255,
+                               cmap='gray')
+
                     image_id += 1
- 
 
                 # Dead frames
-                dead_frames_sample = np.random.choice(np.arange(1, 10), 2, replace=False)
+                dead_frames_sample = np.random.choice(np.arange(1, 10),
+                                                      2,
+                                                      replace=False)
                 for dead_frame in death_frame + dead_frames_sample:
 
                     if dead_frame > num_frames - 1:
                         continue
 
-                    mask = f['Segmentations']['Phase'][dead_frame][:] == cell_idx
+                    mask = f['Segmentations']['Phase'][
+                        dead_frame][:] == cell_idx
 
                     if not mask.any():
                         # find closest mask before and after and add to get crop coordinates
 
-                        prev_frames = np.clip(dead_frame - np.arange(20), a_min=0, a_max=num_frames - 1)
-                        prev_masks = f['Segmentations']['Phase'][prev_frames][:]  # fancy indexing on hdf5 5 files possible?
-                        valid_prev_frames = prev_frames[np.any(prev_masks == cell_idx, axis=(1, 2))]
+                        prev_frames = np.clip(dead_frame - np.arange(20),
+                                              a_min=0,
+                                              a_max=num_frames - 1)
+                        prev_masks = f['Segmentations']['Phase'][
+                            prev_frames][:]  # fancy indexing on hdf5 5 files possible?
+                        valid_prev_frames = prev_frames[np.any(
+                            prev_masks == cell_idx, axis=(1, 2))]
 
-                        next_frames = np.clip(dead_frame + np.arange(1, 21), a_min=0, a_max=num_frames - 1)
-                        next_masks = f['Segmentations']['Phase'][next_frames][:]    
-                        valid_next_frames = next_frames[np.any(next_masks == cell_idx, axis=(1, 2))]
+                        next_frames = np.clip(dead_frame + np.arange(1, 21),
+                                              a_min=0,
+                                              a_max=num_frames - 1)
+                        next_masks = f['Segmentations']['Phase'][
+                            next_frames][:]
+                        valid_next_frames = next_frames[np.any(
+                            next_masks == cell_idx, axis=(1, 2))]
 
-                        if len(valid_prev_frames) == 0 and len(valid_next_frames) == 0:
+                        if len(valid_prev_frames) == 0 and len(
+                                valid_next_frames) == 0:
                             continue
 
-                        prev_mask = f['Segmentations']['Phase'][np.max(valid_prev_frames)][:]
-                        next_mask = f['Segmentations']['Phase'][np.min(valid_next_frames)][:]
+                        prev_mask = f['Segmentations']['Phase'][np.max(
+                            valid_prev_frames)][:]
+                        next_mask = f['Segmentations']['Phase'][np.min(
+                            valid_next_frames)][:]
 
-                        crop_mask = np.logical_and(prev_mask == cell_idx, next_mask == cell_idx)
+                        crop_mask = np.logical_and(prev_mask == cell_idx,
+                                                   next_mask == cell_idx)
                     else:
                         crop_mask = mask
 
@@ -253,8 +309,10 @@ def get_finetuning_dataset(
                     image, mask = crop_image_and_mask(image, crop_mask)
 
                     image_file = f'{cell_idx}_{dead_frame}_dead.jpeg'
-                    
-                    seg_found = mask_funcs.add_coco_annotation(coco_json, image_file, mask, image_id, annotation_id, 1)
+
+                    seg_found = mask_funcs.add_coco_annotation(
+                        coco_json, image_file, mask, image_id, annotation_id,
+                        1)
 
                     if seg_found == 1:
                         image_file = f'{cell_idx}_{dead_frame}_dead.jpeg'
@@ -262,10 +320,12 @@ def get_finetuning_dataset(
                     else:
                         image_file = f'ANNOTATE_{cell_idx}_{dead_frame}_dead.jpeg'
 
-                    plt.imsave(images_dir / image_file, image / 255, cmap='gray')
+                    plt.imsave(images_dir / image_file,
+                               image / 255,
+                               cmap='gray')
 
                     image_id += 1
- 
+
             if include_wrong_segs:
                 cell_idxs = wrong_segmentations['Cell Idx']
                 # val_count = max(1, int(len(cell_ids) * 0.2))
@@ -278,7 +338,8 @@ def get_finetuning_dataset(
                     coco_json = settings['coco_json']
                     images_dir = settings['images']
 
-                    frames = np.nonzero(~np.isnan(f['Cells']['Phase']['Area'][:, cell_idx]))[0]
+                    frames = np.nonzero(
+                        ~np.isnan(f['Cells']['Phase']['Area'][:, cell_idx]))[0]
                     frame = np.random.choice(frames)
 
                     mask = f['Segmentations']['Phase'][frame] == cell_idx
@@ -292,9 +353,11 @@ def get_finetuning_dataset(
                         "width": image.shape[1],
                         "height": image.shape[0],
                         "file_name": image_file,
-                        })
-                    
-                    plt.imsave(images_dir / image_file, image / 255, cmap='gray')
+                    })
+
+                    plt.imsave(images_dir / image_file,
+                               image / 255,
+                               cmap='gray')
                     image_id += 1
                     pbar.update(1)
 
@@ -305,16 +368,18 @@ def get_finetuning_dataset(
                 coco_json = settings['coco_json']
                 images_dir = settings['images']
 
-                num_samples = len(crops) / 2 # Get approximately same number of no cell images as alive/dead cell images
+                num_samples = len(
+                    crops
+                ) / 2  # Get approximately same number of no cell images as alive/dead cell images
                 attempts = 0
                 added = 0
-                max_attempts = len(crops) * 20  # avoid infinite loop   
+                max_attempts = len(crops) * 20  # avoid infinite loop
 
                 coco_json = settings['coco_json']
 
                 while added < num_samples and attempts < max_attempts:
                     attempts += 1
-                    frame = random.randint(0, num_frames - 1)      
+                    frame = random.randint(0, num_frames - 1)
 
                     h_crop, w_crop = random.choice(crops)
 
@@ -324,21 +389,27 @@ def get_finetuning_dataset(
                     x_0 = random.randint(0, image_h - h_crop)
                     y_0 = random.randint(0, image_w - w_crop)
 
-                    mask_crop = f['Segmentations']['Phase'][frame][x_0:x_0+h_crop, y_0:y_0+w_crop]
+                    mask_crop = f['Segmentations']['Phase'][frame][x_0:x_0 +
+                                                                   h_crop,
+                                                                   y_0:y_0 +
+                                                                   w_crop]
                     if (mask_crop >= 0).any():
                         continue
 
-                    image = f['Images']['Phase'][frame][x_0:x_0+h_crop, y_0:y_0+w_crop]
+                    image = f['Images']['Phase'][frame][x_0:x_0 + h_crop,
+                                                        y_0:y_0 + w_crop]
                     image_file = f'no_cell_{added}.jpeg'
 
-                    plt.imsave(images_dir / image_file, image / 255, cmap='gray')
+                    plt.imsave(images_dir / image_file,
+                               image / 255,
+                               cmap='gray')
                     coco_json["images"].append({
                         "id": image_id,
                         "width": image.shape[1],
                         "height": image.shape[0],
                         "file_name": image_file,
-                        })
-                    
+                    })
+
                     image_id += 1
                     added += 1
                     pbar.update(1)
@@ -349,7 +420,8 @@ def get_finetuning_dataset(
                     coco_json = settings['coco_json']
                     images_dir = settings['images']
 
-                    frames = np.nonzero(~np.isnan(f['Cells']['Phase']['Area'][:, cell_idx]))[0]
+                    frames = np.nonzero(
+                        ~np.isnan(f['Cells']['Phase']['Area'][:, cell_idx]))[0]
                     frame = np.random.choice(frames)
 
                     mask = f['Segmentations']['Phase'][frame] == cell_idx
@@ -363,12 +435,13 @@ def get_finetuning_dataset(
                         "width": image.shape[1],
                         "height": image.shape[0],
                         "file_name": image_file,
-                        })
-                    
-                    plt.imsave(images_dir / image_file, image / 255, cmap='gray')
+                    })
+
+                    plt.imsave(images_dir / image_file,
+                               image / 255,
+                               cmap='gray')
                     image_id += 1
                     pbar.update(1)
-
 
         pbar.close()
 
@@ -380,6 +453,7 @@ def get_finetuning_dataset(
     #     with open(dirs[split]['json_file'], 'w') as f:
     #         json.dump(dirs[split]['coco_json'], f)
 
+
 # class ClassOnlyFastRCNNOutputLayers(FastRCNNOutputLayers):
 #     def __init__(self, input_shape, *, box2box_transform, num_classes, **kwargs):
 #         super().__init__(
@@ -388,61 +462,64 @@ def get_finetuning_dataset(
 #             num_classes=num_classes,
 #             **kwargs
 #         )
-    # def losses(self, predictions, proposals):
-    #     """
-    #     Override loss to ignore background class and optionally ignore box regression loss.
-    #     """
-    #     scores, proposal_deltas = predictions
-    #     device = scores.device
+# def losses(self, predictions, proposals):
+#     """
+#     Override loss to ignore background class and optionally ignore box regression loss.
+#     """
+#     scores, proposal_deltas = predictions
+#     device = scores.device
 
-    #     # Concatenate ground truth classes from proposals
-    #     gt_classes = cat([p.gt_classes for p in proposals], dim=0) if len(proposals) else torch.empty(0, dtype=torch.int64, device=device)
+#     # Concatenate ground truth classes from proposals
+#     gt_classes = cat([p.gt_classes for p in proposals], dim=0) if len(proposals) else torch.empty(0, dtype=torch.int64, device=device)
 
-    #     # Filter out background (class == num_classes)
-    #     is_foreground = gt_classes < self.num_classes
-    #     scores_fg = scores[is_foreground]
-    #     gt_classes_fg = gt_classes[is_foreground]
+#     # Filter out background (class == num_classes)
+#     is_foreground = gt_classes < self.num_classes
+#     scores_fg = scores[is_foreground]
+#     gt_classes_fg = gt_classes[is_foreground]
 
-    #     if len(gt_classes_fg) == 0:
-    #         # no foreground samples in this batch: return zero loss
-    #         loss_cls = torch.tensor(0.0, device=device, requires_grad=True)
-    #     else:
-    #         loss_cls = F.cross_entropy(scores_fg, gt_classes_fg)
+#     if len(gt_classes_fg) == 0:
+#         # no foreground samples in this batch: return zero loss
+#         loss_cls = torch.tensor(0.0, device=device, requires_grad=True)
+#     else:
+#         loss_cls = F.cross_entropy(scores_fg, gt_classes_fg)
 
-    #     # Option 1: ignore box regression loss completely
-    #     loss_box_reg = torch.tensor(0.0, device=device, requires_grad=True)
+#     # Option 1: ignore box regression loss completely
+#     loss_box_reg = torch.tensor(0.0, device=device, requires_grad=True)
 
-    #     # Option 2: If you want to keep box loss, uncomment below and comment Option 1 above
-    #     # proposal_boxes = [p.proposal_boxes for p in proposals]
-    #     # gt_boxes = [p.gt_boxes for p in proposals]
-    #     # loss_box_reg = self.box_reg_loss(proposal_deltas, proposal_boxes, gt_boxes, gt_classes)
-        
-    #     print(f"scores device: {scores.device}")
-    #     print(f"proposal_deltas device: {proposal_deltas.device}")
-    #     for p in proposals:
-    #         print(f"proposal gt_classes device: {p.gt_classes.device}")
+#     # Option 2: If you want to keep box loss, uncomment below and comment Option 1 above
+#     # proposal_boxes = [p.proposal_boxes for p in proposals]
+#     # gt_boxes = [p.gt_boxes for p in proposals]
+#     # loss_box_reg = self.box_reg_loss(proposal_deltas, proposal_boxes, gt_boxes, gt_classes)
 
-    #     return {
-    #         "loss_cls": loss_cls,
-    #         "loss_box_reg": loss_box_reg,
-    #     }     
-    
+#     print(f"scores device: {scores.device}")
+#     print(f"proposal_deltas device: {proposal_deltas.device}")
+#     for p in proposals:
+#         print(f"proposal gt_classes device: {p.gt_classes.device}")
+
+#     return {
+#         "loss_cls": loss_cls,
+#         "loss_box_reg": loss_box_reg,
+#     }
+
+
 class ClassifierHeadFineTuner(train.MyTrainer):
     """Freeze everything except classification head, and remove all augemtnations in mapper (can't set augmentation sizes to image size like in MyTrainer as image crop sizes vary)."""
+
     def build_hooks(self):
         hooks = super().build_hooks()
-        hooks.insert(-1, train.LossEvalHook(
-            self.cfg.TEST.EVAL_PERIOD,
-            self.model,
-            build_detection_test_loader(
-                self.cfg,
-                self.cfg.DATASETS.TEST[0],
-                # DatasetMapper(self.cfg, True),
-                mapper = no_resize_mapper,
-            )
-        ))
+        hooks.insert(
+            -1,
+            train.LossEvalHook(
+                self.cfg.TEST.EVAL_PERIOD,
+                self.model,
+                build_detection_test_loader(
+                    self.cfg,
+                    self.cfg.DATASETS.TEST[0],
+                    # DatasetMapper(self.cfg, True),
+                    mapper=no_resize_mapper,
+                )))
         return hooks
-    
+
     # @classmethod
     # def build_optimizer(cls, cfg, model):
     #     """Freezes everything but classification head
@@ -459,12 +536,12 @@ class ClassifierHeadFineTuner(train.MyTrainer):
 
     #         # else:
     #         #     param.requires_grad = False
-        
+
     #     return torch.optim.Adam(
     #         [p for p in model.parameters() if p.requires_grad],
     #         lr=cfg.SOLVER.BASE_LR
     #     )
-    
+
     # @classmethod
     # def build_model(cls, cfg):
     #     model = super().build_model(cfg)
@@ -474,19 +551,22 @@ class ClassifierHeadFineTuner(train.MyTrainer):
     def build_train_loader(cls, cfg):
         """Set mapper as no resize mapper,"""
         return build_detection_train_loader(cfg, mapper=no_resize_mapper)
-    
+
     @classmethod
     def build_test_loader(cls, cfg, dataset_name):
         # if dataset_name is None:
         #     dataset_name = cfg.DATASETS.TEST[0]
-        return build_detection_test_loader(cfg, 
-                                           dataset_name,
-                                        #    mapper=DatasetMapper(cfg, is_train=False),
-                                           mapper=no_resize_mapper,
-                                           )
+        return build_detection_test_loader(
+            cfg,
+            dataset_name,
+            #    mapper=DatasetMapper(cfg, is_train=False),
+            mapper=no_resize_mapper,
+        )
+
 
 # NOT USED IGNORE
 class CustomWeightedROIHeads(StandardROIHeads):
+
     def __init__(self, cfg, input_shape):
         super().__init__(cfg, input_shape)
         # Set your weights here
@@ -511,6 +591,7 @@ class CustomWeightedROIHeads(StandardROIHeads):
 
         return losses
 
+
 def no_resize_mapper(dataset_dict):
     """
     A custom mapper that loads image and annotations *without* resizing.
@@ -526,7 +607,7 @@ def no_resize_mapper(dataset_dict):
     #                         T.RandomFlip(prob=0.5, horizontal=False, vertical=True),
     #                            ])
     augs = T.AugmentationList([])
-    
+
     aug_input = T.AugInput(image)
 
     h, w = aug_input.image.shape[:2]
@@ -541,7 +622,8 @@ def no_resize_mapper(dataset_dict):
             utils.transform_instance_annotations(obj, transforms, (h, w))
             for obj in dataset_dict.pop("annotations")
         ]
-        dataset_dict["instances"] = utils.annotations_to_instances(annos, (h, w))
+        dataset_dict["instances"] = utils.annotations_to_instances(
+            annos, (h, w))
 
     return dataset_dict
 
@@ -560,22 +642,26 @@ def fine_tune(directory=SETTINGS.MASK_RCNN_MODEL):
 
     dataset_dir = directory / 'Fine_Tuning_Data'
     config_directory = directory / 'Model'
-    register_coco_instances("my_dataset_train", {}, str(dataset_dir / 'train' / 'labels.json'), str(dataset_dir / 'train' / 'images'))
-    register_coco_instances("my_dataset_val", {},str(dataset_dir / 'validate' / 'labels.json'), str(dataset_dir / 'validate' / 'images'))
+    register_coco_instances("my_dataset_train", {},
+                            str(dataset_dir / 'train' / 'labels.json'),
+                            str(dataset_dir / 'train' / 'images'))
+    register_coco_instances("my_dataset_val", {},
+                            str(dataset_dir / 'validate' / 'labels.json'),
+                            str(dataset_dir / 'validate' / 'images'))
 
     train_metadata = MetadataCatalog.get("my_dataset_train")
-    
+
     cfg = get_cfg()
     add_validation_config(cfg)  # config.yaml carries a VALIDATION node
     cfg.merge_from_file(str(directory / 'Model' / 'config.yaml'))
     cfg.OUTPUT_DIR = str(directory / 'Model')
     cfg.MODEL.WEIGHTS = str(directory / 'Model' / 'model_final.pth')
-    cfg.SOLVER.BASE_LR = 2.5e-4 # Decrease learnign rate for fine tuning (was 0.00025 for main training)
-    cfg.SOLVER.IMS_PER_BATCH = 2 # Avoids issues with collating images of different sizes
+    cfg.SOLVER.BASE_LR = 2.5e-4  # Decrease learnign rate for fine tuning (was 0.00025 for main training)
+    cfg.SOLVER.IMS_PER_BATCH = 2  # Avoids issues with collating images of different sizes
     cfg.SOLVER.MAX_ITER = 1000
     cfg.TEST.EVAL_PERIOD = 10000
-    cfg.DATASETS.TRAIN = ("my_dataset_train",)
-    cfg.DATASETS.TEST = ("my_dataset_val",)
+    cfg.DATASETS.TRAIN = ("my_dataset_train", )
+    cfg.DATASETS.TEST = ("my_dataset_val", )
     # cfg.MODEL.ROI_HEADS.NAME = "CustomWeightedROIHeads"
     cfg.MODEL.ROI_HEADS.NAME = 'StandardROIHeads'
     cfg.DATALOADER.FILTER_EMPTY_ANNOTATIONS = False
@@ -585,23 +671,31 @@ def fine_tune(directory=SETTINGS.MASK_RCNN_MODEL):
     trainer.train()
 
     plot_loss(config_directory)
-    
+
 
 def plot_loss(cfg_dir):
+
     def load_json_arr(json_path):
         lines = []
         with open(json_path, 'r') as f:
             for line in f:
                 lines.append(json.loads(line))
         return lines
-    
+
     experiment_metrics = load_json_arr(cfg_dir / 'metrics.json')
     plt.clf()
     plt.rcParams["font.family"] = 'serif'
-    plt.scatter([x['iteration'] for x in experiment_metrics if 'total_loss' in x], [x['total_loss'] for x in experiment_metrics if 'total_loss' in x], color='navy')
+    plt.scatter(
+        [x['iteration'] for x in experiment_metrics if 'total_loss' in x],
+        [x['total_loss'] for x in experiment_metrics if 'total_loss' in x],
+        color='navy')
     plt.scatter(
         [x['iteration'] for x in experiment_metrics if 'validation_loss' in x],
-        [x['validation_loss'] for x in experiment_metrics if 'validation_loss' in x], color='red')
+        [
+            x['validation_loss']
+            for x in experiment_metrics if 'validation_loss' in x
+        ],
+        color='red')
     plt.legend(['Training Loss', 'Validation Loss'], loc='upper left')
     plt.savefig(cfg_dir / 'loss_plot.png')
     plt.clf()
@@ -615,6 +709,7 @@ def main():
     fine_tune()
     # get_finetuning_dataset()
     # plot_loss(Path("PhagoPred/detectron_segmentation/models/27_05_mac_finetune/Model"))
+
 
 if __name__ == '__main__':
     main()

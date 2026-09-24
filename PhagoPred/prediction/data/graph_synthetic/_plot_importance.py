@@ -4,8 +4,8 @@ from typing import Literal
 import numpy as np
 import matplotlib.pyplot as plt
 
-from PhagoPred.survival_v2.data.graph_synthetic.scenarios import ALL_CFGS
-from PhagoPred.survival_v2.data.graph_synthetic.analytic_estimates import (
+from PhagoPred.prediction.data.graph_synthetic.scenarios import ALL_CFGS
+from PhagoPred.prediction.data.graph_synthetic.analytic_estimates import (
     generate_sample_with_feature_importance,
     generate_sample_with_feature_importance_batched,
     sampleWithImportances,

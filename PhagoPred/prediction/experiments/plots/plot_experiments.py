@@ -8,8 +8,8 @@ from functools import partial
 import matplotlib.pyplot as plt
 import numpy as np
 
-from PhagoPred.survival_v2.configs.io import ExperimentCfg, load_experiment_cfg
-from PhagoPred.survival_v2.evaluate import BinaryResults, SurvivalResults
+from PhagoPred.prediction.configs.io import ExperimentCfg, load_experiment_cfg
+from PhagoPred.prediction.evaluate import BinaryResults, SurvivalResults
 from PhagoPred.utils.logger import get_logger
 from .experiment_record_dataclass import ExperimentRecord
 from .plot_boxplots import plot_box_plots

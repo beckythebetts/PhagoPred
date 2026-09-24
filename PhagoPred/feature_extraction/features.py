@@ -17,10 +17,6 @@ import skan  #skeletonising
 import ctypes
 from pathlib import Path
 
-# CuPy/cuCIM load libnvrtc.so.12 via ctypes at runtime, but the version pip
-# installs (nvidia-cuda-nvrtc-cu12) sits in a package directory that isn't on
-# the dynamic linker's search path. Preload it explicitly so CuPy finds it
-# regardless of LD_LIBRARY_PATH.
 import nvidia.cuda_nvrtc
 
 ctypes.CDLL(

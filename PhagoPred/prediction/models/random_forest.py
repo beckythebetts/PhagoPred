@@ -15,7 +15,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 
 from PhagoPred.utils.logger import get_logger
-from PhagoPred.survival_v2.data import (
+from PhagoPred.prediction.data import (
     BinaryTemporalSummaryDataset,
     SurvivalTemopralSummaryDataset,
 )
@@ -168,8 +168,8 @@ class RandomSurvivalForestModel(ClassicalSurvivalModel):
             # variable (often num_bins + 1) column count that misaligns with the
             # bin grid. Evaluate the survival step functions on the fixed bin
             # grid instead so the PMF is always exactly num_bins wide.
-            step_fns = self.model.predict_survival_function(
-                input_features, return_array=False)
+            step_fns = self.model.predict_survival_function(input_features,
+                                                            return_array=False)
             # Clip to the model's last observed time; the survival function is
             # flat beyond it, and evaluating past the domain would raise.
             bin_times = np.clip(np.arange(self.num_bins), None,

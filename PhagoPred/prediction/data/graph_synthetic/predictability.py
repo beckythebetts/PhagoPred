@@ -154,7 +154,7 @@ log = get_logger()
 #         plt.show()
 
 if __name__ == '__main__':
-    from PhagoPred.survival_v2.data.graph_synthetic.scenarios import (
+    from PhagoPred.prediction.data.graph_synthetic.scenarios import (
         _linear,
         _chain,
         _multiplicative,

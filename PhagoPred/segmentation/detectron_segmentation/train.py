@@ -46,7 +46,7 @@ import json
 
 from PhagoPred.utils import tools
 from PhagoPred import SETTINGS
-from PhagoPred.detectron_segmentation.config import add_validation_config
+from PhagoPred.segmentation.detectron_segmentation.config import add_validation_config
 
 TORCH_VERSION = ".".join(torch.__version__.split(".")[:2])
 CUDA_VERSION = torch.__version__.split("+")[-1]

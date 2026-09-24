@@ -14,9 +14,9 @@ from urllib.parse import urlparse
 import torch
 
 from PhagoPred import SETTINGS
-from PhagoPred.cellpose_segmentation import threshold_epi
-from PhagoPred.cellpose_segmentation.upsample import (DEFAULT_SIGMA_LOW_RES,
-                                                      upsample_labels)
+from PhagoPred.segmentation.cellpose_segmentation import threshold_epi
+from PhagoPred.segmentation.cellpose_segmentation.upsample import (
+    DEFAULT_SIGMA_LOW_RES, upsample_labels)
 
 
 def seg_dataset(h5_file: Path,

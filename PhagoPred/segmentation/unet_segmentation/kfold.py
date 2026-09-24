@@ -4,18 +4,21 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import torch
 
+from PhagoPred.segmentation.unet_segmentation import eval
 from PhagoPred.utils import tools
-from PhagoPred.unet_segmentation import train, eval
+from PhagoPred.segmentation.unet_segmentation import train
+
 
 class KFold:
 
     def __init__(self, directory):
         self.directory = directory
         self.ims = sorted([im for im in (self.directory / 'images').iterdir()])
-        self.masks = sorted([im for im in (self.directory / 'masks').iterdir()])
+        self.masks = sorted(
+            [im for im in (self.directory / 'masks').iterdir()])
 
     def split_all(self, num_val=4):
-        for i in range(int(len(self.ims)/num_val)):
+        for i in range(int(len(self.ims) / num_val)):
             training_data = self.directory / f'model_{i}' / 'Training_Data'
 
             tools.remake_dir(training_data / 'train' / 'images')
@@ -23,17 +26,24 @@ class KFold:
             tools.remake_dir(training_data / 'train' / 'masks')
             tools.remake_dir(training_data / 'validate' / 'masks')
 
-            val_ims = [self.ims[((i*num_val)+x) % len(self.ims)] for x in range(num_val)]
+            val_ims = [
+                self.ims[((i * num_val) + x) % len(self.ims)]
+                for x in range(num_val)
+            ]
             train_ims = [im for im in self.ims if im not in val_ims]
 
             for im in self.ims:
                 if im in val_ims:
-                    shutil.copy(im, training_data / 'validate' / 'images' / im.name)
-                    shutil.copy(self.directory / 'masks' / im.name, training_data / 'validate' / 'masks' / im.name)
+                    shutil.copy(
+                        im, training_data / 'validate' / 'images' / im.name)
+                    shutil.copy(self.directory / 'masks' / im.name,
+                                training_data / 'validate' / 'masks' / im.name)
 
                 elif im in train_ims:
-                    shutil.copy(im, training_data / 'train' / 'images' / im.name)
-                    shutil.copy(self.directory / 'masks' / im.name, training_data / 'train' / 'masks' / im.name)
+                    shutil.copy(im,
+                                training_data / 'train' / 'images' / im.name)
+                    shutil.copy(self.directory / 'masks' / im.name,
+                                training_data / 'train' / 'masks' / im.name)
 
     def train_and_eval(self):
         for file in self.directory.glob('*model*'):
@@ -59,10 +69,12 @@ class KFold:
 
 
 def main():
-    kfold = KFold(Path('PhagoPred') / 'unet_segmentation' / 'models' / '20x_flir_8')
+    kfold = KFold(
+        Path('PhagoPred') / 'unet_segmentation' / 'models' / '20x_flir_8')
     # kfold.split_all()
     kfold.train_and_eval()
     # kfold.plot_loss()
+
 
 if __name__ == '__main__':
     main()

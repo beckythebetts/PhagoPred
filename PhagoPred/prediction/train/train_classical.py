@@ -1,5 +1,5 @@
-from PhagoPred.survival_v2.models import ClassicalSurvivalModel
-from PhagoPred.survival_v2.data import CellDataset
+from PhagoPred.prediction.models import ClassicalSurvivalModel
+from PhagoPred.prediction.data import CellDataset
 
 
 def train_classical(model: ClassicalSurvivalModel,

@@ -6,9 +6,9 @@ import numpy as np
 import torch
 
 from PhagoPred.utils.logger import get_logger
-from PhagoPred.survival_v2.utils.io import load_dataset
-from PhagoPred.survival_v2.data.dataset import collate_fn
-from PhagoPred.survival_v2.interpret import SampleWithSHAP
+from PhagoPred.prediction.utils.io import load_dataset
+from PhagoPred.prediction.data.dataset import collate_fn
+from PhagoPred.prediction.interpret import SampleWithSHAP
 
 log = get_logger()
 
@@ -59,7 +59,7 @@ def load_background_pool(
 
     feature_names = model_feat_names or samples[0].feature_names
     aligned = ([align_sample_features(s, feature_names) for s in samples]
-              if model_feat_names else [s.feature_vals for s in samples])
+               if model_feat_names else [s.feature_vals for s in samples])
 
     max_t = max(a.shape[1] for a in aligned)
     K = len(feature_names)
@@ -168,8 +168,7 @@ def _generate_samples(
                 and 'time_to_event' in batch
                 and batch['time_to_event'] is not None):
             if int(batch['event_indicator'][i]) == 1:
-                death_frame = landmark_frame + float(
-                    batch['time_to_event'][i])
+                death_frame = landmark_frame + float(batch['time_to_event'][i])
 
         sample = SampleWithSHAP(
             feature_vals=feature_vals,

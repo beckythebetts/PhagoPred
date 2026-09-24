@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import torch
 
-from PhagoPred.survival_v2.data import (
+from PhagoPred.prediction.data import (
     BinaryCell,
     SurvivalCell,
     BinaryCellBatch,
     SurvivalCellBatch,
     BinaryClassCell,
 )
-from PhagoPred.survival_v2.configs.losses import LossCfg, SurvivalLossCfg, BinaryLossCfg
+from PhagoPred.prediction.configs.losses import LossCfg, SurvivalLossCfg, BinaryLossCfg
 from PhagoPred.utils.logger import get_logger
 from .survival_losses import (
     soft_target_nll,

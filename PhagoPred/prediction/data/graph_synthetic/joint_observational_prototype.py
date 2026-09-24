@@ -36,28 +36,34 @@ Known limitations (production work, not yet done)
 import numpy as np
 from scipy.linalg import solve_triangular, cholesky
 
-from PhagoPred.survival_v2.data.graph_synthetic.rules import (
+from PhagoPred.prediction.data.graph_synthetic.rules import (
     Rule, ReLU, Var, Apply, AutoCorrelationRule)
-from PhagoPred.survival_v2.data.graph_synthetic.graph import CausalGraph, Feature
-from PhagoPred.survival_v2.data.graph_synthetic import noise_funcs
+from PhagoPred.prediction.data.graph_synthetic.graph import CausalGraph, Feature
+from PhagoPred.prediction.data.graph_synthetic import noise_funcs
 
 S = 0.5
 RIDGE = 1e-8
 
 
 def lp(x, sc):
-    return -0.5 * (x / sc) ** 2 - np.log(sc * np.sqrt(2 * np.pi))
+    return -0.5 * (x / sc)**2 - np.log(sc * np.sqrt(2 * np.pi))
 
 
 def chain(lag=5, nonlinear=False):
-    feats = [Feature(n, pre_noise=noise_funcs.GaussianNoise(S),
-                     post_noise=noise_funcs.NoNoise())
-             for n in ('A', 'B', 'C', 'D')]
+    feats = [
+        Feature(n,
+                pre_noise=noise_funcs.GaussianNoise(S),
+                post_noise=noise_funcs.NoNoise()) for n in ('A', 'B', 'C', 'D')
+    ]
     feats.append(Feature('Hazard', pre_noise=noise_funcs.NoNoise()))
-    a_edge = (0.8 * Apply(np.tanh, Var('A', lag))) if nonlinear else (0.8 * Var('A', lag))
-    rules = [Rule('B', a_edge),
-             Rule('C', 0.8 * Var('B', lag)),
-             Rule('Hazard', ReLU(Var('C', lag)))]
+    a_edge = (0.8 *
+              Apply(np.tanh, Var('A', lag))) if nonlinear else (0.8 *
+                                                                Var('A', lag))
+    rules = [
+        Rule('B', a_edge),
+        Rule('C', 0.8 * Var('B', lag)),
+        Rule('Hazard', ReLU(Var('C', lag)))
+    ]
     rules += [AutoCorrelationRule(k, 1 - 1e-5) for k in ('A', 'B', 'C', 'D')]
     return CausalGraph(feats, rules, 500)
 
@@ -75,9 +81,11 @@ def edge_coeffs_at_base(graph, base_sig, lf):
                 for t in range(lf):
                     if t - lag < 0:
                         continue
-                    ctx = {(nm, lg): base_sig[nm][t - lg]
-                           for nm, lgs in rule.inputs.items() for lg in lgs
-                           if t - lg >= 0}
+                    ctx = {
+                        (nm, lg): base_sig[nm][t - lg]
+                        for nm, lgs in rule.inputs.items()
+                        for lg in lgs if t - lg >= 0
+                    }
                     coef[t] = rule.expr.partial(n, lag, ctx)
                 edges[rule.target].append((n, lag, coef))
     return obs, edges
@@ -86,7 +94,7 @@ def edge_coeffs_at_base(graph, base_sig, lf):
 def build_precision(obs, edges, lf, idx):
     n = len(idx)
     Q = np.zeros((n, n))
-    iv = 1.0 / S ** 2
+    iv = 1.0 / S**2
     for f in obs:
         for t in range(lf):
             terms = [(idx[(f, t)], 1.0)]
@@ -109,8 +117,11 @@ def true_log_prior(graph, past, obs, scales, lf, B):
             for rule in graph.rules:
                 if rule.target != f or t < rule.max_lag:
                     continue
-                ctx = {(nm, lg): past[nm][t - lg]
-                       for nm, lgs in rule.inputs.items() for lg in lgs}
+                ctx = {
+                    (nm, lg): past[nm][t - lg]
+                    for nm, lgs in rule.inputs.items()
+                    for lg in lgs
+                }
                 drift = drift + rule.expr(ctx)
             logp += lp(past[f][t] - drift, sc)
     return logp
@@ -135,11 +146,14 @@ def hazard_target(sig, lf, horizon):
     return 1.0 - np.prod(1.0 - h, axis=0)
 
 
-def joint_observational(graph, base_sig, base_noise, lf, horizon, nperm, B, seed):
+def joint_observational(graph, base_sig, base_noise, lf, horizon, nperm, B,
+                        seed):
     rng = np.random.default_rng(seed)
     obs, edges = edge_coeffs_at_base(graph, base_sig, lf)
-    scales = {f.name: float(getattr(f.pre_noise, 'sigma', 1.0))
-              for f in graph.features}
+    scales = {
+        f.name: float(getattr(f.pre_noise, 'sigma', 1.0))
+        for f in graph.features
+    }
     idx = {(f, t): fi * lf + t for fi, f in enumerate(obs) for t in range(lf)}
     inv_idx = {v: k for k, v in idx.items()}
     n = len(idx)
@@ -152,13 +166,16 @@ def joint_observational(graph, base_sig, base_noise, lf, horizon, nperm, B, seed
         perm = rng.permutation(n)
         inv = np.argsort(perm)
         present = inv[:, None] < np.arange(n + 1)[None, :]
-        base_normals = rng.normal(size=(n, B))          # common random numbers
+        base_normals = rng.normal(size=(n, B))  # common random numbers
         v = np.zeros(n + 1)
         for k in range(n + 1):
             pin = present[:, k]
             F = np.where(~pin)[0]
             P = np.where(pin)[0]
-            past = {f: np.repeat(base_sig[f][:lf, None], B, axis=1) for f in obs}
+            past = {
+                f: np.repeat(base_sig[f][:lf, None], B, axis=1)
+                for f in obs
+            }
             if len(F) > 0:
                 Qff = Q[np.ix_(F, F)]
                 Qfp = Q[np.ix_(F, P)]
@@ -183,7 +200,7 @@ def joint_observational(graph, base_sig, base_noise, lf, horizon, nperm, B, seed
             ww = np.exp(logw - logw.max())
             v[k] = (ww * tgt).sum() / ww.sum()
             if 0 < len(F) < n:
-                ess_log.append((ww.sum() ** 2) / (ww ** 2).sum())
+                ess_log.append((ww.sum()**2) / (ww**2).sum())
         marg = np.diff(v)
         contrib = np.zeros(n)
         contrib[perm] = marg
@@ -195,14 +212,15 @@ def run(nonlinear, seed=1):
     np.random.seed(seed)
     g = chain(lag=4, nonlinear=nonlinear)
     lf, horizon, B, nperm = 20, 8, 16, 40
-    from PhagoPred.survival_v2.data.graph_synthetic.analytic_estimates import _apply_rules
+    from PhagoPred.prediction.data.graph_synthetic.analytic_estimates import _apply_rules
     bn = {f.name: f.generate_signal(lf + horizon) for f in g.features}
     base = _apply_rules(g, bn, lf + horizon)
     m, obs, ess = joint_observational(g, base, bn, lf, horizon, nperm, B, seed)
     tag = 'NONLINEAR (0.8*tanh(A))' if nonlinear else 'LINEAR (0.8*A)'
     print('=== %s edge,  mean ESS=%.2f / %d ===' % (tag, ess, B))
     for j, f in enumerate(obs):
-        print('   %s  signed=%+.4f   |.|=%.4f' % (f, m[j].sum(), np.abs(m[j]).sum()))
+        print('   %s  signed=%+.4f   |.|=%.4f' %
+              (f, m[j].sum(), np.abs(m[j]).sum()))
     print()
 
 

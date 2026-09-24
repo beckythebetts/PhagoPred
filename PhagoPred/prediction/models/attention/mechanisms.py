@@ -3,7 +3,7 @@ from dataclasses import asdict
 import torch
 import torch.nn as nn
 
-from PhagoPred.survival_v2.configs.attention import AttentionCfg
+from PhagoPred.prediction.configs.attention import AttentionCfg
 
 
 class AttentionVector(nn.Module):

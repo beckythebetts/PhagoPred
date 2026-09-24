@@ -8,17 +8,17 @@ import h5py
 from tqdm import tqdm
 
 from PhagoPred.utils.logger import get_logger
-from PhagoPred.survival_v2.utils.io import load_model
-from PhagoPred.survival_v2.configs.datasets import BinaryDatasetCfg, SurvivalDatasetCfg
-from PhagoPred.survival_v2.interpret.ground_truth import infer_scenario, gt_get_samples
-from PhagoPred.survival_v2.interpret.model import get_samples as model_get_samples
-from PhagoPred.survival_v2.interpret.model.utils import (
+from PhagoPred.prediction.utils.io import load_model
+from PhagoPred.prediction.configs.datasets import BinaryDatasetCfg, SurvivalDatasetCfg
+from PhagoPred.prediction.interpret.ground_truth import infer_scenario, gt_get_samples
+from PhagoPred.prediction.interpret.model import get_samples as model_get_samples
+from PhagoPred.prediction.interpret.model.utils import (
     load_background_pool, background_rows_for_length)
-from PhagoPred.survival_v2.interpret.model.var_precision import fit_var
-from PhagoPred.survival_v2.interpret.model.kernel_shap import (
+from PhagoPred.prediction.interpret.model.var_precision import fit_var
+from PhagoPred.prediction.interpret.model.kernel_shap import (
     KernelSHAP, InterventionalBackground, ObservationalBackground,
     analyse_sample_in_file)
-from PhagoPred.survival_v2.interpret import plots
+from PhagoPred.prediction.interpret import plots
 
 log = get_logger()
 

@@ -23,8 +23,8 @@ import numpy as np
 from tqdm import tqdm
 
 from PhagoPred import SETTINGS
-from PhagoPred.cellpose_segmentation.upsample import (DEFAULT_SIGMA_LOW_RES,
-                                                      smooth_label_image)
+from PhagoPred.segmentation.cellpose_segmentation.upsample import (
+    DEFAULT_SIGMA_LOW_RES, smooth_label_image)
 
 
 def scale_factor_from_model(model_dir: Path) -> float:
@@ -64,8 +64,9 @@ def resmooth_dataset(h5_file: Path,
         done = int(group.attrs.get('SmoothedFrames', 0))
         n_frames = segmentations.shape[0]
         if done >= n_frames and not force:
-            print(f'{h5_file.name}/{channel}: already smoothed '
-                  f'(sigma={group.attrs.get("SmoothingSigmaLowRes")}), skipping')
+            print(
+                f'{h5_file.name}/{channel}: already smoothed '
+                f'(sigma={group.attrs.get("SmoothingSigmaLowRes")}), skipping')
             return
         if force:
             done = 0
@@ -98,10 +99,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('h5_files', nargs='+', type=Path)
     parser.add_argument('--channel', default='Phase')
-    parser.add_argument('--sigma',
-                        type=float,
-                        default=DEFAULT_SIGMA_LOW_RES,
-                        help='bandwidth in low-resolution pixels (default 0.5)')
+    parser.add_argument(
+        '--sigma',
+        type=float,
+        default=DEFAULT_SIGMA_LOW_RES,
+        help='bandwidth in low-resolution pixels (default 0.5)')
     parser.add_argument('--scale-factor',
                         type=float,
                         default=None,

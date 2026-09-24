@@ -8,11 +8,11 @@ import h5py
 from tqdm import tqdm
 from scipy import sparse as _sparse
 
-from PhagoPred.survival_v2.data.graph_synthetic import CausalGraph
-from PhagoPred.survival_v2.interpret import (SampleWithSHAP, SHAPResult,
-                                             ExplainerEnum, BackgroundEnum)
-from PhagoPred.survival_v2.interpret.precision import (ObservedPrecision,
-                                                       condition_and_sample)
+from PhagoPred.prediction.data.graph_synthetic import CausalGraph
+from PhagoPred.prediction.interpret import (SampleWithSHAP, SHAPResult,
+                                            ExplainerEnum, BackgroundEnum)
+from PhagoPred.prediction.interpret.precision import (ObservedPrecision,
+                                                      condition_and_sample)
 
 
 @dataclass
@@ -228,7 +228,7 @@ class _GroundTruthPrecision:
 def _observed_is_linear(graph: CausalGraph) -> bool:
     """True iff no rule targeting an *observed* feature is nonlinear.
     """
-    from PhagoPred.survival_v2.data.graph_synthetic import rules as R
+    from PhagoPred.prediction.data.graph_synthetic import rules as R
     nonlin = (R.ReLU, R.Sigmoid, R.Hill, R.Threshold, R.Apply, R.Min, R.Max,
               R.Abs, R.Pow)
 

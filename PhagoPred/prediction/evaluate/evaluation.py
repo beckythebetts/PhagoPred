@@ -1,9 +1,9 @@
 from typing import Union
 from pathlib import Path
 
-from PhagoPred.survival_v2.models import SurvivalModel, ClassicalSurvivalModel
-from PhagoPred.survival_v2.data import CellDataset, BinaryCellDataset, SurvivalCellDataset, BinaryClassDataset
-from PhagoPred.survival_v2.configs.datasets import DatasetCfg
+from PhagoPred.prediction.models import SurvivalModel, ClassicalSurvivalModel
+from PhagoPred.prediction.data import CellDataset, BinaryCellDataset, SurvivalCellDataset, BinaryClassDataset
+from PhagoPred.prediction.configs.datasets import DatasetCfg
 from .binary_evaluation import evaluate_binary_model, BinaryResults
 from .survival_evaluation import evaluate_survival_model, SurvivalResults
 

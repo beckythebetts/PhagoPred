@@ -5,7 +5,7 @@ from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 import numpy as np
 
-from PhagoPred.survival_v2.evaluate import BinaryResults, SurvivalResults
+from PhagoPred.prediction.evaluate import BinaryResults, SurvivalResults
 from PhagoPred.utils.logger import get_logger
 from .experiment_record_dataclass import ExperimentRecord
 from .utils import plot_med_range_on_ax

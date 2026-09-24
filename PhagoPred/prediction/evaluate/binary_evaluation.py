@@ -8,16 +8,16 @@ import numpy as np
 import torch
 from sklearn.metrics import confusion_matrix
 
-from PhagoPred.survival_v2.models import ClassicalSurvivalModel, SurvivalModel
-from PhagoPred.survival_v2.utils.plots import (
+from PhagoPred.prediction.models import ClassicalSurvivalModel, SurvivalModel
+from PhagoPred.prediction.utils.plots import (
     visualise_binary_prediction,
     plot_roc_curve,
     plot_binary_cm,
 )
-from PhagoPred.survival_v2.configs.datasets import DatasetCfg
+from PhagoPred.prediction.configs.datasets import DatasetCfg
 from PhagoPred.utils.logger import get_logger
 from PhagoPred.utils.tools import to_json_safe
-from PhagoPred.survival_v2.data import BinaryCellDataset, BinaryClassDataset, BinaryCellSample, BinaryClassCell, BinaryCell, binary_collate_fn, binary_class_collate_fn
+from PhagoPred.prediction.data import BinaryCellDataset, BinaryClassDataset, BinaryCellSample, BinaryClassCell, BinaryCell, binary_collate_fn, binary_class_collate_fn
 from .metrics import (
     reciever_operator_characteristic,
     mean_squared_error,

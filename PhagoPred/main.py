@@ -5,10 +5,11 @@ import h5py
 from tqdm import tqdm
 
 from PhagoPred import SETTINGS
-from PhagoPred.detectron_segmentation import segment, fine_tune_class, eval
-from PhagoPred.cellpose_segmentation import segment as cellpose_segment
+from PhagoPred.segmentation.detectron_segmentation import segment
+from PhagoPred.segmentation.cellpose_segmentation import segment as cellpose_segment
 from PhagoPred.feature_extraction import extract_features, clean_features, features
 from PhagoPred.feature_extraction.morphology.UMAP import UMAP_embedding
+from PhagoPred.segmentation.detectron_segmentation import eval, fine_tune_class
 from PhagoPred.utils.tools import fill_missing_cells, repack_hdf5, rechunk_hdf5, hdf5_needs_rechunk
 from PhagoPred.utils.dataset_creation import epi_background_correction, keep_only_group, truncate_hdf5, hdf5_from_tiffs, rename_group, hdf5_from_ome_tiffs, preprocessing
 import PhagoPred.display.GUI.main as GUI
@@ -39,91 +40,3 @@ if __name__ == '__main__':
         extract_features.extract_features(h5_file)
 
         shutil.move(h5_file, remote_datasets_dir)
-
-# if __name__ == '__main__':
-#     datasets = Path(
-#         '~/thor_server/MacrophageData/14_08/').expanduser().iterdir()
-#     # dataset
-#     h5_paths = [
-#         Path('PhagoPred') / 'Datasets' / 'B.h5',
-#         # "PhagoPred\\Datasets\\B.h5",
-#         # "C:\\Users\\php23rjb\\Downloads\\A.h5",
-#         # "C:\\Users\\php23rjb\\Downloads\\E.h5",
-#         # "C:\\Users\\php23rjb\\Downloads\\C.h5",
-#         # "C:\\Users\\php23rjb\\Downloads\\D.h5"
-#     ]
-#     for dataset in tqdm(
-#             datasets
-#             # h5_paths
-#             # # [
-#             # #     # Path('PhagoPred') / 'Datasets' / 'E.h5',
-#             # #     # Path('~/thor_server/06_03/K').expanduser(),
-#             # #     Path("C:\\Users\\php23rjb\\Downloads\\C.h5")
-#             # # ]
-#     ):
-#         # dataset = Path(dataset)
-#         # if dataset.name != '10_02_26_1':
-#         #     continue
-#         if not dataset.name == 'A.h5':
-#             continue
-#         # if dataset.name in ['Test', 'A', 'B', 'C', 'D', 'E']:
-#         #     continue
-#         # if not dataset.is_dir():
-#         #     continue
-#         # if dataset.stem in [
-#         #         'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-#         #         'N', 'O'
-#         # ]:
-#         #     continue
-
-#         print(f'Processing dataset: {dataset.name}')
-#         h5_file = Path('PhagoPred') / 'Datasets' / f'{dataset.stem}.h5'
-#         hdf5_from_tiffs(dataset, h5_file, frame_steps={'Phase': 3, 'Fluor': 1})
-#         rename_group(h5_file,
-#                      old_group_name='Images/Fluor',
-#                      new_group_name='Images/Epi')
-
-#         with h5py.File(h5_file, 'r') as f:
-#             SETTINGS.IMAGE_SIZE = f['Images'].attrs['Image size / pixels']
-#         dataset = h5_file
-
-#         # segment.seg_dataset(dataset=dataset)
-#         cellpose_segment.seg_dataset(dataset)
-#         trackpy_2_stage.run_tracking(dataset=dataset)
-#         extract_features.extract_features(
-#             dataset=dataset, phase_features=[features.FirstLastFrame()])
-
-#         fill_missing_cells(dataset=dataset)
-
-#         extract_features.extract_features(dataset=dataset)
-#         # extract_features.extract_features(dataset=h5_file,
-#         #                                   phase_features=[
-#         #                                       features.Fluorescence(),
-#         #                                       features.ExternalFluorescence()
-#         #                                   ])
-#         # shutil.move(h5_file, dataset)
-#         # shutil.move(
-#         #     dataset,
-#         #     Path('~/thor_server/MacrophageData/14_08/').expanduser() /
-#         #     dataset.name)
-#         extract_features.extract_features(dataset, [
-#             features.RegionProps(),
-#         ])
-# GUI.run(dataset=dataset)
-# truncate_hdf5(dataset, dataset.parent / f"truncated_{dataset.name}", start_frame = 0, end_frame=300)
-
-# trackpy.run_tracking()
-# extract_features.extract_features()
-# segment.main()
-# trackpy.main()
-# # save.main()
-# extract_features.main()
-# plots.main()
-# fitting.main()
-# napari_GUI.main()
-# model.main()
-# fine_tune_class.main()
-# eval.main()
-# losses.main()
-# train.main()
-# validate.main()

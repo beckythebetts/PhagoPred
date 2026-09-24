@@ -10,8 +10,8 @@ import numpy as np
 import torch
 import pickle
 
-from PhagoPred.survival_v2.data import TemporalSummary, CellDataset, BinaryTemporalSummaryDataset, SurvivalTemopralSummaryDataset
-from PhagoPred.survival_v2.probability_calib import (
+from PhagoPred.prediction.data import TemporalSummary, CellDataset, BinaryTemporalSummaryDataset, SurvivalTemopralSummaryDataset
+from PhagoPred.prediction.models.probability_calib import (
     TemperatureScalingResult,
     VectorScalingResult,
     PlattScalingResult,
@@ -122,9 +122,11 @@ class ClassicalSurvivalModel(ABC):
             if self.calibration is not None:
                 log_pmf = np.log(np.clip(predictions, 1e-8, 1.0))
                 if isinstance(self.calibration, TemperatureScalingResult):
-                    predictions = apply_temperature_scaling(log_pmf, self.calibration)
+                    predictions = apply_temperature_scaling(
+                        log_pmf, self.calibration)
                 elif isinstance(self.calibration, VectorScalingResult):
-                    predictions = apply_vector_scaling(log_pmf, self.calibration)
+                    predictions = apply_vector_scaling(log_pmf,
+                                                       self.calibration)
         return predictions
 
     @abstractmethod
