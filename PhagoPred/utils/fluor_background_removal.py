@@ -1,12 +1,14 @@
 import multiprocessing as mp
 from pathlib import Path
 
+from tqdm import tqdm
 import numpy as np
 import napari
 from qtpy.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
                             QPushButton, QComboBox, QSpinBox)
 from qtpy.QtCore import Qt
 import scipy.ndimage
+import cv2
 
 
 # --- Background removal functions ---
@@ -109,6 +111,14 @@ def rolling_ball_background(imgs: np.ndarray,
     result = queue.get()
     process.join()
     return result
+
+
+def gaussian_smooth(imgs: np.ndarray, sigma: float = 1.0) -> np.ndarray:
+    smoothed_ims = []
+    for im in tqdm(imgs, total=imgs.shape[0], desc='Smoothing images'):
+        smoothed_ims.append(
+            cv2.GaussianBlur(im, (0, 0), sigmaX=sigma, sigmaY=sigma))
+    return np.stack(smoothed_ims, axis=0)
 
 
 def n2v_denoise(imgs: np.ndarray,
