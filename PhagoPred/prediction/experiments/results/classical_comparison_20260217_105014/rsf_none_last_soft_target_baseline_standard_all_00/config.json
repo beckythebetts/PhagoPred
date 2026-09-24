@@ -1,0 +1,9 @@
+{
+  "name": "rsf_none_last_soft_target_baseline_standard_all",
+  "model": "rsf",
+  "attention": "none_last",
+  "loss": "soft_target",
+  "dataset": "baseline",
+  "training": "standard",
+  "feature_combo": "all"
+}

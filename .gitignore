@@ -11,11 +11,11 @@ detectron2/
 .idea/
 
 
-PhagoPred/cellpose_segmentation/Models
+PhagoPred/segmentation/cellpose_segmentation/Models
 PhagoPred/Datasets
 PhagoPred/datasets
-PhagoPred/detectron_segmentation/Models
-PhagoPred/detectron_segmentation/models
+PhagoPred/segmentation/detectron_segmentation/Models
+PhagoPred/segmentation/detectron_segmentation/models
 temp/
 PhagoPred/feature_extraction/morphology/UMAP_model_search
 PhagoPred/survival_v2/experiments/results

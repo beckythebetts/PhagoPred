@@ -1,0 +1,41 @@
+{
+  "temporal_baseline": NaN,
+  "feature_baseline": NaN,
+  "feature_names": [
+    "Area",
+    "Circularity",
+    "Displacement",
+    "Perimeter",
+    "Phagocytes within 100 pixels",
+    "Phagocytes within 250 pixels",
+    "Phagocytes within 500 pixels",
+    "Skeleton Branch Length Mean",
+    "Skeleton Branch Length Max",
+    "Skeleton Branch Length Std",
+    "Skeleton Branches",
+    "Skeleton Length",
+    "Speed",
+    "Major Axis Length",
+    "Minor Axis Length",
+    "Eccentricity"
+  ],
+  "feature_importance": {
+    "Area": 0.00016140688241386526,
+    "Circularity": 1.3752090914127361e-05,
+    "Displacement": 0.0001915770770645574,
+    "Perimeter": 0.00010797954564139409,
+    "Phagocytes within 100 pixels": 0.0003580444983536861,
+    "Phagocytes within 250 pixels": 0.00024587806807102846,
+    "Phagocytes within 500 pixels": 0.00013992843698796707,
+    "Skeleton Branch Length Mean": 0.00016995391581861593,
+    "Skeleton Branch Length Max": 0.0001782098866918825,
+    "Skeleton Branch Length Std": 0.0001800836147211417,
+    "Skeleton Branches": 0.00014682843773880034,
+    "Skeleton Length": 0.00016582128075988647,
+    "Speed": 0.00021109072442447894,
+    "Major Axis Length": 0.0001763217365365238,
+    "Minor Axis Length": 0.00013067467758156703,
+    "Eccentricity": 0.00022416793374114202
+  },
+  "temporal_feature_baseline": NaN
+}

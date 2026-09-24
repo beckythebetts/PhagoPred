@@ -1,0 +1,9 @@
+{
+  "name": "lstm_medium_none_last_soft_target_late_entry_extreme_standard_all",
+  "model": "lstm_medium",
+  "attention": "none_last",
+  "loss": "soft_target",
+  "dataset": "late_entry_extreme",
+  "training": "standard",
+  "feature_combo": "all"
+}

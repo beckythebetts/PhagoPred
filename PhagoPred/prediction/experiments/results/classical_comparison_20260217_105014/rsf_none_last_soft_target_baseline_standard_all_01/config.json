@@ -1,0 +1,25 @@
+{
+  "name": "rsf_none_last_soft_target_baseline_standard_all",
+  "model": "rsf",
+  "attention": "none_last",
+  "loss": "soft_target",
+  "dataset": "baseline",
+  "training": "standard",
+  "feature_combo": "all",
+  "normlisation_means": [
+    392.0718688964844,
+    21.708574295043945,
+    -0.016591206192970276,
+    8.14193058013916,
+    0.08558660000562668,
+    21.73712730407715
+  ],
+  "normlisation_stds": [
+    238.91867065429688,
+    17.898574829101562,
+    1.181550145149231,
+    194.5641326904297,
+    3.5422956943511963,
+    18.160829544067383
+  ]
+}

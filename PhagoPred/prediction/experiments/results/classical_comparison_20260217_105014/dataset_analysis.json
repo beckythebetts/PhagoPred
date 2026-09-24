@@ -1,0 +1,272 @@
+{
+  "cnn_medium_none_last_soft_target_baseline_standard_all_00": {
+    "dataset": "baseline",
+    "feature_combo": "all",
+    "model": "cnn_medium",
+    "train": {
+      "total": 1400,
+      "events": 106,
+      "censored": 1294
+    },
+    "val": {
+      "total": 600,
+      "events": 44,
+      "censored": 556
+    }
+  },
+  "cnn_medium_none_last_soft_target_baseline_standard_all_01": {
+    "dataset": "baseline",
+    "feature_combo": "all",
+    "model": "cnn_medium",
+    "train": {
+      "total": 1400,
+      "events": 106,
+      "censored": 1294
+    },
+    "val": {
+      "total": 600,
+      "events": 44,
+      "censored": 556
+    }
+  },
+  "cnn_medium_none_last_soft_target_baseline_standard_all_02": {
+    "dataset": "baseline",
+    "feature_combo": "all",
+    "model": "cnn_medium",
+    "train": {
+      "total": 1400,
+      "events": 106,
+      "censored": 1294
+    },
+    "val": {
+      "total": 600,
+      "events": 44,
+      "censored": 556
+    }
+  },
+  "cnn_medium_none_last_soft_target_late_entry_extreme_standard_all_00": {
+    "dataset": "late_entry_extreme",
+    "feature_combo": "all",
+    "model": "cnn_medium",
+    "train": {
+      "total": 1382,
+      "events": 76,
+      "censored": 1306
+    },
+    "val": {
+      "total": 592,
+      "events": 39,
+      "censored": 553
+    }
+  },
+  "cnn_medium_none_last_soft_target_late_entry_extreme_standard_all_01": {
+    "dataset": "late_entry_extreme",
+    "feature_combo": "all",
+    "model": "cnn_medium",
+    "train": {
+      "total": 1382,
+      "events": 76,
+      "censored": 1306
+    },
+    "val": {
+      "total": 592,
+      "events": 39,
+      "censored": 553
+    }
+  },
+  "cnn_medium_none_last_soft_target_late_entry_extreme_standard_all_02": {
+    "dataset": "late_entry_extreme",
+    "feature_combo": "all",
+    "model": "cnn_medium",
+    "train": {
+      "total": 1382,
+      "events": 76,
+      "censored": 1306
+    },
+    "val": {
+      "total": 592,
+      "events": 39,
+      "censored": 553
+    }
+  },
+  "lstm_medium_none_last_soft_target_baseline_standard_all_00": {
+    "dataset": "baseline",
+    "feature_combo": "all",
+    "model": "lstm_medium",
+    "train": {
+      "total": 1400,
+      "events": 106,
+      "censored": 1294
+    },
+    "val": {
+      "total": 600,
+      "events": 44,
+      "censored": 556
+    }
+  },
+  "lstm_medium_none_last_soft_target_baseline_standard_all_01": {
+    "dataset": "baseline",
+    "feature_combo": "all",
+    "model": "lstm_medium",
+    "train": {
+      "total": 1400,
+      "events": 106,
+      "censored": 1294
+    },
+    "val": {
+      "total": 600,
+      "events": 44,
+      "censored": 556
+    }
+  },
+  "lstm_medium_none_last_soft_target_baseline_standard_all_02": {
+    "dataset": "baseline",
+    "feature_combo": "all",
+    "model": "lstm_medium",
+    "train": {
+      "total": 1400,
+      "events": 106,
+      "censored": 1294
+    },
+    "val": {
+      "total": 600,
+      "events": 44,
+      "censored": 556
+    }
+  },
+  "lstm_medium_none_last_soft_target_late_entry_extreme_standard_all_00": {
+    "dataset": "late_entry_extreme",
+    "feature_combo": "all",
+    "model": "lstm_medium",
+    "train": {
+      "total": 1382,
+      "events": 76,
+      "censored": 1306
+    },
+    "val": {
+      "total": 592,
+      "events": 39,
+      "censored": 553
+    }
+  },
+  "lstm_medium_none_last_soft_target_late_entry_extreme_standard_all_01": {
+    "dataset": "late_entry_extreme",
+    "feature_combo": "all",
+    "model": "lstm_medium",
+    "train": {
+      "total": 1382,
+      "events": 76,
+      "censored": 1306
+    },
+    "val": {
+      "total": 592,
+      "events": 39,
+      "censored": 553
+    }
+  },
+  "lstm_medium_none_last_soft_target_late_entry_extreme_standard_all_02": {
+    "dataset": "late_entry_extreme",
+    "feature_combo": "all",
+    "model": "lstm_medium",
+    "train": {
+      "total": 1382,
+      "events": 76,
+      "censored": 1306
+    },
+    "val": {
+      "total": 592,
+      "events": 39,
+      "censored": 553
+    }
+  },
+  "rsf_none_last_soft_target_baseline_standard_all_00": {
+    "dataset": "baseline",
+    "feature_combo": "all",
+    "model": "rsf",
+    "train": {
+      "total": 1400,
+      "events": 106,
+      "censored": 1294
+    },
+    "val": {
+      "total": 600,
+      "events": 44,
+      "censored": 556
+    }
+  },
+  "rsf_none_last_soft_target_baseline_standard_all_01": {
+    "dataset": "baseline",
+    "feature_combo": "all",
+    "model": "rsf",
+    "train": {
+      "total": 1400,
+      "events": 106,
+      "censored": 1294
+    },
+    "val": {
+      "total": 600,
+      "events": 44,
+      "censored": 556
+    }
+  },
+  "rsf_none_last_soft_target_baseline_standard_all_02": {
+    "dataset": "baseline",
+    "feature_combo": "all",
+    "model": "rsf",
+    "train": {
+      "total": 1400,
+      "events": 106,
+      "censored": 1294
+    },
+    "val": {
+      "total": 600,
+      "events": 44,
+      "censored": 556
+    }
+  },
+  "rsf_none_last_soft_target_late_entry_extreme_standard_all_00": {
+    "dataset": "late_entry_extreme",
+    "feature_combo": "all",
+    "model": "rsf",
+    "train": {
+      "total": 1382,
+      "events": 76,
+      "censored": 1306
+    },
+    "val": {
+      "total": 592,
+      "events": 39,
+      "censored": 553
+    }
+  },
+  "rsf_none_last_soft_target_late_entry_extreme_standard_all_01": {
+    "dataset": "late_entry_extreme",
+    "feature_combo": "all",
+    "model": "rsf",
+    "train": {
+      "total": 1382,
+      "events": 76,
+      "censored": 1306
+    },
+    "val": {
+      "total": 592,
+      "events": 39,
+      "censored": 553
+    }
+  },
+  "rsf_none_last_soft_target_late_entry_extreme_standard_all_02": {
+    "dataset": "late_entry_extreme",
+    "feature_combo": "all",
+    "model": "rsf",
+    "train": {
+      "total": 1382,
+      "events": 76,
+      "censored": 1306
+    },
+    "val": {
+      "total": 592,
+      "events": 39,
+      "censored": 553
+    }
+  }
+}

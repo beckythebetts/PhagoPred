@@ -1,0 +1,25 @@
+{
+  "name": "lstm_medium_none_last_soft_target_late_entry_extreme_standard_all",
+  "model": "lstm_medium",
+  "attention": "none_last",
+  "loss": "soft_target",
+  "dataset": "late_entry_extreme",
+  "training": "standard",
+  "feature_combo": "all",
+  "normlisation_means": [
+    486.537109375,
+    26.58209991455078,
+    0.016331404447555542,
+    0.9043053984642029,
+    0.0358002632856369,
+    26.982807159423828
+  ],
+  "normlisation_stds": [
+    219.77191162109375,
+    18.381757736206055,
+    1.2126057147979736,
+    219.46173095703125,
+    3.5351383686065674,
+    18.952421188354492
+  ]
+}

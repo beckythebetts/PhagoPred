@@ -1,3 +1,0 @@
-"""
-Modular survival analysis framework.
-"""

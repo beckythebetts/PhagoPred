@@ -1,0 +1,9 @@
+{
+  "name": "cnn_medium_none_last_soft_target_baseline_standard_all",
+  "model": "cnn_medium",
+  "attention": "none_last",
+  "loss": "soft_target",
+  "dataset": "baseline",
+  "training": "standard",
+  "feature_combo": "all"
+}

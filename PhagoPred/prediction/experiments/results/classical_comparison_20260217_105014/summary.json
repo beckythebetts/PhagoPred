@@ -1,0 +1,133 @@
+{
+  "suite_name": "classical_comparison",
+  "timestamp": "20260217_105014",
+  "num_experiments": 18,
+  "results": [
+    {
+      "name": "lstm_medium_none_last_soft_target_baseline_standard_all",
+      "c_index": 0.7628912205183391,
+      "brier_score": 0.06693715084445613,
+      "accuracy": 0.20454545454545456,
+      "error": null
+    },
+    {
+      "name": "lstm_medium_none_last_soft_target_late_entry_extreme_standard_all",
+      "c_index": 0.8068161957471599,
+      "brier_score": 0.06063689070000228,
+      "accuracy": 0.3076923076923077,
+      "error": null
+    },
+    {
+      "name": "cnn_medium_none_last_soft_target_baseline_standard_all",
+      "c_index": 0.7497659176029963,
+      "brier_score": 0.06832314506805567,
+      "accuracy": 0.13636363636363635,
+      "error": null
+    },
+    {
+      "name": "cnn_medium_none_last_soft_target_late_entry_extreme_standard_all",
+      "c_index": 0.7424568339050055,
+      "brier_score": 0.07437819151956279,
+      "accuracy": 0.2564102564102564,
+      "error": null
+    },
+    {
+      "name": "rsf_none_last_soft_target_baseline_standard_all",
+      "c_index": 0.33077499064020965,
+      "brier_score": 0.03548137984967093,
+      "accuracy": 0.3181818181818182,
+      "error": null
+    },
+    {
+      "name": "rsf_none_last_soft_target_late_entry_extreme_standard_all",
+      "c_index": 0.4707732444380028,
+      "brier_score": 0.03860937529925329,
+      "accuracy": 0.23076923076923078,
+      "error": null
+    },
+    {
+      "name": "lstm_medium_none_last_soft_target_baseline_standard_all",
+      "c_index": 0.7566966312539726,
+      "brier_score": 0.05867619141268545,
+      "accuracy": 0.1590909090909091,
+      "error": null
+    },
+    {
+      "name": "lstm_medium_none_last_soft_target_late_entry_extreme_standard_all",
+      "c_index": 0.7955491329479769,
+      "brier_score": 0.06998395568216484,
+      "accuracy": 0.28205128205128205,
+      "error": null
+    },
+    {
+      "name": "cnn_medium_none_last_soft_target_baseline_standard_all",
+      "c_index": 0.7329088774496523,
+      "brier_score": 0.06978426744350708,
+      "accuracy": 0.1590909090909091,
+      "error": null
+    },
+    {
+      "name": "cnn_medium_none_last_soft_target_late_entry_extreme_standard_all",
+      "c_index": 0.7369523477046604,
+      "brier_score": 0.06243436990644795,
+      "accuracy": 0.3333333333333333,
+      "error": null
+    },
+    {
+      "name": "rsf_none_last_soft_target_baseline_standard_all",
+      "c_index": 0.40871272743782705,
+      "brier_score": 0.03826213457034128,
+      "accuracy": 0.2727272727272727,
+      "error": null
+    },
+    {
+      "name": "rsf_none_last_soft_target_late_entry_extreme_standard_all",
+      "c_index": 0.42248321212627826,
+      "brier_score": 0.040857456436505096,
+      "accuracy": 0.3076923076923077,
+      "error": null
+    },
+    {
+      "name": "lstm_medium_none_last_soft_target_baseline_standard_all",
+      "c_index": 0.7357350536071234,
+      "brier_score": 0.05211713521215202,
+      "accuracy": 0.29545454545454547,
+      "error": null
+    },
+    {
+      "name": "lstm_medium_none_last_soft_target_late_entry_extreme_standard_all",
+      "c_index": 0.7360544977385672,
+      "brier_score": 0.07043352264503185,
+      "accuracy": 0.1282051282051282,
+      "error": null
+    },
+    {
+      "name": "cnn_medium_none_last_soft_target_baseline_standard_all",
+      "c_index": 0.778194978511649,
+      "brier_score": 0.05954350253031799,
+      "accuracy": 0.20454545454545456,
+      "error": null
+    },
+    {
+      "name": "cnn_medium_none_last_soft_target_late_entry_extreme_standard_all",
+      "c_index": 0.7800825120330048,
+      "brier_score": 0.06988892979748898,
+      "accuracy": 0.20512820512820512,
+      "error": null
+    },
+    {
+      "name": "rsf_none_last_soft_target_baseline_standard_all",
+      "c_index": 0.3188789483293774,
+      "brier_score": 0.037952083296646996,
+      "accuracy": 0.2159090909090909,
+      "error": null
+    },
+    {
+      "name": "rsf_none_last_soft_target_late_entry_extreme_standard_all",
+      "c_index": 0.48021337662714175,
+      "brier_score": 0.03784975994507073,
+      "accuracy": 0.28205128205128205,
+      "error": null
+    }
+  ]
+}

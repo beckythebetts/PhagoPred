@@ -1,0 +1,3 @@
+24_07 - Bio system, half with no_fluor for testing
+14_08, 21_08 - Bio system, too few bacteria (not washing off P/S media with HBSS?)
+18_09 - Phys system, high density + potential phototoxicity

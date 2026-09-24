@@ -1,7 +1,5 @@
 import numpy as np
 
-# Initial track_id_map: suppose we have tracks labeled 1 to 4
-import numpy as np
 
 def single_pass_merge(track_id_map, queue):
     for track_0, track_1 in queue:
@@ -9,6 +7,7 @@ def single_pass_merge(track_id_map, queue):
         track_id_map[mask] = track_0
         queue[queue == track_1] = track_0  # update queue on the fly
     return track_id_map
+
 
 def iterative_merge(track_id_map, queue):
     changed = True
@@ -26,12 +25,7 @@ def iterative_merge(track_id_map, queue):
 
 
 track_id_map = np.array([5, 4, 3, 2, 1])
-queue = np.array([
-    [1, 2],
-    [2, 3],
-    [3, 4],
-    [4, 5]
-])
+queue = np.array([[1, 2], [2, 3], [3, 4], [4, 5]])
 
 print("Original track_id_map:", track_id_map)
 
