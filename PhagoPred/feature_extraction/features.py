@@ -904,10 +904,11 @@ class ExternalFluorescence(BaseFeature):
         return results.cpu().numpy()
 
 
-# class FluorescenceRadial(BaseFeature):
-#     """Quantify and describe distribution of fluorescence wihtin cells"""
-#     primary_feature = True
-#     crop = True
+class FluorescenceRadial(BaseFeature):
+    """SLOWQuantify and describe distribution of fluorescence wihtin cells"""
+    primary_feature = True
+    crop = True
+
 
 #     def __init__(self):
 #         super().__init__()

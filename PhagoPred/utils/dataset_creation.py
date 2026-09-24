@@ -1,4 +1,6 @@
 from __future__ import annotations
+import re
+
 import numpy as np
 import os
 import sys
@@ -16,13 +18,16 @@ import logging
 
 from PhagoPred import SETTINGS
 from .fluor_background_removal import (replace_hot_pixels, bg_removal,
-                                       rolling_ball_background, n2v_denoise)
+                                       rolling_ball_background, n2v_denoise,
+                                       gaussian_smooth)
 from .tools import remake_dir
 from .logger import get_logger
 
 log = get_logger()
 
 N2V_MODEL_DIR = Path('/home/ubuntu/PhagoPred/PhagoPred/Datasets/nv2_model')
+# N2V_MODEL_DIR = Path(
+#     '/home/ubuntu/PhagoPred/PhagoPred/Datasets/nv2_model_hicks_microscope')
 
 
 def truncate_hdf5(dataset_path: Path, new_path: Path, start_frame: int,
@@ -167,112 +172,154 @@ def set_hdf5_metadata(dataset: h5py.Dataset, x_size: int, y_size: int) -> None:
 
 
 def hdf5_from_ome_tiffs(tiff_files_path: Path,
-                        hdf5_file: Path,
+                        hdf5_dir: Path,
                         phase_channel: int = 1,
                         epi_channel: int = 2,
                         frame_step_size: int = 1,
-                        batch_size: int = 50) -> None:
-    """
-    Convert multi-file, multi-page .ome.tif files to HDF5 with batched reading and
-    global min/max scaling for quantitative uint8 conversion.
-    """
-
-    if os.path.exists(hdf5_file):
-        os.remove(hdf5_file)
-
-    print(f'Tiff files found? {tiff_files_path.exists()}')
-    print(f'HDF5 path found? {hdf5_file.parent.exists()}')
+                        batch_size: int = 50,
+                        num_pos: int = 24) -> None:
+    log.info(f'Creating hdf5 files at {hdf5_dir} from {tiff_files_path}')
 
     def natural_sort_key(s):
-        import re
+
         return [
             int(text) if text.isdigit() else text.lower()
             for text in re.split(r'(\d+)', str(s))
         ]
 
-    tiff_files = sorted(tiff_files_path.glob("*.ome.tif"),
-                        key=natural_sort_key)
-    if not tiff_files:
-        raise ValueError("No .ome.tif files found.")
+    for pos in range(num_pos):
+        # T, C, Y, X = None, None, None, None
+        dims = None
+        log.info(f'Creating hdf5 file for position {pos} in {hdf5_dir}')
+        hdf5_file = hdf5_dir / f'{pos}.h5'
+        if os.path.exists(hdf5_file):
+            os.remove(hdf5_file)
 
-    # Get shape info from first file
-    with tifffile.TiffFile(str(tiff_files[0])) as tif:
-        series = tif.series[0]
-        shape = series.shape
-        T, C, Y, X = shape
+        tiff_files = sorted(tiff_files_path.glob(f'*_Pos{pos}[._]*ome.tif'),
+                            key=natural_sort_key)
 
-    with h5py.File(hdf5_file, 'w') as h:
-        Images = h.create_group('Images')
-        set_hdf5_metadata(Images, X, Y)
+        with h5py.File(hdf5_file, 'w') as h:
+            for i, file in enumerate(tiff_files):
+                with tifffile.TiffFile(str(file)) as tif:
+                    if dims is None:
+                        print(f'Getting metadata for {hdf5_file.name}')
+                        dims = tif.series[0].shape
+                        log.info(f'Got metadta for {hdf5_file}, dims: {dims}')
 
-        phase_ds = Images.create_dataset('Phase',
-                                         shape=(0, Y, X),
-                                         maxshape=(None, Y, X),
-                                         dtype='uint8',
-                                         chunks=(1, Y, X))
-        epi_ds = Images.create_dataset('Epi',
-                                       shape=(0, Y, X),
-                                       maxshape=(None, Y, X),
-                                       dtype='uint8',
-                                       chunks=(1, Y, X))
+                        T, _, C, Y, X = dims
+                        images = h.create_group('Images')
+                        set_hdf5_metadata(images, X, Y)
 
-        phase_min, phase_max = None, None
-        epi_min, epi_max = None, None
+                        phase_ds = images.create_dataset(
+                            'Phase',
+                            shape=(0, Y, X),
+                            maxshape=(None, Y, X),
+                            dtype='uint8',
+                            chunks=(1, Y, X),
+                        )
+                        epi_ds = images.create_dataset(
+                            'Epi',
+                            shape=(0, Y, X),
+                            maxshape=(None, Y, X),
+                            dtype='uint8',
+                            chunks=(1, Y, X),
+                        )
 
-        frame_count = 0
+                        phase_min, phase_max = None, None
+                        epi_min, epi_max = None, None
 
-        for i, file in enumerate(tiff_files):
-            # sys.stdout.write(f"\rProcessing file {i + 1} / {len(tiff_files)}, {frame_count} frames processed")
-            # sys.stdout.flush()
+                        frame_count = 0
+                    pages = tif.pages
+                    num_pages = len(pages)
+                    num_frames = num_pages // C
 
-            with tifffile.TiffFile(str(file)) as tif:
-                pages = tif.pages
-                num_pages = len(pages)
-                num_frames = num_pages // C
+                    selected_frames = np.arange(0, num_frames, frame_step_size)
 
-                selected_frames = np.arange(0, num_frames, frame_step_size)
+                    with tqdm(total=T,
+                              desc=f'Processing position {pos}') as pbar:
+                        for batch_start in range(0, len(selected_frames),
+                                                 batch_size):
 
-                for batch_start in tqdm(
-                        range(0, len(selected_frames), batch_size),
-                        desc=
-                        f"\rProcessing file {i + 1} / {len(tiff_files)}, {frame_count} frames processed"
-                ):
-                    batch_end = min(batch_start + batch_size,
-                                    len(selected_frames))
-                    batch_frames = selected_frames[batch_start:batch_end]
+                            batch_end = min(batch_start + batch_size,
+                                            len(selected_frames))
+                            batch_frames = selected_frames[
+                                batch_start:batch_end]
 
-                    phase_page_idxs = batch_frames * C + phase_channel
-                    epi_page_idxs = batch_frames * C + epi_channel
+                            phase_page_idxs = batch_frames * C + phase_channel
+                            epi_page_idxs = batch_frames * C + epi_channel
 
-                    # Read one frame at a time to reduce memory usage
-                    phase_batch = np.stack(
-                        [pages[i].asarray() for i in phase_page_idxs])
-                    epi_batch = np.stack(
-                        [pages[i].asarray() for i in epi_page_idxs])
+                            # Read one frame at a time to reduce memory usage
+                            phase_batch = []
+                            epi_batch = []
+                            for i in range(len(phase_page_idxs)):
+                                phase_batch.append(
+                                    pages[phase_page_idxs[i]].asarray())
+                                epi_batch.append(
+                                    pages[epi_page_idxs[i]].asarray())
+                                pbar.update(1)
+                            phase_batch = np.stack(phase_batch)
+                            epi_batch = np.stack(epi_batch)
+                            # phase_batch = np.stack(
+                            #     [pages[i].asarray() for i in phase_page_idxs])
+                            # epi_batch = np.stack(
+                            #     [pages[i].asarray() for i in epi_page_idxs])
 
-                    # Compute global scaling from first batch
-                    if phase_min is None:
-                        phase_min, phase_max = compute_percentile_limits(
-                            phase_batch, 0, 100)
-                    if epi_min is None:
-                        epi_min, epi_max = compute_percentile_limits(
-                            epi_batch, 1, 99)
+                            # Compute global scaling from first batch
+                            if phase_min is None:
+                                phase_min, phase_max = compute_percentile_limits(
+                                    phase_batch, 0, 100)
+                            if epi_min is None:
+                                epi_min, epi_max = compute_percentile_limits(
+                                    epi_batch, 0.1, 99.9)
 
-                    phase_batch = to_8bit(phase_batch, phase_min, phase_max)
-                    epi_batch = to_8bit(epi_batch, epi_min, epi_max)
+                            phase_batch = to_8bit(phase_batch, phase_min,
+                                                  phase_max)
+                            epi_batch = to_8bit(epi_batch, epi_min, epi_max)
 
-                    # Resize and write to HDF5
-                    batch_len = len(phase_batch)
-                    phase_ds.resize((frame_count + batch_len, Y, X))
-                    epi_ds.resize((frame_count + batch_len, Y, X))
+                            # Resize and write to HDF5
+                            batch_len = len(phase_batch)
+                            phase_ds.resize((frame_count + batch_len, Y, X))
+                            epi_ds.resize((frame_count + batch_len, Y, X))
 
-                    phase_ds[frame_count:frame_count + batch_len] = phase_batch
-                    epi_ds[frame_count:frame_count + batch_len] = epi_batch
+                            phase_ds[frame_count:frame_count +
+                                     batch_len] = phase_batch
+                            epi_ds[frame_count:frame_count +
+                                   batch_len] = epi_batch
 
-                    frame_count += batch_len
+                            frame_count += batch_len
+            images.attrs['Number of frames'] = frame_count
+            print(f"\nHDF5 file created: {frame_count} frames")
 
-        Images.attrs['Number of frames'] = frame_count
-        print(f"\nHDF5 file created: {frame_count} frames")
+
+def preprocessing(hdf5_file_path: str | Path) -> None:
+    print(f'Preprocessing images in {hdf5_file_path}')
+    log.info(f'Applying preprocessing to {hdf5_file_path}')
+
+    with h5py.File(Path(hdf5_file_path), 'r+') as f:
+        phase_ds = f['Images']['Phase']
+        clahe_grid_size = 20
+        T, Y, X = phase_ds.shape
+        x_tiles = math.floor(X / (clahe_grid_size * 2)) * 2 + 1
+        y_tiles = math.floor(Y / (clahe_grid_size * 2)) * 2 + 1
+        clahe = cv2.createCLAHE(tileGridSize=(y_tiles, x_tiles), clipLimit=3.0)
+        phase_ims = phase_ds[:]
+        for i, im in tqdm(enumerate(phase_ims),
+                          total=phase_ims.shape[0],
+                          desc='Applying CLAHE to phase'):
+            phase_ds[i] = clahe.apply(im)
+
+        fluor_ds = f['Images']['Epi']
+        # basic = basicpy.BaSiC(get_darkfield=False)
+        fluor_ims = fluor_ds[:]
+        log.info('Applying rolling ball background')
+        fluor_ims = rolling_ball_background(fluor_ims)
+        log.info('Applying smoothing')
+        fluor_ims = gaussian_smooth(fluor_ims)
+        # log.info('Applying N2V')
+        # fluor_ims = n2v_denoise(fluor_ims, N2V_MODEL_DIR)
+        # log.info('Applying BASIC')
+        # fluor_ims = basic.fit_transform(fluor_ims, is_timelapse=True)
+        fluor_ds[:] = fluor_ims
 
 
 def make_short_test_copy(orig_file: Path,
@@ -671,55 +718,10 @@ def split_datasets_by_time(parent_path: Path, num_splits: int) -> None:
 
 
 if __name__ == '__main__':
-    split_datasets_by_time(
-        Path('~/thor_server/MacrophageData/24_07').expanduser(), 3)
-    # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/07_10_0.h5")
-    # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_5min.h5")
-    # keep_only_group("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min.h5")
-    # make_short_test_copy(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_5min.h5"),
-    #                      Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_5min_short.h5"),
-    #                      start_frame=0,
-    #                      end_frame=200)
-    # make_short_test_copy(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min.h5"),
-    #                      Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min_short.h5"),
-    #                      start_frame=0,
-    #                      end_frame=100)
-    # hdf5_from_tiffs(Path("~/thor_server/24_02_partial/A").expanduser(),
-    #                 # Path('D:/27_05.h5'),
-    #                 Path("~/PhagoPred/PhagoPred/Datasets/24_02_A.h5").expanduser(),
-    #                 )
-    # rename_group(Path("~/PhagoPred/PhagoPred/Datasets/10_02_26_1.h5").expanduser(), 'Images/Phase', 'Images/Phase0')
-    # rename_group(Path("~/PhagoPred/PhagoPred/Datasets/10_02_26_1.h5").expanduser(), 'Images/Epi', 'Images/Phase')
-    # rename_group(Path("~/PhagoPred/PhagoPred/Datasets/10_02_26_1.h5").expanduser(), 'Images/Phase0', 'Images/Epi')
-    # make_short_test_copy(
-    #     Path("~/PhagoPred/PhagoPred/Datasets/10_02_26_1.h5").expanduser(),
-    #     Path(
-    #         "~/PhagoPred/PhagoPred/Datasets/10_02_26_1_short.h5").expanduser(),
-    #     start_frame=0,
-    #     end_frame=200)
-    # hdf5_from_tiffs(Path("~/thor_server/MacrophageData/28_10_no_staph_1").expanduser(),
-    #             # Path('D:/27_05.h5'),
-    #             Path("~/PhagoPred/PhagoPred/Datasets/ExposureTest/28_10_10min.h5").expanduser(),
-    #             phase_channel=2,
-    #             epi_channel=1,
-    #             frame_step_size=2,
-    #             )
-    # epi_background_correction()
-    # epi_background_correction_gaussian()
-    # create_survival_analysis_dataset(Path('PhagoPred') / 'Datasets' / 'ExposureTest'/ '10_10_5000.h5', Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '10_10_5000_survival.h5')
-    # create_survival_analysis_dataset(Path('PhagoPred') / 'Datasets' / 'ExposureTest'/ '07_10_0.h5', Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '07_10_0_survival.h5')
-    # create_survival_analysis_dataset(Path('PhagoPred') / 'Datasets' / 'ExposureTest'/ '28_10_2500.h5', Path('PhagoPred') / 'Datasets' / 'ExposureTest' / '28_10_2500_survival.h5')
+    # hdf5_from_ome_tiffs(
+    #     Path('~/thor_server/MacrophageData/18_09/_1').expanduser(),
+    #     hdf5_dir=Path('~/thor_server/MacrophageData/18_09/').expanduser())
 
-    # make_short_test_copy(Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05.h5"),
-    #                      Path("C:/Users/php23rjb/Documents/PhagoPred/PhagoPred/Datasets/27_05_500.h5"),
-    #                      start_frame=3000,
-    #                      end_frame=3500)
-    # Create dummy data similar to your sliced data
-    # data = np.random.randint(0, 256, size=(50, 2048, 2048), dtype=np.uint8)
-    # split_by_radius(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/ExposureTest/10_10_5000.h5"))
-    # with h5py.File(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_tets.h5"), "w") as f:
-    #     dset = f.create_dataset("Epi", data=data)
-    #     f.flush()
-
-    # import os
-    # print("File size:", os.path.getsize(Path("/home/ubuntu/PhagoPred/PhagoPred/Datasets/27_05_tets.h5")), "bytes")
+    preprocessing(Path('~/thor_server/MacrophageData/18_09/0.h5').expanduser())
+    # split_datasets_by_time(
+    #     Path('~/thor_server/MacrophageData/24_07').expanduser(), 3)
