@@ -39,6 +39,19 @@ def fit_var(pool: np.ndarray,
     2*num_params`` over ``1..max_lag``.
     """
     N, T, K = pool.shape
+    # Empirical mean, not the theoretical VAR stationary mean (I -
+    # sum(A))^-1 @ intercept: that formula divides by something close to
+    # singular whenever the fitted process is near a unit root (ar_coeff
+    # close to 1, as several of these scenarios deliberately use), where a
+    # finite stationary mean barely exists in the first place. A near-zero
+    # determinant there blows the solved mean up to whatever huge value
+    # floating-point noise in (I - sum(A)) happens to produce — e.g. this
+    # gave mean_vec entries of 15-17 for features whose real values are
+    # small, which then dominates every free (masked-out) node's fill value
+    # and one feature's SHAP score along with it. The pool's own empirical
+    # mean is bounded, data-grounded, and doesn't depend on inverting
+    # anything.
+    mean = np.nanmean(pool, axis=(0, 1))
     best = None
     for p in range(1, max_lag + 1):
         X_rows, Y_rows = [], []
@@ -67,7 +80,6 @@ def fit_var(pool: np.ndarray,
             # each block to the (target_f, source_g) convention used below.
             A = np.stack(
                 [A_flat[lag * K:(lag + 1) * K].T for lag in range(p)])
-            mean = np.linalg.solve(np.eye(K) - A.sum(axis=0), intercept)
             best = (score, VARFit(feature_names, p, A, intercept, sigma_eps,
                                   mean))
     if best is None:

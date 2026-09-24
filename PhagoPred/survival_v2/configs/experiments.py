@@ -317,13 +317,10 @@ EXPERIMENT_SUITES = {
             ])),
     # Compare scenario types (linear vs linear chain vs nonlinear chain),
     # all at high autocorrelation.
-    'Graph Scenario Types Binary':
+    'Graph Scenario Types Binary Attention':
     generate_experiment_grid(
-        ExperimentCfg(model=[
-            MODELS['CNN Medium'],
-            MODELS['LSTM Medium'],
-        ],
-                      attention=ATTENTION['Last'],
+        ExperimentCfg(model=MODELS['CNN Medium'],
+                      attention=list(ATTENTION.values()),
                       loss=LOSSES['Weighted BCE'],
                       dataset=[
                           DATASETS['Binary Graph Linear High AR'],

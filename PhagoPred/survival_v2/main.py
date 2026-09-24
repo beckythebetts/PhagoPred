@@ -17,14 +17,15 @@ from PhagoPred.survival_v2.interpret import run_shap, plot_shap
 
 
 def train():
-    suites = ('24_07_test', )
+    suites = ('Graph Scenario Types Binary Attention', )
     for suite in suites:
         output_dir = run_experiment_suite(
             suite_name=suite,
             output_dir='PhagoPred/survival_v2/experiments/results',
             device='cuda',
-            repeats=1,
-            shap_interpret=True)
+            repeats=3,
+            shap_interpret=False,
+        )
     return output_dir
 
 
@@ -45,8 +46,8 @@ def interpret_suite(suite_dir: Path):
     for experient_dir in suite_dir.iterdir():
         # print(experient_dir)
         if experient_dir.is_dir():
-            run_shap(experient_dir)
-            # plot_shap(experient_dir)
+            # run_shap(experient_dir)
+            plot_shap(experient_dir)
 
 
 def view_dataset_distributions():
@@ -69,9 +70,17 @@ def plot():
 
 
 if __name__ == '__main__':
+    train()
     # train()
+    # interpret_suite(
+    #     Path(
+    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Scenario Types Binary_01092026_095604'
+    #     ))
+    # plot_experiment_results(
+    #     Path(
+    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Scenario Types Binary_01092026_095604'
+    #     ))
+    # SHAP comparisons across the suite's varying params (plot_shap_average,
+    # plot_shap_average_folds, plot_shap_sample) need interpret_suite's
+    # shap_samples.h5 files to already exist.
     # plot()
-    interpret_suite(
-        Path(
-            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Scenario Types Binary_01092026_095604'
-        ))
