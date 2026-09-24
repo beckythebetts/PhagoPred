@@ -24,6 +24,9 @@ def seg_dataset(h5_file: Path,
                 channel: Literal['Phase', 'Epi'] = 'Phase',
                 category: str = 'Macrophage',
                 smooth_sigma: float = DEFAULT_SIGMA_LOW_RES) -> None:
+    ckpt = model_dir / 'models' / 'model'
+    if not ckpt.is_file():
+        raise FileNotFoundError(f'No cellpose checkpoint at {ckpt}')
 
     model = models.CellposeModel(gpu=True,
                                  pretrained_model=str(model_dir / 'models' /
