@@ -190,10 +190,11 @@ def _realised_horizon_cif(hazard_signal: np.ndarray, lf: int, horizon: int,
 
 def _contributions_from_values(values: np.ndarray,
                                permutation_order: np.ndarray) -> np.ndarray:
-    """Marginals of ``values`` (n_coal,) scattered back to player order."""
-    marginals = np.diff(values)
+    """Marginals of ``values`` (n_players + 1,), the value of the first k
+    players of ``permutation_order`` for k = 0..n_players, scattered back to
+    player order."""
     contributions = np.zeros(permutation_order.shape[0])
-    contributions[permutation_order[:-1]] = marginals
+    contributions[permutation_order] = np.diff(values)
     return contributions
 
 
@@ -318,12 +319,21 @@ def _propagate_and_target(graph, past, base_noise, lf, seq_len,
 
     ``past`` is a fresh per-call dict (feature-name-keyed, required by
     ``rule.apply_step``); ``base_noise`` is the sample-level array.
+
+    Hazard is not a player, so it has no entry in ``past``; its history is
+    rebuilt from its base noise and the sampled observed past (as in
+    ``_interventional_value``). Leaving it zero would drop its autoregressive
+    carry-over into the horizon, so v(all pinned) would not reproduce the base
+    sample's own target.
     """
     sig = {f.name: np.zeros((seq_len, B)) for f in graph.features}
     for f_idx, f in enumerate(graph.features):
         if f.name in past:
             sig[f.name][:lf] = past[f.name]
-        sig[f.name][lf:] = base_noise[f_idx, lf:seq_len, None]
+            sig[f.name][lf:] = base_noise[f_idx, lf:seq_len, None]
+        else:
+            sig[f.name][:] = base_noise[f_idx, :seq_len, None]
+    _apply_hazard_rules(graph, sig, lf)
     for t in range(lf, seq_len):
         for rule in graph.rules:
             rule.apply_step(sig, t)
@@ -462,17 +472,25 @@ def _shapley_axis(make_value_fn: callable, axis: str, num_segments: int,
     permutation — the observational estimator uses that to redraw its
     common-random-number seed, so every coalition in a permutation shares
     randomness and a dummy player's marginal is identically zero.
+
+    Permutations are drawn in antithetic pairs (a random order, then its
+    reverse), so a player that joins early in one joins late in the other;
+    this cancels much of the Monte-Carlo variance from coalition size.
     """
     ns, seg_len, seg_of_frame = _axis_segments(axis, num_segments, lf)
     n_players = _axis_n_players(axis, n_obs_feats, ns)
     acc = np.zeros(n_players)
-    for _ in range(num_permutations):
+    perm = None
+    for i in range(num_permutations):
         value_fn = make_value_fn()
-        perm = np.random.permutation(n_players)
+        perm = (np.random.permutation(n_players)
+                if i % 2 == 0 else perm[::-1].copy())
         inv = np.argsort(perm)
-        v = np.zeros(n_players)
+        # k = 0..n_players inclusive: the full coalition is needed for the
+        # last player's marginal
+        v = np.zeros(n_players + 1)
         cache = {}
-        for k in range(n_players):
+        for k in range(n_players + 1):
             mask = _axis_pinned_mask(axis, inv, k, n_obs_feats, ns,
                                      seg_of_frame, lf)
             key = mask.tobytes()
@@ -622,7 +640,7 @@ def generate_sample_with_importances(
         axis:
         _shapley_axis(make_interv, axis, joint_num_segments, n_obs_feats,
                       num_feats, lf, num_permutations)
-        for axis in tqdm(AXES, desc='interventional axes')
+        for axis in AXES
     }
 
     make_obs = _make_obs_value_factory(observed_precision, graph, base.signals,
@@ -633,7 +651,7 @@ def generate_sample_with_importances(
         axis:
         _shapley_axis(make_obs, axis, joint_num_segments, n_obs_feats,
                       num_feats, lf, num_permutations)
-        for axis in tqdm(AXES, desc='observational axes')
+        for axis in AXES
     }
 
     obs_boundaries = (np.linspace(0, lf, joint_num_segments + 1, dtype=int)

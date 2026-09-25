@@ -46,8 +46,8 @@ def interpret_suite(suite_dir: Path):
     for experient_dir in suite_dir.iterdir():
         # print(experient_dir)
         if experient_dir.is_dir():
-            # run_shap(experient_dir)
-            plot_shap(experient_dir)
+            run_shap(experient_dir, num_samples=10, num_time_segments=10)
+            # plot_shap(experient_dir)
 
 
 def view_dataset_distributions():
@@ -70,7 +70,15 @@ def plot():
 
 
 if __name__ == '__main__':
-    train()
+    # train()
+    # plot_experiment_results(
+    #     Path(
+    #         '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Scenario Types Binary Attention_24092026_104834'
+    #     ))
+    interpret_suite(
+        Path(
+            '/home/ubuntu/PhagoPred/PhagoPred/survival_v2/experiments/results/Graph Scenario Types Binary Attention_24092026_104834'
+        ))
     # train()
     # interpret_suite(
     #     Path(

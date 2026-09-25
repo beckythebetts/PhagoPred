@@ -100,6 +100,7 @@ def run_shap(
 
     # === RUN KERNEL SHAP ===
     pool, _ = load_background_pool(results_file, model_feat_names)
+    pool = (pool - means) / stds
     var_fit = fit_var(pool, model_feat_names)
     log.info(
         f'Fit global VAR(p={var_fit.p}) background model over '
@@ -120,7 +121,8 @@ def run_shap(
         output_type=output_type,
         time_bins=hazard_bins,
         show_progress=False,
-    )
+        means=means,
+        stds=stds)
 
     with h5py.File(results_file, 'a') as f:
         indices = sorted(int(k) for k in f.keys() if k.isdigit())
