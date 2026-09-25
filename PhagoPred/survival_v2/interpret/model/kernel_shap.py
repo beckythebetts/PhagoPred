@@ -377,8 +377,8 @@ class KernelSHAP:
             time_bins=time_bins,
         )
 
-        if importance_type in ("temporal", "temporal_feature"
-                              ) and num_segments is not None:
+        if importance_type in (
+                "temporal", "temporal_feature") and num_segments is not None:
             # Clamp to the sample's own length, matching
             # ground_truth.generate_samples._axis_segments's min(num_segments,
             # lf) — otherwise np.linspace(0, T, num_segments+1) below produces
@@ -486,6 +486,8 @@ def analyse_sample_in_file(
     sample_idx: int,
     kernel_shap: KernelSHAP,
     background: BackgroundStrategy,
+    means: np.ndarray,
+    stds: np.ndarray,
     model_feat_names: list[str] | None = None,
     device: str = 'cpu',
     **analyse_kwargs,
@@ -506,8 +508,9 @@ def analyse_sample_in_file(
     sample = SampleWithSHAP.read_h5(h5_path, sample_idx)
     feature_vals = (align_sample_features(sample, model_feat_names)
                     if model_feat_names is not None else sample.feature_vals)
-    x = torch.tensor(feature_vals.T, dtype=torch.float32,
-                     device=device)  # (T, F) -> model's expected layout
+    # (F, T) -> (T, F), the model's expected layout, normalised as in training
+    feature_vals = (feature_vals.T - means) / stds
+    x = torch.tensor(feature_vals, dtype=torch.float32, device=device)
     length = torch.tensor([x.shape[0]], device=device)
 
     result = kernel_shap.analyse(x, length, background, **analyse_kwargs)

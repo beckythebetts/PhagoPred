@@ -1,7 +1,11 @@
 from __future__ import annotations
 import json
+import os
+import multiprocessing as mp
+from functools import partial
 from pathlib import Path
 
+from tqdm import tqdm
 import numpy as np
 import h5py
 
@@ -73,7 +77,9 @@ def get_samples(
     samples_dir.mkdir(parents=True, exist_ok=True)
     try:
         for file in samples_dir.iterdir():
-            if scenario.filename not in file.name:
+            # stem is '<scenario.filename>_<idx>'; compare exactly, since e.g.
+            # 'linear_chain_high_ar' is a substring of 'nonlinear_chain_high_ar'
+            if file.stem.rsplit('_', 1)[0] != scenario.filename:
                 continue
             with h5py.File(file, 'r') as f:
                 if not _params_match(f, output_type, horizon, hazard_bins,
@@ -84,8 +90,7 @@ def get_samples(
                 if n == num_samples:
                     file_name = file
                     break
-                if n > num_samples and (superset is None
-                                        or n < superset[0]):
+                if n > num_samples and (superset is None or n < superset[0]):
                     superset = (n, file)
     except KeyError:
         pass
@@ -137,6 +142,7 @@ def _generate_samples(
     output_type: str,
     num_background_samples: int,
     num_segments: int | None = None,
+    num_workers: int | None = None,
 ) -> None:
 
     with h5py.File(h5_path, 'w') as f:
@@ -147,7 +153,7 @@ def _generate_samples(
             []) if hazard_bins is None else hazard_bins
         f.attrs['Num Permutations'] = num_permutations
         f.attrs['Min Horizon CIF'] = min_horizon_cif
-        f.attrs['Num Samples'] = num_samples
+        f.attrs['Num Samples'] = 0
         f.attrs['Num Background Samples'] = num_background_samples
         f.attrs['Num Segments'] = -1 if num_segments is None else int(
             num_segments)
@@ -155,26 +161,47 @@ def _generate_samples(
     attempt_budget = num_samples * 200
     attempts = 0
     samples = 0
-    while samples < num_samples and attempts < attempt_budget:
-        sample = generate_sample_with_importances(
-            scenario.graph,
-            scenario.hazard_calibration_func,
-            horizon,
-            scenario.num_frames,
-            100,
-            num_permutations,
-            hazard_bins,
-            output_type,
-            min_horizon_cif,
-            num_background_samples,
-            num_segments=num_segments,
-        )
-        if sample is not None:
-            sample.write_h5(h5_path, samples)
-            samples += 1
-            log.info(
-                f'Generated sample {samples} / {num_samples}, {attempts} total attempts'
-            )
-
-        attempts += 1
+    generate = partial(
+        generate_sample_with_importances,
+        scenario.graph,
+        scenario.hazard_calibration_func,
+        horizon,
+        scenario.num_frames,
+        100,
+        num_permutations,
+        hazard_bins,
+        output_type,
+        min_horizon_cif,
+        num_background_samples,
+        num_segments=num_segments,
+    )
+    # Every attempt gets its own seed: forked workers would otherwise inherit
+    # the same global numpy RNG state and generate identical samples.
+    seeds = np.random.SeedSequence().generate_state(attempt_budget)
+    num_workers = num_workers or os.cpu_count() or 1
+    # Leaving the `with` terminates attempts still running once enough
+    # samples have been written.
+    with mp.get_context('fork').Pool(num_workers) as pool, \
+            tqdm(total=num_samples,
+                 desc='Generating ground truth samples') as pbar:
+        for sample in pool.imap_unordered(partial(_seeded_attempt, generate),
+                                          seeds):
+            attempts += 1
+            if sample is not None:
+                sample.write_h5(h5_path, samples)
+                samples += 1
+                log.info(
+                    f'Generated sample {samples} / {num_samples}, {attempts} total attempts'
+                )
+                pbar.update(1)
+                with h5py.File(h5_path, 'r+') as f:
+                    f.attrs['Num Samples'] = samples
+                if samples >= num_samples:
+                    break
     return samples
+
+
+def _seeded_attempt(generate: callable, seed: int):
+    """One sample attempt in a worker process, with its own RNG seed."""
+    np.random.seed(seed)
+    return generate()
