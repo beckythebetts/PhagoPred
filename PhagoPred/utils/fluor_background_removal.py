@@ -1,4 +1,5 @@
 import multiprocessing as mp
+from multiprocessing import shared_memory
 from pathlib import Path
 
 from tqdm import tqdm
@@ -77,40 +78,67 @@ def bg_removal_v4(img, sigma_bg=40, sigma_smooth=3, size_median=10):
     return img
 
 
-def _rolling_ball_background_worker(imgs: np.ndarray, radius: float,
-                                    do_presmooth: bool, use_paraboloid: bool,
-                                    queue: mp.Queue) -> None:
+def _rolling_ball_background_worker(shm_name: str, shape: tuple, dtype: str,
+                                    radius: float, do_presmooth: bool,
+                                    use_paraboloid: bool,
+                                    java_options: str) -> None:
     import imagej_rolling_ball
     from tqdm import tqdm
-    bg_subtractor = imagej_rolling_ball.BackgroundSubtracter()
-    out = np.stack([
-        bg_subtractor.rolling_ball_background(im,
-                                              radius,
-                                              do_presmooth=do_presmooth,
-                                              use_paraboloid=use_paraboloid)
-        for im in tqdm(imgs, desc='Rolling ball background removal')
-    ])
-    queue.put(out)
-    queue.close()
-    queue.join_thread()
+    shm = shared_memory.SharedMemory(name=shm_name)
+    try:
+        imgs = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
+        bg_subtractor = imagej_rolling_ball.BackgroundSubtracter(
+            java_options=java_options)
+        for im in tqdm(imgs, desc='Rolling ball background removal'):
+            bg_subtractor.rolling_ball_background(
+                im,
+                radius,
+                do_presmooth=do_presmooth,
+                use_paraboloid=use_paraboloid,
+                inplace=True)
+        del imgs, im
+    finally:
+        shm.close()
 
 
 def rolling_ball_background(imgs: np.ndarray,
                             radius: float = 50,
                             do_presmooth: bool = True,
-                            use_paraboloid: bool = False) -> np.ndarray:
+                            use_paraboloid: bool = False,
+                            java_options: str = '-Xmx2g') -> np.ndarray:
     """Rolling-ball background subtraction (ImageJ's BackgroundSubtracter,
     via the imagej_rolling_ball package) applied to a stack of frames.
+
+    imgs is modified in place and also returned.
+
+    ImageJ runs in a spawned process so the JVM is torn down afterwards.
+    The stack is passed through shared memory rather than pickled, so only
+    one extra copy of it exists (in the shared buffer) instead of several
+    in the worker - on a 288 x 2048 x 2048 stack the pickled version was
+    OOM-killed. If the worker dies (e.g. OOM-killed) this raises rather
+    than waiting forever for a result.
     """
     ctx = mp.get_context('spawn')
-    queue = ctx.Queue()
-    process = ctx.Process(target=_rolling_ball_background_worker,
-                          args=(imgs, radius, do_presmooth, use_paraboloid,
-                                queue))
-    process.start()
-    result = queue.get()
-    process.join()
-    return result
+    shm = shared_memory.SharedMemory(create=True, size=imgs.nbytes)
+    try:
+        shared = np.ndarray(imgs.shape, dtype=imgs.dtype, buffer=shm.buf)
+        shared[:] = imgs
+        process = ctx.Process(target=_rolling_ball_background_worker,
+                              args=(shm.name, imgs.shape, imgs.dtype.str,
+                                    radius, do_presmooth, use_paraboloid,
+                                    java_options))
+        process.start()
+        process.join()
+        if process.exitcode != 0:
+            raise RuntimeError(
+                f'Rolling ball background worker exited with code '
+                f'{process.exitcode} (-9 usually means it was OOM-killed)')
+        imgs[:] = shared
+        del shared
+    finally:
+        shm.close()
+        shm.unlink()
+    return imgs
 
 
 def gaussian_smooth(imgs: np.ndarray, sigma: float = 1.0) -> np.ndarray:

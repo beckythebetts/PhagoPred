@@ -291,35 +291,59 @@ def hdf5_from_ome_tiffs(tiff_files_path: Path,
             print(f"\nHDF5 file created: {frame_count} frames")
 
 
+PREPROCESSED_ATTR = 'Preprocessed'
+
+
 def preprocessing(hdf5_file_path: str | Path) -> None:
+    """CLAHE on Phase, rolling ball + smoothing on Epi, both in place.
+
+    Each channel is marked with a 'Preprocessed' attr once done, and marked
+    channels are skipped, so an interrupted run can be resumed without
+    applying a step twice.
+    """
     print(f'Preprocessing images in {hdf5_file_path}')
     log.info(f'Applying preprocessing to {hdf5_file_path}')
 
     with h5py.File(Path(hdf5_file_path), 'r+') as f:
         phase_ds = f['Images']['Phase']
-        clahe_grid_size = 20
-        T, Y, X = phase_ds.shape
-        x_tiles = math.floor(X / (clahe_grid_size * 2)) * 2 + 1
-        y_tiles = math.floor(Y / (clahe_grid_size * 2)) * 2 + 1
-        clahe = cv2.createCLAHE(tileGridSize=(y_tiles, x_tiles), clipLimit=3.0)
-        phase_ims = phase_ds[:]
-        for i, im in tqdm(enumerate(phase_ims),
-                          total=phase_ims.shape[0],
-                          desc='Applying CLAHE to phase'):
-            phase_ds[i] = clahe.apply(im)
+        if phase_ds.attrs.get(PREPROCESSED_ATTR, False):
+            log.info('Phase already preprocessed, skipping CLAHE')
+        else:
+            clahe_grid_size = 20
+            T, Y, X = phase_ds.shape
+            x_tiles = math.floor(X / (clahe_grid_size * 2)) * 2 + 1
+            y_tiles = math.floor(Y / (clahe_grid_size * 2)) * 2 + 1
+            clahe = cv2.createCLAHE(tileGridSize=(y_tiles, x_tiles),
+                                    clipLimit=3.0)
+            phase_ims = phase_ds[:]
+            for i, im in tqdm(enumerate(phase_ims),
+                              total=phase_ims.shape[0],
+                              desc='Applying CLAHE to phase'):
+                phase_ds[i] = clahe.apply(im)
+            del phase_ims
+            phase_ds.attrs[PREPROCESSED_ATTR] = True
+            f.flush()
 
         fluor_ds = f['Images']['Epi']
+        if fluor_ds.attrs.get(PREPROCESSED_ATTR, False):
+            log.info('Epi already preprocessed, skipping background removal')
+            return
         # basic = basicpy.BaSiC(get_darkfield=False)
         fluor_ims = fluor_ds[:]
         log.info('Applying rolling ball background')
-        fluor_ims = rolling_ball_background(fluor_ims)
+        rolling_ball_background(fluor_ims)
         log.info('Applying smoothing')
-        fluor_ims = gaussian_smooth(fluor_ims)
+        # Smooth and write frame by frame rather than via gaussian_smooth,
+        # which builds a second full copy of the stack
+        for i, im in tqdm(enumerate(fluor_ims),
+                          total=fluor_ims.shape[0],
+                          desc='Smoothing images'):
+            fluor_ds[i] = cv2.GaussianBlur(im, (0, 0), sigmaX=1.0, sigmaY=1.0)
+        fluor_ds.attrs[PREPROCESSED_ATTR] = True
         # log.info('Applying N2V')
         # fluor_ims = n2v_denoise(fluor_ims, N2V_MODEL_DIR)
         # log.info('Applying BASIC')
         # fluor_ims = basic.fit_transform(fluor_ims, is_timelapse=True)
-        fluor_ds[:] = fluor_ims
 
 
 def make_short_test_copy(orig_file: Path,
