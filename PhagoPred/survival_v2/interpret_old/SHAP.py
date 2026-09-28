@@ -29,7 +29,8 @@ class SHAPResults:
     # Aggregated importance scores
     feature_importance: Optional[np.ndarray] = None  # (num_features,)
     temporal_importance: Optional[np.ndarray] = None  # (num_time_bins,)
-    feature_temporal_importance: Optional[np.ndarray] = None  # (num_time_bins, num_features)
+    feature_temporal_importance: Optional[
+        np.ndarray] = None  # (num_time_bins, num_features)
 
 
 class ModelWrapper(torch.nn.Module):
@@ -41,7 +42,8 @@ class ModelWrapper(torch.nn.Module):
     def __init__(
         self,
         model: "SurvivalModel",
-        output_type: Literal["pmf", "cif", "expected_time", "median_time", "logits"] = "expected_time",
+        output_type: Literal["pmf", "cif", "expected_time", "median_time",
+                             "logits"] = "expected_time",
         target_bin: Optional[int] = None,
     ):
         super().__init__()
@@ -63,7 +65,10 @@ class ModelWrapper(torch.nn.Module):
         seq_len = x.shape[1]
 
         # Create lengths tensor (assume all valid)
-        lengths = torch.full((batch_size,), seq_len, dtype=torch.long, device=x.device)
+        lengths = torch.full((batch_size, ),
+                             seq_len,
+                             dtype=torch.long,
+                             device=x.device)
 
         # Get model outputs
         outputs = self.model(x, lengths, return_attention=False)
@@ -127,7 +132,8 @@ class SurvivalSHAP:
             device: Device to run computations on
         """
         if shap is None:
-            raise ImportError("shap package not installed. Install with: pip install shap")
+            raise ImportError(
+                "shap package not installed. Install with: pip install shap")
 
         self.model = model
         self.device = device
@@ -136,7 +142,8 @@ class SurvivalSHAP:
 
         # Convert background data to tensor
         if isinstance(background_data, np.ndarray):
-            background_data = torch.tensor(background_data, dtype=torch.float32)
+            background_data = torch.tensor(background_data,
+                                           dtype=torch.float32)
         self.background_data = background_data.to(device)
 
         # Store dimensions
@@ -146,7 +153,9 @@ class SurvivalSHAP:
 
         # Feature names
         if feature_names is None:
-            self.feature_names = [f"Feature_{i}" for i in range(self.num_features)]
+            self.feature_names = [
+                f"Feature_{i}" for i in range(self.num_features)
+            ]
         else:
             self.feature_names = feature_names
 
@@ -167,17 +176,24 @@ class SurvivalSHAP:
             wrapped_model.eval()
 
             if method == "deep":
-                explainer = shap.DeepExplainer(wrapped_model, self.background_data)
+                explainer = shap.DeepExplainer(wrapped_model,
+                                               self.background_data)
             elif method == "gradient":
-                explainer = shap.GradientExplainer(wrapped_model, self.background_data)
+                explainer = shap.GradientExplainer(wrapped_model,
+                                                   self.background_data)
             elif method == "kernel":
                 # For kernel, we need a function not a module
                 def model_fn(x):
                     with torch.no_grad():
-                        x_tensor = torch.tensor(x, dtype=torch.float32, device=self.device)
+                        x_tensor = torch.tensor(x,
+                                                dtype=torch.float32,
+                                                device=self.device)
                         out = wrapped_model(x_tensor)
                         return out.cpu().numpy()
-                explainer = shap.KernelExplainer(model_fn, self.background_data.cpu().numpy())
+
+                explainer = shap.KernelExplainer(
+                    model_fn,
+                    self.background_data.cpu().numpy())
             else:
                 raise ValueError(f"Unknown method: {method}")
 
@@ -188,7 +204,8 @@ class SurvivalSHAP:
     def compute_shap_values(
         self,
         data: Union[torch.Tensor, np.ndarray],
-        output_type: Literal["pmf", "cif", "expected_time", "median_time", "logits"] = "expected_time",
+        output_type: Literal["pmf", "cif", "expected_time", "median_time",
+                             "logits"] = "expected_time",
         target_bin: Optional[int] = None,
         method: Literal["deep", "gradient", "kernel"] = "gradient",
     ) -> np.ndarray:
@@ -244,7 +261,8 @@ class SurvivalSHAP:
         Returns:
             (importance_scores, shap_values) - importance per feature, raw SHAP values
         """
-        shap_values = self.compute_shap_values(data, output_type, target_bin, method)
+        shap_values = self.compute_shap_values(data, output_type, target_bin,
+                                               method)
 
         # Aggregate across time dimension first, then samples
         if aggregation == "mean_abs":
@@ -282,7 +300,8 @@ class SurvivalSHAP:
         Returns:
             (importance_scores, shap_values) - importance per time step/bin
         """
-        shap_values = self.compute_shap_values(data, output_type, target_bin, method)
+        shap_values = self.compute_shap_values(data, output_type, target_bin,
+                                               method)
         seq_len = shap_values.shape[1]
 
         # Aggregate across features first
@@ -300,7 +319,8 @@ class SurvivalSHAP:
             bin_edges = np.linspace(0, seq_len, num_time_bins + 1, dtype=int)
             binned_importance = np.zeros((time_shap.shape[0], num_time_bins))
             for i in range(num_time_bins):
-                binned_importance[:, i] = time_shap[:, bin_edges[i]:bin_edges[i+1]].mean(axis=1)
+                binned_importance[:, i] = time_shap[:, bin_edges[i]:bin_edges[
+                    i + 1]].mean(axis=1)
             time_shap = binned_importance
 
         # Average across samples
@@ -329,7 +349,8 @@ class SurvivalSHAP:
         Returns:
             (importance_matrix, shap_values) - shape (num_time_bins, num_features)
         """
-        shap_values = self.compute_shap_values(data, output_type, target_bin, method)
+        shap_values = self.compute_shap_values(data, output_type, target_bin,
+                                               method)
         seq_len = shap_values.shape[1]
 
         if num_time_bins is None:
@@ -338,9 +359,11 @@ class SurvivalSHAP:
         # Bin timesteps
         if num_time_bins < seq_len:
             bin_edges = np.linspace(0, seq_len, num_time_bins + 1, dtype=int)
-            binned_shap = np.zeros((shap_values.shape[0], num_time_bins, self.num_features))
+            binned_shap = np.zeros(
+                (shap_values.shape[0], num_time_bins, self.num_features))
             for i in range(num_time_bins):
-                binned_shap[:, i, :] = shap_values[:, bin_edges[i]:bin_edges[i+1], :].mean(axis=1)
+                binned_shap[:, i, :] = shap_values[:, bin_edges[i]:bin_edges[
+                    i + 1], :].mean(axis=1)
             shap_for_matrix = binned_shap
         else:
             shap_for_matrix = shap_values
@@ -374,9 +397,10 @@ class SurvivalSHAP:
         """
         if isinstance(data, CellDataset):
             data = sample_cell_dataset(data, num_samples=num_samples)
-            
+
         # Compute raw SHAP values
-        shap_values = self.compute_shap_values(data, output_type, target_bin, method)
+        shap_values = self.compute_shap_values(data, output_type, target_bin,
+                                               method)
 
         # Feature importance
         feature_importance = np.abs(shap_values).mean(axis=(0, 1))
@@ -389,7 +413,9 @@ class SurvivalSHAP:
             bin_edges = np.linspace(0, seq_len, num_time_bins + 1, dtype=int)
             binned_temporal = np.zeros((temporal_shap.shape[0], num_time_bins))
             for i in range(num_time_bins):
-                binned_temporal[:, i] = temporal_shap[:, bin_edges[i]:bin_edges[i+1]].mean(axis=1)
+                binned_temporal[:, i] = temporal_shap[:,
+                                                      bin_edges[i]:bin_edges[
+                                                          i + 1]].mean(axis=1)
             temporal_importance = binned_temporal.mean(axis=0)
             time_bins = bin_edges
         else:
@@ -400,9 +426,11 @@ class SurvivalSHAP:
         # Feature-temporal matrix
         if num_time_bins < seq_len:
             bin_edges = np.linspace(0, seq_len, num_time_bins + 1, dtype=int)
-            binned_ft = np.zeros((shap_values.shape[0], num_time_bins, self.num_features))
+            binned_ft = np.zeros(
+                (shap_values.shape[0], num_time_bins, self.num_features))
             for i in range(num_time_bins):
-                binned_ft[:, i, :] = shap_values[:, bin_edges[i]:bin_edges[i+1], :].mean(axis=1)
+                binned_ft[:, i, :] = shap_values[:, bin_edges[i]:bin_edges[
+                    i + 1], :].mean(axis=1)
             ft_importance = np.abs(binned_ft).mean(axis=0)
         else:
             ft_importance = np.abs(shap_values).mean(axis=0)
@@ -415,7 +443,7 @@ class SurvivalSHAP:
             temporal_importance=temporal_importance,
             feature_temporal_importance=ft_importance,
         )
-    
+
     def analyse_all_bins(
         self,
         data: Union[torch.Tensor, np.ndarray, 'CellDataset'],
@@ -539,9 +567,13 @@ class SurvivalSHAP:
         colors = plt.cm.tab10(np.linspace(0, 1, top_k))
 
         for idx, feat_idx in enumerate(top_indices):
-            ax.plot(x, importance_matrix[:, feat_idx], 'o-',
-                   color=colors[idx], label=self.feature_names[feat_idx],
-                   linewidth=2, markersize=6)
+            ax.plot(x,
+                    importance_matrix[:, feat_idx],
+                    'o-',
+                    color=colors[idx],
+                    label=self.feature_names[feat_idx],
+                    linewidth=2,
+                    markersize=6)
 
         if bin_labels is None:
             bin_labels = [f"Bin {i}" for i in range(num_bins)]
@@ -621,9 +653,13 @@ class SurvivalSHAP:
         colors = plt.cm.tab10(np.linspace(0, 1, top_k))
         x = np.arange(num_bins)
         for idx, feat_idx in enumerate(top_indices):
-            ax3.plot(x, importance_matrix[:, feat_idx], 'o-',
-                    color=colors[idx], label=self.feature_names[feat_idx],
-                    linewidth=2, markersize=5)
+            ax3.plot(x,
+                     importance_matrix[:, feat_idx],
+                     'o-',
+                     color=colors[idx],
+                     label=self.feature_names[feat_idx],
+                     linewidth=2,
+                     markersize=5)
         ax3.set_xticks(x)
         ax3.set_xticklabels(bin_labels, rotation=45, ha='right')
         ax3.set_xlabel("Target Time Bin")
@@ -643,7 +679,9 @@ class SurvivalSHAP:
         ax4.set_title("Total Feature Importance per Bin")
         ax4.grid(axis='y', alpha=0.3)
 
-        plt.suptitle("SHAP Analysis Across All Target Bins", fontsize=14, fontweight='bold')
+        plt.suptitle("SHAP Analysis Across All Target Bins",
+                     fontsize=14,
+                     fontweight='bold')
 
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -730,9 +768,12 @@ class SurvivalSHAP:
         ax.set_yticklabels(self.feature_names)
 
         # X-axis labels (time bins)
-        if time_bins is not None and len(time_bins) == importance_matrix.shape[0] + 1:
-            bin_labels = [f"{time_bins[i]:.0f}-{time_bins[i+1]:.0f}"
-                         for i in range(len(time_bins)-1)]
+        if time_bins is not None and len(
+                time_bins) == importance_matrix.shape[0] + 1:
+            bin_labels = [
+                f"{time_bins[i]:.0f}-{time_bins[i+1]:.0f}"
+                for i in range(len(time_bins) - 1)
+            ]
             ax.set_xticks(range(len(bin_labels)))
             ax.set_xticklabels(bin_labels, rotation=45, ha='right')
 
@@ -772,7 +813,11 @@ class SurvivalSHAP:
         ax2 = fig.add_subplot(gs[0, 1])
         x = np.arange(len(results.temporal_importance))
         ax2.bar(x, results.temporal_importance, color='coral', alpha=0.7)
-        ax2.plot(x, results.temporal_importance, 'o-', color='darkred', markersize=3)
+        ax2.plot(x,
+                 results.temporal_importance,
+                 'o-',
+                 color='darkred',
+                 markersize=3)
         ax2.set_xlabel("Time bin")
         ax2.set_ylabel("Mean |SHAP value|")
         ax2.set_title("Temporal Importance")
@@ -780,7 +825,9 @@ class SurvivalSHAP:
 
         # Feature-temporal heatmap (bottom, spanning both columns)
         ax3 = fig.add_subplot(gs[1, :])
-        im = ax3.imshow(results.feature_temporal_importance.T, aspect='auto', cmap='YlOrRd')
+        im = ax3.imshow(results.feature_temporal_importance.T,
+                        aspect='auto',
+                        cmap='YlOrRd')
         ax3.set_xlabel("Time bin")
         ax3.set_ylabel("Feature")
         ax3.set_title("Feature-Temporal Importance")
@@ -795,7 +842,10 @@ class SurvivalSHAP:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
         return fig
 
-def sample_cell_dataset(dataset: "CellDataset", num_samples: int = 100, max_len: int = 1000) -> torch.Tensor:
+
+def sample_cell_dataset(dataset: "CellDataset",
+                        num_samples: int = 100,
+                        max_len: int = 1000) -> torch.Tensor:
     """
     Sample random sequences from CellDataset..
 
@@ -808,12 +858,13 @@ def sample_cell_dataset(dataset: "CellDataset", num_samples: int = 100, max_len:
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=num_samples,
-        shuffle=True,
-        collate_fn=lambda batch: collate_fn(batch, dataset, max_seq_len=max_len),
-    )
+        collate_fn=lambda batch: collate_fn(
+            batch, dataset, max_seq_len=max_len),
+        sampler=dataset.make_sampler())
     batch = next(iter(dataloader))
     return batch['features']
-    
+
+
 def create_background_from_dataset(
     dataset: "CellDataset",
     num_samples: int = 100,
@@ -831,8 +882,9 @@ def create_background_from_dataset(
     bg_dataset = sample_cell_dataset(dataset, num_samples, max_len)
     if sample_type == 'mean':
         bg_dataset = torch.mean(bg_dataset, dim=0, keepdim=True)
-    
+
     return bg_dataset
+
 
 def explain_single_sample(
     model: "SurvivalModel",
@@ -888,6 +940,3 @@ def explain_single_sample(
 
 # # Alias for backward compatibility
 # SHAP = SurvivalSHAP
-
-
-        

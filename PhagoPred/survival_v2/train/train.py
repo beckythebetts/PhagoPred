@@ -33,13 +33,13 @@ def train(
         train_loader = DataLoader(
             train_dataset,
             batch_size=train_config.batch_size,
-            shuffle=True,
-            collate_fn=lambda batch: collate_fn(batch, device=device))
+            collate_fn=lambda batch: collate_fn(batch, device=device),
+            sampler=train_dataset.make_sampler())
         val_loader = DataLoader(
             val_dataset,
             batch_size=train_config.batch_size,
-            shuffle=False,
-            collate_fn=lambda batch: collate_fn(batch, device=device))
+            collate_fn=lambda batch: collate_fn(batch, device=device),
+            sampler=val_dataset.make_sampler())
 
         optimiser = torch.optim.Adam(model.parameters(), lr=train_config.lr)
         scheduler_type = train_config.scheduler

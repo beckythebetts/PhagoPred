@@ -125,13 +125,13 @@ class BinaryCellDataset(CellDataset):
         if self._pmfs_cache[cell_metadata.file_idxs] is not None:
             full_pmf = self._pmfs_cache[
                 cell_metadata.file_idxs][:, cell_metadata.local_cell_idxs]
-            survival = 1.0 - full_pmf[:landmark_frame].sum()
+            survival = 1.0 - full_pmf[:landmark_frame + 1].sum()
             survival = np.clip(survival, 0.0, 1.0)
             horizon_end = min(landmark_frame + self.prediction_horizon + 1,
                               len(full_pmf))
             if survival > 0.0:
-                event_probability = full_pmf[landmark_frame:horizon_end].sum(
-                ) / survival
+                event_probability = full_pmf[landmark_frame +
+                                             1:horizon_end].sum() / survival
             else:
                 event_probability = 0.0
             event_probability = float(np.clip(event_probability, 0.0, 1.0))
@@ -141,9 +141,10 @@ class BinaryCellDataset(CellDataset):
         """Get positive weight for weighted BCE loss.
         Num -ve / num +ve, estimated from n_samples random samples.
         """
-        indices = np.random.choice(len(self),
-                                   size=min(n_samples, len(self)),
-                                   replace=False)
+        # indices = np.random.choice(len(self),
+        #                            size=min(n_samples, len(self)),
+        #                            replace=False)
+        indices = self.sample_indices(n_samples)
         events = [self[int(i)].event for i in indices]
         n_pos = sum(events)
         n_neg = len(events) - n_pos
@@ -193,8 +194,9 @@ class BinaryCellDataset(CellDataset):
 
     def _compute_variance(self, sample_size: int = 1000) -> None:
         vals = []
-        for _ in tqdm(range(sample_size), 'Smapling cells for cdf variance'):
-            cell_idx = np.random.randint(len(self.cell_metadata))
+        idxs = self.sample_indices(sample_size)
+        for cell_idx in tqdm(idxs, 'Smapling cells for cdf variance'):
+            # cell_idx = np.random.randint(len(self.cell_metadata))
             cell = self[cell_idx]
             vals.append(cell.event_probability)
 

@@ -146,7 +146,7 @@ class Min(Expr):
         self.sources = [Var(s) if isinstance(s, str) else s for s in sources]
 
     def __call__(self, context):
-        return min(s(context) for s in self.sources)
+        return np.minimum.reduce([s(context) for s in self.sources])
 
     def partial(self, var_name, lag, context):
         vals = [s(context) for s in self.sources]
@@ -160,7 +160,7 @@ class Max(Expr):
         self.sources = [Var(s) if isinstance(s, str) else s for s in sources]
 
     def __call__(self, context):
-        return max(s(context) for s in self.sources)
+        return np.maximum.reduce([s(context) for s in self.sources])
 
     def partial(self, var_name, lag, context):
         vals = [s(context) for s in self.sources]
@@ -260,7 +260,7 @@ class Hill(Expr):
         self.K = K
 
     def __call__(self, context):
-        val = max(self.source(context), 0.0)
+        val = np.maximum(self.source(context), 0.0)
         return val**self.n / (self.K**self.n + val**self.n)
 
     def partial(self, var_name, lag, context):

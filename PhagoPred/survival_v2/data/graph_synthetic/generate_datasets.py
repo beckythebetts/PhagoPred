@@ -5,6 +5,7 @@ from typing import Literal
 
 import h5py
 import numpy as np
+from scipy.special import expit
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
@@ -13,26 +14,34 @@ from .rules import Rule
 
 
 class OffsetSigmoid:
-    """Sigmoid hazard transform: h(x) = 1 / (1 + exp(delta - x)).
+    """Sigmoid hazard transform: h(x) = 1 / (1 + exp(delta - scale * x)).
 
-    delta is fitted by calibrate_hazard so that the observed death fraction
-    matches the target.  Instances can be saved to / loaded from HDF5
-    metadata via to_metadata / from_metadata.
+    ``scale`` sets how spread out the (scaled) hazard signal is, and so how
+    predictable deaths are; ``delta`` sets how many cells die. Both are
+    fitted by calibrate_hazard. Instances can be saved to / loaded from HDF5
+    metadata via to_metadata / from_metadata; files written before ``scale``
+    existed load with scale 1.
     """
     name = 'offset_sigmoid'
 
-    def __init__(self, delta: float = 0.0):
+    def __init__(self, delta: float = 0.0, scale: float = 1.0):
         self.delta = delta
+        self.scale = scale
 
     def __call__(self, x: np.ndarray) -> np.ndarray:
-        return 1.0 / (1.0 + np.exp(self.delta - x))
+        return expit(self.scale * x - self.delta)
 
     def to_metadata(self) -> dict:
-        return {'hazard_func': self.name, 'delta': self.delta}
+        return {
+            'hazard_func': self.name,
+            'delta': self.delta,
+            'scale': self.scale
+        }
 
     @classmethod
     def from_metadata(cls, attrs) -> OffsetSigmoid:
-        return cls(delta=float(attrs['delta']))
+        return cls(delta=float(attrs['delta']),
+                   scale=float(attrs.get('scale', 1.0)))
 
 
 _HAZARD_FUNCS: dict[str, type] = {
@@ -57,28 +66,35 @@ def _pmf_from_hazards(hazards: np.ndarray) -> np.ndarray:
     return pmf
 
 
-def _observe_death_fraction(
-    graph: CausalGraph,
+def _expected_death_fraction(
+    pre_hazard: np.ndarray,
+    window_hazard: np.ndarray,
     start_frames: np.ndarray,
     end_frames: np.ndarray,
     offset: float,
-    n_samples: int,
+    scale: float = 1.0,
 ) -> float:
-    """Estimate the death fraction for a given hazard offset over n_samples cells."""
-    hazard_func = OffsetSigmoid(offset)
-    deaths = 0
-    for c in range(n_samples):
-        signals = graph.sample_graph()
-        hazard_rates = hazard_func(signals['Hazard'].copy())
-        pmf = _pmf_from_hazards(hazard_rates)
-        cif = np.cumsum(pmf)
-        start, end = int(start_frames[c]), int(end_frames[c])
-        u = np.random.rand()
-        if u <= cif.max():
-            df = float(np.argmax(cif >= u))
-            if start <= df <= end:
-                deaths += 1
-    return deaths / n_samples
+    """Expected fraction of cells dying within [start, end] of the window, for
+    a given hazard offset, among cells that survive the death-active burn-in.
+
+    ``pre_hazard`` (death_burn_in, N) and ``window_hazard`` (T, N) are raw
+    Hazard signals from one fixed pool. Survival through the burn-in is
+    applied as a weight rather than by rejection sampling, so the result is a
+    smooth, noise-free function of ``offset``.
+    """
+    hazard_func = OffsetSigmoid(offset, scale)
+    weights = np.prod(1.0 - np.clip(hazard_func(pre_hazard), 0.0, 1.0), axis=0)
+    rates = np.clip(hazard_func(window_hazard), 0.0, 1.0)
+    cif = np.cumsum(_pmf_from_hazards(rates), axis=0)
+    cells = np.arange(cif.shape[1])
+    end = np.clip(end_frames.astype(int), 0, cif.shape[0] - 1)
+    start = start_frames.astype(int)
+    before_start = np.where(start > 0, cif[np.maximum(start - 1, 0), cells],
+                            0.0)
+    p_death = cif[end, cells] - before_start
+    if weights.sum() <= 0:
+        return 0.0
+    return float(np.sum(weights * p_death) / weights.sum())
 
 
 def calibrate_hazard(
@@ -87,7 +103,8 @@ def calibrate_hazard(
     start_frames: np.ndarray,
     end_frames: np.ndarray,
     target_death_fraction: float,
-    n_calib: int = 200,
+    hazard_spread: float | None = 3.0,
+    n_calib: int = 1000,
     max_iter: int = 50,
     tol: float = 0.02,
     step_init: float = 10.0,
@@ -107,18 +124,43 @@ def calibrate_hazard(
     unreachable (a floor above/below it) the bracketing phase says so rather
     than iterating forever.  The offset giving the closest observed death
     fraction is tracked and returned, so a sensible result comes back even if
-    ``tol`` is never met exactly."""
+    ``tol`` is never met exactly.
+
+    One pool of ``n_calib`` cells is simulated up front (including the
+    graph's burn-in) and reused for every offset; cells dying during the
+    death-active burn-in are accounted for by survival weights (see
+    ``_expected_death_fraction``), matching the rejection used when the
+    datasets are generated.
+
+    Before the offset search, ``scale`` is set so the scaled Hazard signal
+    has a standard deviation of ``hazard_spread`` over the pool's window,
+    making scenarios comparably predictable whatever the scale of their
+    Hazard rule's output (None keeps scale 1). The spread is measured on the
+    raw signal, so it does not depend on the offset."""
     iters = 0
     best_offset = 0.0
     best_err = float('inf')
 
+    pool = graph.simulate(n_calib,
+                          num_frames,
+                          keep_context=graph.death_burn_in,
+                          post_noise=False)['Hazard']
+    pre_hazard = pool[:graph.death_burn_in]
+    window_hazard = pool[graph.death_burn_in:]
+    start_frames = np.resize(np.asarray(start_frames), n_calib)
+    end_frames = np.resize(np.asarray(end_frames), n_calib)
+
+    scale = 1.0
+    raw_spread = float(window_hazard.std())
+    if hazard_spread is not None and raw_spread > 0:
+        scale = hazard_spread / raw_spread
+    print(f"  Hazard spread {raw_spread:.4g} -> scale {scale:.4g} "
+          f"(target spread {hazard_spread})")
+
     def evaluate(offset: float, phase: str) -> float:
         nonlocal iters, best_offset, best_err
-        obs = _observe_death_fraction(graph,
-                                      start_frames,
-                                      end_frames,
-                                      offset=offset,
-                                      n_samples=n_calib)
+        obs = _expected_death_fraction(pre_hazard, window_hazard, start_frames,
+                                       end_frames, offset, scale)
         err = abs(obs - target_death_fraction)
         if err < best_err:
             best_err = err
@@ -134,7 +176,7 @@ def calibrate_hazard(
     offset = 0.0
     obs = evaluate(offset, "bracket")
     if best_err <= tol:
-        return OffsetSigmoid(delta=best_offset)
+        return OffsetSigmoid(delta=best_offset, scale=scale)
 
     step = step_init
     lo = hi = None
@@ -145,7 +187,7 @@ def calibrate_hazard(
             offset += step
             obs = evaluate(offset, "bracket")
             if best_err <= tol:
-                return OffsetSigmoid(delta=best_offset)
+                return OffsetSigmoid(delta=best_offset, scale=scale)
             if obs <= target_death_fraction:
                 hi = offset
                 break
@@ -155,7 +197,7 @@ def calibrate_hazard(
             print(f"  Calibration warning: target {target_death_fraction:.3f} "
                   f"unreachable; observed floored at {lo_obs:.3f} by "
                   f"offset {lo:.4f}. Returning best offset.")
-            return OffsetSigmoid(delta=best_offset)
+            return OffsetSigmoid(delta=best_offset, scale=scale)
     else:
         # Too few deaths -> lower offset until observed rises to/above target.
         hi, hi_obs = offset, obs
@@ -163,7 +205,7 @@ def calibrate_hazard(
             offset -= step
             obs = evaluate(offset, "bracket")
             if best_err <= tol:
-                return OffsetSigmoid(delta=best_offset)
+                return OffsetSigmoid(delta=best_offset, scale=scale)
             if obs >= target_death_fraction:
                 lo = offset
                 break
@@ -173,7 +215,7 @@ def calibrate_hazard(
             print(f"  Calibration warning: target {target_death_fraction:.3f} "
                   f"unreachable; observed capped at {hi_obs:.3f} by "
                   f"offset {hi:.4f}. Returning best offset.")
-            return OffsetSigmoid(delta=best_offset)
+            return OffsetSigmoid(delta=best_offset, scale=scale)
 
     # --- Phase 2: bisection --------------------------------------------
     # Invariant: lo < hi and observed(lo) >= target >= observed(hi).
@@ -187,7 +229,7 @@ def calibrate_hazard(
         else:
             hi = mid
 
-    return OffsetSigmoid(delta=best_offset)
+    return OffsetSigmoid(delta=best_offset, scale=scale)
 
 
 # --- Old analytical calibration (kept for reference; superseded by the
@@ -292,8 +334,17 @@ def _generate_cells(
     all_cifs = np.empty((num_frames, num_cells), dtype=np.float32)
     all_deaths = np.full(num_cells, np.nan, dtype=np.float32)
 
+    # Burn-in and survivor conditioning happen inside simulate(); every cell
+    # returned was alive at frame 0.
+    print(f'Simulating {num_cells} cells (burn-in {graph.burn_in}, '
+          f'death-active burn-in {graph.death_burn_in})')
+    sim = graph.simulate(num_cells,
+                         num_frames,
+                         hazard_func=hazard_calibration_func,
+                         post_noise=True)
+
     for c in tqdm(range(num_cells), desc='Generating cells'):
-        signals = graph.sample_graph()
+        signals = {name: arr[:, c] for name, arr in sim.items()}
         start, end = int(start_frames[c]), int(end_frames[c])
 
         hazard_signal = signals['Hazard'].copy()
@@ -347,6 +398,8 @@ def _save_dataset(
     late_entry_prob: float,
     feature_mask_prob: float,
     hazard_calibration_func: OffsetSigmoid,
+    burn_in: int = 0,
+    death_burn_in: int = 0,
 ) -> None:
     filename = Path(filename)
     filename.parent.mkdir(parents=True, exist_ok=True)
@@ -374,6 +427,8 @@ def _save_dataset(
         cells.attrs['late_entry_prob'] = late_entry_prob
         cells.attrs['feature_mask_prob'] = feature_mask_prob
         cells.attrs['feature_names'] = feature_names
+        cells.attrs['burn_in'] = burn_in
+        cells.attrs['death_burn_in'] = death_burn_in
         for key, val in hazard_calibration_func.to_metadata().items():
             cells['Phase']['HazardRates'].attrs[key] = val
 
@@ -443,7 +498,7 @@ def generate_dataset(
     )
     _save_dataset(train_filename, *train_data, feature_names, non_hazard_names,
                   num_frames, late_entry_prob, feature_mask_prob,
-                  hazard_calibration_func)
+                  hazard_calibration_func, graph.burn_in, graph.death_burn_in)
 
     if seed is not None:
         np.random.seed(seed + 1)
@@ -463,7 +518,7 @@ def generate_dataset(
     )
     _save_dataset(val_filename, *val_data, feature_names, non_hazard_names,
                   num_frames, late_entry_prob, feature_mask_prob,
-                  hazard_calibration_func)
+                  hazard_calibration_func, graph.burn_in, graph.death_burn_in)
 
     if cal_filename is not None:
         if seed is not None:
@@ -485,7 +540,8 @@ def generate_dataset(
         )
         _save_dataset(cal_filename, *cal_data, feature_names, non_hazard_names,
                       num_frames, late_entry_prob, feature_mask_prob,
-                      hazard_calibration_func)
+                      hazard_calibration_func, graph.burn_in,
+                      graph.death_burn_in)
 
 
 def estimate_variances(
@@ -500,13 +556,18 @@ def estimate_variances(
     max_time_to_death: int | None = None,
 ) -> dict[str, list[float]]:
     values = {'hazard': [], 'cdf': [], 'pmf': []}
+    sample_weightings = []
     for _ in tqdm(range(trunk_sample_size), desc="Estimating Variances"):
         # Genrate full sample signal
-        base_signals = graph.sample_graph(max_sequence_length)
+        base_signals = graph.simulate(1,
+                                      max_sequence_length,
+                                      hazard_calibration_func,
+                                      keep_context=graph.max_lag,
+                                      post_noise=False)
         base_hazard = hazard_calibration_func(base_signals['Hazard'])
 
         # Sample death frame
-        base_pmf = _pmf_from_hazards(base_hazard)
+        base_pmf = _pmf_from_hazards(base_hazard[graph.max_lag:, 0])
         base_cif = np.cumsum(base_pmf)
         u = np.random.rand()
         if u <= base_cif.max():
@@ -516,37 +577,42 @@ def estimate_variances(
 
         # Sample landmark frames
         lf = np.arange(max_sequence_length)
-        lf = lf[lf > min_sequence_length]
+        lf = lf[lf >= min_sequence_length]
         if death_frame is not None:
-            lf = lf[lf <= death_frame]
+            lf = lf[lf < death_frame]
+        else:
+            lf = lf[lf < max_sequence_length - horizon - 1]
             # if max_time_to_death is not None:
             #     lf = lf[death_frame - lf < max_time_to_death]
         if len(lf) == 0:
             continue
+        sample_weighting = len(lf)
         lf = np.random.choice(lf)
 
         # Branch from landmark frame
         branch_signals = {}
         for feature in graph.features:
-            trunk = base_signals[feature.name][:lf]
+            trunk = base_signals[feature.name][:lf + graph.max_lag, 0]
             extensions = np.stack([
-                feature.generate_signal(horizon)
+                feature.generate_signal(horizon + 1)
                 for _ in range(branch_smaple_size)
             ],
                                   axis=1)
             branch_signals[feature.name] = np.vstack([
                 np.broadcast_to(trunk[:, np.newaxis],
-                                (lf, branch_smaple_size)),
+                                (lf + graph.max_lag, branch_smaple_size)),
                 extensions,
             ])
 
-        for t in range(lf, lf + horizon):
+        for t in range(lf + graph.max_lag, lf + graph.max_lag + horizon + 1):
             for rule in graph.rules:
                 rule.apply_step(branch_signals, t)
         # === NEED TO INCLUDE POST NOISE???===
 
         # Get hazard of each branch
-        branch_hazards = hazard_calibration_func(branch_signals['Hazard'][lf:])
+        branch_hazards = hazard_calibration_func(
+            branch_signals['Hazard'][lf + graph.max_lag + 1:lf +
+                                     graph.max_lag + horizon + 1])
         branch_cdfs = np.cumsum(_pmf_from_hazards(branch_hazards), axis=0)
 
         if hazard_bins is not None:
@@ -562,15 +628,21 @@ def estimate_variances(
         values['hazard'].append(h.T)  # (B, max_horizon_or_n_bins)
         values['cdf'].append(branch_cdfs.T)
         values['pmf'].append(pmfs.T)
+        sample_weightings.append(sample_weighting)
 
-        variances = {name: {} for name in values}
+    variances = {name: {} for name in values}
+    sample_weightings = sample_weightings / np.sum(sample_weightings)
+    for name, vals in values.items():
+        vals = np.array(vals)
+        branch_var = np.average(np.var(vals, axis=1),
+                                axis=0,
+                                weights=sample_weightings)
+        m = vals.mean(axis=1)  # (N, H)
+        grand = np.average(m, axis=0, weights=sample_weightings)
+        total_var = branch_var + np.average(
+            (m - grand)**2, axis=0, weights=sample_weightings)
 
-        for name, vals in values.items():
-            vals = np.array(vals)
-            branch_var = np.average(np.var(vals, axis=1), axis=0)
-            total_var = branch_var + np.var(np.mean(vals, axis=1), axis=0)
-
-            variances[name] = {'Total': total_var, 'Unobserved': branch_var}
+        variances[name] = {'Total': total_var, 'Unobserved': branch_var}
 
     return variances
 

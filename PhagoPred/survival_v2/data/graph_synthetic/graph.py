@@ -73,15 +73,35 @@ class CausalGraph:
     def __init__(self,
                  features: list[Feature],
                  rules: list[Rule],
-                 time_steps: int = None):
+                 time_steps: int = None,
+                 burn_in: int = 0,
+                 death_burn_in: int = 0):
+        """
+        Args:
+            burn_in: frames simulated (and discarded) before frame 0, so every
+                trajectory starts from the process's long-run behaviour rather
+                than from zero.
+            death_burn_in: the last ``death_burn_in`` burn-in frames run the
+                death process; cells dying there are rejected, so frame 0 only
+                holds cells that were alive when observation started.
+        """
         self.features = features
         self.rules = rules
         if time_steps is None:
             time_steps = max(rule.get_delay() for rule in rules) + 1
         self.time_steps = time_steps
+        if death_burn_in > burn_in:
+            raise ValueError(
+                f'death_burn_in ({death_burn_in}) > burn_in ({burn_in})')
+        self.burn_in = burn_in
+        self.death_burn_in = death_burn_in
         self.nx_graph = self._build_nx_graph()
 
         self.map = None  # Mapping of downstream children nodes for each parent node
+
+    @property
+    def max_lag(self) -> int:
+        return max(rule.max_lag for rule in self.rules)
 
     def get_variances(
         self,
@@ -221,17 +241,105 @@ class CausalGraph:
 
         return G
 
+    def simulate(
+        self,
+        n_cells: int,
+        window: int,
+        hazard_func: callable | None = None,
+        keep_context: int = 0,
+        post_noise: bool = True,
+        return_noise: bool = False,
+        max_batch_cells: int = 1000,
+        max_rejection_factor: int = 100,
+    ) -> dict[str, np.ndarray] | tuple[dict, dict]:
+        """Simulate ``n_cells`` trajectories at once, as (T, n_cells) arrays.
+
+        ``self.burn_in`` frames are simulated before frame 0. If
+        ``hazard_func`` is given, cells dying during the last
+        ``self.death_burn_in`` of those frames are rejected (and replaced by
+        further simulation), so only cells alive at frame 0 are returned.
+
+        Returns frames [-keep_context, window) (context first), plus the
+        matching pre-noise if ``return_noise``. ``post_noise`` adds each
+        feature's observation noise to the returned signals only.
+        """
+        burn_in, death_burn_in = self.burn_in, self.death_burn_in
+        if keep_context > burn_in:
+            raise ValueError(
+                f'keep_context ({keep_context}) > burn_in ({burn_in})')
+        T = burn_in + window
+        start = burn_in - keep_context
+        condition = hazard_func is not None and death_burn_in > 0
+
+        kept_sig, kept_noise = [], []
+        n_kept, n_simulated, accept_rate = 0, 0, 1.0
+        while n_kept < n_cells:
+            if n_simulated > max_rejection_factor * n_cells:
+                raise RuntimeError(
+                    f'Only {n_kept}/{n_cells} cells survived the burn-in out '
+                    f'of {n_simulated} simulated; the hazard is too high '
+                    f'during the last {death_burn_in} burn-in frames.')
+            n = min(int(np.ceil((n_cells - n_kept) / accept_rate * 1.1)) + 1,
+                    max_batch_cells)
+            n_simulated += n
+            noise = {
+                f.name: np.stack([f.generate_signal(T) for _ in range(n)],
+                                 axis=1)
+                for f in self.features
+            }
+            sig = {name: arr.copy() for name, arr in noise.items()}
+            for t in range(T):
+                for rule in self.rules:
+                    rule.apply_step(sig, t)
+
+            keep = np.ones(n, dtype=bool)
+            if condition:
+                h = np.clip(
+                    hazard_func(sig['Hazard'][burn_in - death_burn_in:burn_in]),
+                    0.0, 1.0)
+                keep = np.random.rand(n) < np.prod(1.0 - h, axis=0)
+                accept_rate = max(keep.mean(), 0.01)
+
+            kept_sig.append({k: v[start:, keep] for k, v in sig.items()})
+            kept_noise.append({k: v[start:, keep] for k, v in noise.items()})
+            n_kept += int(keep.sum())
+
+        signals = {
+            f.name: np.concatenate([b[f.name] for b in kept_sig],
+                                   axis=1)[:, :n_cells]
+            for f in self.features
+        }
+        if post_noise:
+            for f in self.features:
+                signals[f.name] += np.stack([
+                    f.post_noise.sample(keep_context + window)
+                    for _ in range(n_cells)
+                ],
+                                            axis=1)
+        if not return_noise:
+            return signals
+        noise = {
+            f.name: np.concatenate([b[f.name] for b in kept_noise],
+                                   axis=1)[:, :n_cells]
+            for f in self.features
+        }
+        return signals, noise
+
     def sample_graph(self,
                      time_steps: int = None,
                      signals: dict | None = None) -> dict[str, np.ndarray]:
-        """Simulate feature trajectories according to the graph's rules."""
+        """Simulate one trajectory according to the graph's rules.
+
+        Without ``signals``, runs ``simulate`` for a single cell (so the
+        burn-in applies, but not survivor conditioning, which needs a hazard
+        function). With caller-supplied ``signals`` (pre-noise), the rules are
+        applied to them directly from frame 0, with no burn-in.
+        """
         if time_steps is None:
             time_steps = self.time_steps
         if signals is None:
-            signals = {
-                feature.name: feature.generate_signal(time_steps)
-                for feature in self.features
-            }
+            sim = self.simulate(1, time_steps)
+            return {name: arr[:, 0] for name, arr in sim.items()}
 
         for t in range(time_steps):
             for rule in self.rules:

@@ -47,10 +47,13 @@ class outputs:
 
 @dataclass
 class baseSample:
-    signals: np.ndarray  # (num_feats, seq_len), row order == graph.features
-    noise: np.ndarray  # (num_feats, seq_len)
-    lf: int
+    # (num_feats, ctx + seq_len), row order == graph.features: ``ctx`` frames
+    # of burn-in context, then the observation window (frame 0 at ``ctx``).
+    signals: np.ndarray
+    noise: np.ndarray  # (num_feats, ctx + seq_len)
+    lf: int  # landmark, relative to the window
     death_frame: int
+    ctx: int = 0
 
 
 def _pmf_from_hazards(hazards: np.ndarray) -> np.ndarray:
@@ -59,21 +62,6 @@ def _pmf_from_hazards(hazards: np.ndarray) -> np.ndarray:
     pmf[0] = hazards[0]
     pmf[1:] = sf[:-1] * hazards[1:]
     return pmf
-
-
-def _apply_rules(graph: CausalGraph,
-                 noise: dict[str, np.ndarray],
-                 time_steps: int,
-                 copy: bool = True) -> dict[str, np.ndarray]:
-    # ``rule.apply_step`` requires a name-keyed dict (see rules.py); this stays
-    # dict-based purely to interface with it. Callers holding array-form
-    # signals/noise (``baseSample``, ``SampleWithSHAP``) convert at the
-    # boundary rather than threading dicts through the rest of the module.
-    signals = copy_signals(noise) if copy else noise
-    for t in range(time_steps):
-        for rule in graph.rules:
-            rule.apply_step(signals, t)
-    return signals
 
 
 def _pre_scale(noise) -> float:
@@ -86,10 +74,12 @@ def _pre_scale(noise) -> float:
     return float(getattr(noise, 'sigma', getattr(noise, 'scale', 1.0)))
 
 
-def _apply_hazard_rules(graph: CausalGraph, signals: dict[str, np.ndarray],
-                        time_steps: int) -> dict:
+def _apply_hazard_rules(graph: CausalGraph,
+                        signals: dict[str, np.ndarray],
+                        time_steps: int,
+                        start: int = 0) -> dict:
     hazard_rules = [r for r in graph.rules if r.target == 'Hazard']
-    for t in range(time_steps):
+    for t in range(start, time_steps):
         for rule in hazard_rules:
             rule.apply_step(signals, t)
     return (signals)
@@ -141,20 +131,24 @@ def _landmark_sample(
     return lf, death_frame
 
 
-def copy_signals(signals: dict) -> dict:
-    return {k: v.copy() for k, v in signals.items()}
-
-
-def _generate_base_sample(
-        graph: CausalGraph, seq_len: int, horizon: int, min_seq_len: int,
-        hazard_calibration_func: callable) -> baseSample | None:
-    base_noise = {
-        f.name: f.generate_signal(seq_len + horizon)
-        for f in graph.features
-    }
-    base_signals = _apply_rules(graph, base_noise, seq_len + horizon)
+def _generate_base_sample(graph: CausalGraph,
+                          seq_len: int,
+                          horizon: int,
+                          min_seq_len: int,
+                          hazard_calibration_func: callable,
+                          ctx: int = 0) -> baseSample | None:
+    """One trajectory from the same process as the datasets (burn-in and
+    survivor conditioning via ``graph.simulate``), keeping the last ``ctx``
+    burn-in frames as context before the window."""
+    sig, noise = graph.simulate(1,
+                                seq_len + horizon,
+                                hazard_func=hazard_calibration_func,
+                                keep_context=ctx,
+                                post_noise=False,
+                                return_noise=True)
+    window = {name: arr[ctx:, 0] for name, arr in sig.items()}
     landmark_sample = _landmark_sample(
-        base_signals,
+        window,
         hazard_calibration_func,
         seq_len,
         min_seq_len,
@@ -165,12 +159,11 @@ def _generate_base_sample(
     lf, death_frame = landmark_sample
 
     # Dict -> array only here, once: everything downstream of ``baseSample``
-    # (and ``SampleWithSHAP``) works in array form; ``_apply_rules`` above still
-    # needed the dict to talk to ``rule.apply_step``.
-    signals_arr = np.stack([base_signals[f.name] for f in graph.features])
-    noise_arr = np.stack([base_noise[f.name] for f in graph.features])
+    # (and ``SampleWithSHAP``) works in array form.
+    signals_arr = np.stack([sig[f.name][:, 0] for f in graph.features])
+    noise_arr = np.stack([noise[f.name][:, 0] for f in graph.features])
 
-    return baseSample(signals_arr, noise_arr, lf, death_frame)
+    return baseSample(signals_arr, noise_arr, lf, death_frame, ctx)
 
 
 def _realised_horizon_cif(hazard_signal: np.ndarray, lf: int, horizon: int,
@@ -312,34 +305,70 @@ def _build_observed_precision(graph: CausalGraph,
     return _GroundTruthPrecision(obs, lf, _observed_is_linear(graph), prec)
 
 
-def _propagate_and_target(graph, past, base_noise, lf, seq_len,
-                          hazard_calibration_func, hazard_bins, output_type,
-                          B):
+def _hazard_history(base_signals_row: np.ndarray, base_noise_row: np.ndarray,
+                    seq_len: int, n_boundary: int, B: int) -> np.ndarray:
+    """Hazard array ready for its rules to be re-applied from ``n_boundary``:
+    the boundary frames hold the base Hazard (the recursion's starting state)
+    and every later frame its base noise."""
+    hazard = np.repeat(base_noise_row[:seq_len, None], B, axis=1)
+    hazard[:n_boundary] = base_signals_row[:n_boundary, None]
+    return hazard
+
+
+def _propagate_and_target(graph,
+                          past,
+                          base_signals,
+                          base_noise,
+                          n_past,
+                          n_boundary,
+                          seq_len,
+                          hazard_calibration_func,
+                          hazard_bins,
+                          output_type,
+                          B,
+                          survival_start: int | None = None):
     """Fill observed past with ``past`` samples, propagate the horizon, read target.
 
-    ``past`` is a fresh per-call dict (feature-name-keyed, required by
-    ``rule.apply_step``); ``base_noise`` is the sample-level array.
+    Returns ``(target, log_survival)``: ``log_survival`` (B,) is each draw's
+    log-probability of surviving frames [survival_start, n_past), i.e. of
+    being alive at the landmark as the sample is known to be; zeros if
+    ``survival_start`` is None.
+
+    All arrays are in extended coordinates: burn-in context, then the window.
+    ``past`` (feature-name-keyed, required by ``rule.apply_step``) covers
+    frames [0, n_past) = context + window up to the landmark; ``base_signals``
+    and ``base_noise`` are the sample-level arrays.
 
     Hazard is not a player, so it has no entry in ``past``; its history is
-    rebuilt from its base noise and the sampled observed past (as in
+    rebuilt from the boundary state through the sampled observed past (as in
     ``_interventional_value``). Leaving it zero would drop its autoregressive
     carry-over into the horizon, so v(all pinned) would not reproduce the base
     sample's own target.
     """
-    sig = {f.name: np.zeros((seq_len, B)) for f in graph.features}
+    sig = {}
     for f_idx, f in enumerate(graph.features):
         if f.name in past:
-            sig[f.name][:lf] = past[f.name]
-            sig[f.name][lf:] = base_noise[f_idx, lf:seq_len, None]
+            s = np.empty((seq_len, B))
+            s[:n_past] = past[f.name]
+            s[n_past:] = base_noise[f_idx, n_past:seq_len, None]
         else:
-            sig[f.name][:] = base_noise[f_idx, :seq_len, None]
-    _apply_hazard_rules(graph, sig, lf)
-    for t in range(lf, seq_len):
+            s = _hazard_history(base_signals[f_idx], base_noise[f_idx],
+                                seq_len, n_boundary, B)
+        sig[f.name] = s
+    _apply_hazard_rules(graph, sig, n_past, start=n_boundary)
+    log_survival = np.zeros(B)
+    if survival_start is not None and survival_start < n_past:
+        past_rates = np.clip(
+            hazard_calibration_func(sig['Hazard'][survival_start:n_past]),
+            0.0, 1.0 - 1e-12)
+        log_survival = np.log1p(-past_rates).sum(axis=0)
+    for t in range(n_past, seq_len):
         for rule in graph.rules:
             rule.apply_step(sig, t)
-    hazard = hazard_calibration_func(sig['Hazard'][lf:seq_len])
-    return _outputs_from_hazard(hazard, hazard_bins).get_target(
+    hazard = hazard_calibration_func(sig['Hazard'][n_past:seq_len])
+    target = _outputs_from_hazard(hazard, hazard_bins).get_target(
         output_type, hazard_bins)  # (B,)
+    return target, log_survival
 
 
 def _true_log_prior(graph, past, prec: _GroundTruthPrecision,
@@ -369,9 +398,18 @@ def _true_log_prior(graph, past, prec: _GroundTruthPrecision,
 
 def _coalition_value(prec: _GroundTruthPrecision, pinned_mask: np.ndarray,
                      basevec: np.ndarray, xi: np.ndarray, graph, base_signals,
-                     base_noise, seq_len, hazard_calibration_func, hazard_bins,
-                     output_type, B) -> float:
-    """v(S) = E[target | observed pinned = base] via joint-conditional samples."""
+                     base_noise, seq_len, n_boundary, hazard_calibration_func,
+                     hazard_bins, output_type, B,
+                     survival_start: int | None = None) -> float:
+    """v(S) = E[target | observed pinned = base, alive at landmark] via
+    joint-conditional samples.
+
+    ``prec.lf`` here is the number of past frames in extended coordinates
+    (context + window up to the landmark); ``pinned_mask`` covers all of them,
+    with the context already set (boundary pinned, rest free). The Gaussian
+    conditional ignores that the cell survived to the landmark, so draws are
+    importance-weighted by their survival probability from
+    ``survival_start`` (None: no survival conditioning)."""
     lf, obs = prec.lf, prec.obs
     result = condition_and_sample(prec.prec, pinned_mask, basevec, xi)
     # result.values is (n_obs, B), feature-major (col[(f,t)] = fi*lf+t) and
@@ -394,9 +432,12 @@ def _coalition_value(prec: _GroundTruthPrecision, pinned_mask: np.ndarray,
         logq = (0.5 * logdet - 0.5 * np.einsum('ib,ib->b', d, result.Qff @ d) -
                 0.5 * len(result.F) * np.log(2 * np.pi))
         logw = _true_log_prior(graph, past, prec, B) - logq
-    tgt = _propagate_and_target(graph, past, base_noise, lf, seq_len,
-                                hazard_calibration_func, hazard_bins,
-                                output_type, B)
+    tgt, log_survival = _propagate_and_target(graph, past, base_signals,
+                                              base_noise, lf, n_boundary,
+                                              seq_len, hazard_calibration_func,
+                                              hazard_bins, output_type, B,
+                                              survival_start)
+    logw = logw + log_survival
     ww = np.exp(logw - logw.max())
     return float((ww * tgt).sum() / ww.sum())
 
@@ -504,10 +545,16 @@ def _shapley_axis(make_value_fn: callable, axis: str, num_segments: int,
 
 def _interventional_value(pinned_mask: np.ndarray, base_sig_lf: np.ndarray,
                           bg_sig_lf: np.ndarray, graph, base_signals,
-                          base_noise, lf, seq_len, hazard_calibration_func,
-                          hazard_bins, output_type) -> float:
-    """Distributional interventional v(S): pinned -> base, absent -> bg draws, avg."""
+                          base_noise, lf, seq_len, ctx, n_boundary,
+                          hazard_calibration_func, hazard_bins,
+                          output_type) -> float:
+    """Distributional interventional v(S): pinned -> base, absent -> bg draws, avg.
+
+    ``pinned_mask``, ``base_sig_lf`` and ``bg_sig_lf`` cover the window's
+    past only; the ``ctx`` context frames before it are not players and stay
+    at their base values (the intervention only acts on players)."""
     num_backgrounds = bg_sig_lf.shape[1]
+    n_past = ctx + lf
     perturbed = {}
     hazard_idx = None
     for f_idx, f in enumerate(graph.features):
@@ -516,37 +563,70 @@ def _interventional_value(pinned_mask: np.ndarray, base_sig_lf: np.ndarray,
             continue
         rows = slice(f_idx * lf, (f_idx + 1) * lf)  # observed feats come first
         m = pinned_mask[rows][:, None]
-        past = np.where(m, base_sig_lf[rows][:, None], bg_sig_lf[rows])
         signal = np.empty((seq_len, num_backgrounds))
-        signal[:lf] = past
-        signal[lf:] = base_signals[f_idx, lf:seq_len, None]
+        signal[:ctx] = base_signals[f_idx, :ctx, None]
+        signal[ctx:n_past] = np.where(m, base_sig_lf[rows][:, None],
+                                      bg_sig_lf[rows])
+        signal[n_past:] = base_signals[f_idx, n_past:seq_len, None]
         perturbed[f.name] = signal
-    perturbed['Hazard'] = np.broadcast_to(
-        base_noise[hazard_idx, :seq_len, None],
-        (seq_len, num_backgrounds)).copy()
-    perturbed = _apply_hazard_rules(graph, perturbed, seq_len)
-    hazard = hazard_calibration_func(perturbed['Hazard'][lf:seq_len])
+    perturbed['Hazard'] = _hazard_history(base_signals[hazard_idx],
+                                          base_noise[hazard_idx], seq_len,
+                                          n_boundary, num_backgrounds)
+    perturbed = _apply_hazard_rules(graph,
+                                    perturbed,
+                                    seq_len,
+                                    start=n_boundary)
+    hazard = hazard_calibration_func(perturbed['Hazard'][n_past:seq_len])
     target = _outputs_from_hazard(hazard, hazard_bins).get_target(
         output_type, hazard_bins)
     return float(np.mean(target))
 
 
-def _make_obs_value_factory(prec, graph, base_signals, base_noise, seq_len,
-                            hazard_calibration_func, hazard_bins, output_type,
-                            num_samples):
-    lf = prec.lf
+def _with_context(window_mask: np.ndarray, n_obs_feats: int, lf: int,
+                  ctx: int, n_boundary: int) -> np.ndarray:
+    """Prefix each feature's window mask (feature-major, ``lf`` frames each)
+    with its context frames: the first ``n_boundary`` pinned (the state the
+    recursion starts from), the rest free, since they are never players and
+    an observer cannot see them."""
+    if ctx == 0:
+        return window_mask
+    prefix = np.zeros((n_obs_feats, ctx), dtype=bool)
+    prefix[:, :n_boundary] = True
+    return np.concatenate(
+        [prefix, window_mask.reshape(n_obs_feats, lf)], axis=1).reshape(-1)
+
+
+def _make_obs_value_factory(prec,
+                            graph,
+                            base_signals,
+                            base_noise,
+                            seq_len,
+                            lf,
+                            ctx,
+                            n_boundary,
+                            hazard_calibration_func,
+                            hazard_bins,
+                            output_type,
+                            num_samples,
+                            survival_start: int | None = None):
+    n_past = prec.lf
+    n_obs_feats = len(prec.obs)
     basevec = np.array([
-        base_signals[fi][t] for fi in range(len(prec.obs)) for t in range(lf)
+        base_signals[fi][t] for fi in range(n_obs_feats)
+        for t in range(n_past)
     ])
 
     def make():
         xi = np.random.normal(size=(prec.prec.incidence.shape[0], num_samples))
 
         def value_fn(pinned_mask):
-            return _coalition_value(prec, pinned_mask, basevec, xi, graph,
+            full_mask = _with_context(pinned_mask, n_obs_feats, lf, ctx,
+                                      n_boundary)
+            return _coalition_value(prec, full_mask, basevec, xi, graph,
                                     base_signals, base_noise, seq_len,
-                                    hazard_calibration_func, hazard_bins,
-                                    output_type, num_samples)
+                                    n_boundary, hazard_calibration_func,
+                                    hazard_bins, output_type, num_samples,
+                                    survival_start)
 
         return value_fn
 
@@ -554,15 +634,16 @@ def _make_obs_value_factory(prec, graph, base_signals, base_noise, seq_len,
 
 
 def _make_interv_value_factory(base_sig_lf, bg_sig_lf, graph, base_signals,
-                               base_noise, lf, seq_len,
+                               base_noise, lf, seq_len, ctx, n_boundary,
                                hazard_calibration_func, hazard_bins,
                                output_type):
 
     def value_fn(pinned_mask):
         return _interventional_value(pinned_mask, base_sig_lf, bg_sig_lf,
                                      graph, base_signals, base_noise, lf,
-                                     seq_len, hazard_calibration_func,
-                                     hazard_bins, output_type)
+                                     seq_len, ctx, n_boundary,
+                                     hazard_calibration_func, hazard_bins,
+                                     output_type)
 
     return lambda: value_fn  # background draws are fixed -> CRN across coalitions
 
@@ -579,6 +660,8 @@ def generate_sample_with_importances(
     min_horizon_cif: float = 0.0,
     num_backgrounds: int = 8,
     num_segments: int | None = None,
+    context_frames: int | None = None,
+    condition_on_survival: bool = True,
 ) -> SampleWithSHAP | None:
     """Ground-truth permutation Shapley values over (feature, frame) players.
 
@@ -587,45 +670,65 @@ def generate_sample_with_importances(
     column count, and a single permutation already spans
     ``num_feats * lf * num_backgrounds`` columns, so there is no per-iteration
     Python overhead left to amortise.
+
+    If the graph has a burn-in, the last ``context_frames`` of it (default:
+    all of it, which is exact) are kept before the window. Only window frames
+    are players. The first ``graph.max_lag`` context frames are held at their
+    base values as the recursions' starting state; the rest are free in the
+    observational game (an observer cannot see them) and at base in the
+    interventional one. A shorter context is faster; the approximation is
+    conditioning on the boundary state, whose influence decays with the
+    features' and Hazard's memory.
+
+    ``condition_on_survival``: the observational game conditions on the cell
+    being alive at the landmark (as every sample, and every cell a model
+    sees, is), by weighting draws by their survival from the start of the
+    death-active burn-in (or frame 0 without one). The interventional game
+    is a do-operation and is never conditioned.
     """
+    ctx = graph.burn_in if context_frames is None else min(
+        context_frames, graph.burn_in)
+    n_boundary = graph.max_lag if ctx > 0 else 0
+    if 0 < ctx <= n_boundary:
+        raise ValueError(
+            f'context_frames ({ctx}) must exceed the longest rule lag '
+            f'({n_boundary}), which is held fixed as the boundary state.')
 
     base = _generate_base_sample(graph, max_sequence_length, horizon,
-                                 min_sequence_length, hazard_calibration_func)
+                                 min_sequence_length, hazard_calibration_func,
+                                 ctx)
 
     if base is None:
         return None
 
     lf = base.lf
-    seq_len = lf + horizon
+    n_past = ctx + lf  # past frames in extended coordinates
+    seq_len = n_past + horizon
     feat_idx = {f.name: i for i, f in enumerate(graph.features)}
 
     # Reject degenerate (near-zero in-horizon hazard) samples before doing the
     # expensive permutation work below.
     if min_horizon_cif > 0.0:
         horizon_cif = _realised_horizon_cif(base.signals[feat_idx['Hazard']],
-                                            lf, horizon,
+                                            n_past, horizon,
                                             hazard_calibration_func)
         if horizon_cif < min_horizon_cif:
             return None
 
     num_feats = len(graph.features)
-    total_num_feats = num_feats * lf
 
-    base_signal_array = base.signals[:, :lf].reshape(-1)
+    base_signal_array = base.signals[:, ctx:n_past].reshape(-1)
 
-    bg_noise_lf = np.empty((num_backgrounds, total_num_feats))
-    bg_sig_lf = np.empty((num_backgrounds, total_num_feats))
-    for b in range(num_backgrounds):
-        bg_noise = {f.name: f.generate_signal(lf) for f in graph.features}
-        bg_sig = _apply_rules(graph, bg_noise, lf)
-        bg_noise_lf[b] = np.concatenate(
-            [bg_noise[f.name][:lf] for f in graph.features])
-        bg_sig_lf[b] = np.concatenate(
-            [bg_sig[f.name][:lf] for f in graph.features])
-    bg_noise_lf = np.ascontiguousarray(bg_noise_lf.T)  # (n_players, B)
-    bg_sig_lf = np.ascontiguousarray(bg_sig_lf.T)
+    # Backgrounds come from the same population as the samples: burnt-in
+    # cells alive at frame 0. (num_feats * lf, B), feature-major rows.
+    bg = graph.simulate(num_backgrounds,
+                        lf,
+                        hazard_func=hazard_calibration_func,
+                        post_noise=False)
+    bg_sig_lf = np.ascontiguousarray(
+        np.concatenate([bg[f.name] for f in graph.features], axis=0))
 
-    observed_precision = _build_observed_precision(graph, base.signals, lf)
+    observed_precision = _build_observed_precision(graph, base.signals, n_past)
     joint_num_segments = (min(num_segments, lf)
                           if num_segments is not None else lf)
 
@@ -633,7 +736,7 @@ def generate_sample_with_importances(
 
     make_interv = _make_interv_value_factory(base_signal_array, bg_sig_lf,
                                              graph, base.signals, base.noise,
-                                             lf, seq_len,
+                                             lf, seq_len, ctx, n_boundary,
                                              hazard_calibration_func,
                                              hazard_bins, output_type)
     interv = {
@@ -643,10 +746,13 @@ def generate_sample_with_importances(
         for axis in AXES
     }
 
+    survival_start = (max(n_boundary, ctx - graph.death_burn_in)
+                      if condition_on_survival else None)
     make_obs = _make_obs_value_factory(observed_precision, graph, base.signals,
-                                       base.noise, seq_len,
-                                       hazard_calibration_func, hazard_bins,
-                                       output_type, num_backgrounds)
+                                       base.noise, seq_len, lf, ctx,
+                                       n_boundary, hazard_calibration_func,
+                                       hazard_bins, output_type,
+                                       num_backgrounds, survival_start)
     obs = {
         axis:
         _shapley_axis(make_obs, axis, joint_num_segments, n_obs_feats,
@@ -670,14 +776,15 @@ def generate_sample_with_importances(
         )
 
     horizon_hazard = hazard_calibration_func(base.signals[feat_idx['Hazard'],
-                                                          lf:seq_len])
+                                                          n_past:seq_len])
 
     return SampleWithSHAP(
-        feature_vals=base.signals,
+        feature_vals=base.signals[:, ctx:],
         feature_names=[f.name for f in graph.features],
         landmark_frame=base.lf,
         death_frame=base.death_frame,
-        noise_vals=base.noise,
+        noise_vals=base.noise[:, ctx:],
         horizon_hazard=horizon_hazard,
         shap_vals=shap_vals,
+        context_vals=base.signals[:, :ctx] if ctx > 0 else None,
     )

@@ -87,7 +87,7 @@ def evaluate_binary_model(model,
 
     roc_auc, fpr, tpr, thresholds = reciever_operator_characteristic(
         predictions, labels)
-    mse = mean_squared_error(predictions, labels)
+    mse = mean_squared_error(predictions.ravel(), labels)
 
     valid = [(p, e) for p, e in zip(predictions.ravel(), event_probs)
              if e is not None]
@@ -174,7 +174,8 @@ def _get_deep_predictions(
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        collate_fn=lambda batch: collate_fn(batch, device=device))
+        collate_fn=lambda batch: collate_fn(batch, device=device),
+        sampler=dataset.make_sampler())
 
     all_predictions = []
     all_labels = []

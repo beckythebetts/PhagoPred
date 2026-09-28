@@ -126,18 +126,24 @@ def plot_experiment_results(experiments_dir: Path,
     _plot_and_save(plot_shap_average_across_models, all_experiemnts,
                    varying_params, experiments_dir / 'shap_average.png')
     _plot_and_save(plot_shap_fold_average_across_models, all_experiemnts,
-                   varying_params, experiments_dir / 'shap_average_folds.png')
+                   varying_params,
+                   experiments_dir / 'shap_average_folds_normalised.png')
+    _plot_and_save(plot_shap_fold_average_across_models,
+                   all_experiemnts,
+                   varying_params,
+                   experiments_dir / 'shap_average_folds.png',
+                   normalise=False)
     _plot_and_save(plot_shap_samples_across_models, all_experiemnts,
                    varying_params, experiments_dir / 'shap_sample.png')
 
 
 def _plot_and_save(plotting_func: Callable,
                    experiments: list[ExperimentRecord], varying_params: dict,
-                   save_path: Path | str) -> None:
+                   save_path: Path | str, **kwargs) -> None:
 
     save_path = Path(save_path)
     log.info(f'Plotting {save_path.name}')
-    result = plotting_func(experiments, varying_params)
+    result = plotting_func(experiments, varying_params, **kwargs)
     if result == None:
         return
     figs = result if isinstance(result, tuple) else (result, )

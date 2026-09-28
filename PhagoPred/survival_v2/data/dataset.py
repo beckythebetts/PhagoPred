@@ -122,6 +122,26 @@ class CellDataset(torch.utils.data.Dataset, ABC):
 
         self._close_files()
 
+    def _get_landmark_weights(self) -> np.ndarray:
+        return np.array([len(lf) for lf in self.cell_metadata.landmark_frames],
+                        dtype=float)
+
+    def make_sampler(
+        self,
+        num_samples: int | None = None
+    ) -> torch.utils.data.WeightedRandomSampler:
+        weights = self._get_landmark_weights()
+        num_samples = num_samples if num_samples is not None else len(self)
+        return torch.utils.data.WeightedRandomSampler(weights,
+                                                      num_samples,
+                                                      replacement=True)
+
+    def sample_indices(self, num_samples: int | None = None) -> np.ndarray:
+        weights = self._get_landmark_weights()
+        weights = weights / weights.sum()
+        idxs = np.random.choice(np.arange(len(self)), num_samples, p=weights)
+        return idxs
+
     def _load_features_cache(self) -> None:
         """Load features from all .h5 files into memory."""
         for i, _ in enumerate(self.hdf5_paths):
@@ -267,19 +287,11 @@ class CellDataset(torch.utils.data.Dataset, ABC):
         features = self._features_cache[cell_metadata.file_idxs][
             ..., cell_metadata.local_cell_idxs]
 
-        # start_frame = cell_metadata.start_frames
-        # last_frame = cell_metadata.end_frames if np.isnan(
-        #     cell_metadata.death_frames) else cell_metadata.death_frames
         event_indicator = 0 if np.isnan(cell_metadata.death_frames) else 1
         valid_landmark_fames = cell_metadata.landmark_frames
 
         landmark_frame = np.random.choice(valid_landmark_fames)
 
-        # if self.model_type == 'deep':
-        #     features = features[:,
-        #                         int(landmark_frame - start_frame):
-        #                         int(last_frame + 1
-        #                             )]  # For deep models, crop to known frames
         features = features.T  # shape: (num_frames, num_features)
 
         return features, landmark_frame, event_indicator, cell_metadata
@@ -292,8 +304,9 @@ class CellDataset(torch.utils.data.Dataset, ABC):
         used to align variance estimation with the test-set landmark distribution.
         """
         all_landmarks = []
-        for _ in range(n_samples):
-            cell_idx = np.random.randint(0, len(self.cell_metadata))
+        idxs = self.sample_indices(n_samples)
+        for cell_idx in idxs:
+            # cell_idx = np.random.randint(0, len(self.cell_metadata))
             landmarks = self._get_valid_landmarks(cell_idx)
             all_landmarks.append(np.random.choice(landmarks))
         return all_landmarks

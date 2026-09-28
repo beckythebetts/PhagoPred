@@ -59,7 +59,7 @@ def load_background_pool(
 
     feature_names = model_feat_names or samples[0].feature_names
     aligned = ([align_sample_features(s, feature_names) for s in samples]
-              if model_feat_names else [s.feature_vals for s in samples])
+               if model_feat_names else [s.feature_vals for s in samples])
 
     max_t = max(a.shape[1] for a in aligned)
     K = len(feature_names)
@@ -146,9 +146,8 @@ def _generate_samples(
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=min(num_samples, len(dataset)),
-        shuffle=True,
         collate_fn=lambda batch: collate_fn(batch, device='cpu'),
-    )
+        sampler=dataset.make_sampler())
     batch = next(iter(dataloader))
 
     n = len(batch['landmark_frame'])
@@ -168,8 +167,7 @@ def _generate_samples(
                 and 'time_to_event' in batch
                 and batch['time_to_event'] is not None):
             if int(batch['event_indicator'][i]) == 1:
-                death_frame = landmark_frame + float(
-                    batch['time_to_event'][i])
+                death_frame = landmark_frame + float(batch['time_to_event'][i])
 
         sample = SampleWithSHAP(
             feature_vals=feature_vals,

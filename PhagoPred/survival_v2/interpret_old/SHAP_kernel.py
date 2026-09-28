@@ -512,9 +512,8 @@ class KernelSHAP:
             dataloader = torch.utils.data.DataLoader(
                 dataset,
                 batch_size=num_samples,
-                shuffle=True,
                 collate_fn=lambda batch: collate_fn(batch, device=device),
-            )
+                sampler=dataset.make_sampler())
             batch = next(iter(dataloader))
             x_batch = batch['features']
             lengths_batch = batch['length']

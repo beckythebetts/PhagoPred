@@ -361,7 +361,7 @@ def run_experiment_suite(
         result, exp_dir = run_single_experiment(exp_config, output_dir, device)
         results.append(result)
         if shap_interpret:
-            run_shap(exp_dir)
+            run_shap(exp_dir, num_samples=10, num_time_segments=10)
 
     plot_experiment_results(output_dir, ignore_params=['feature_combo'])
     # plot_confusion_matrices(output_dir)
@@ -451,7 +451,8 @@ def _get_calibration_inputs(model,
                 dataset,
                 batch_size=128,
                 shuffle=False,
-                collate_fn=lambda b: binary_collate_fn(b, device=device))
+                collate_fn=lambda b: binary_collate_fn(b, device=device),
+                sampler=dataset.make_sampler())
             with torch.no_grad():
                 for _ in range(n_passes):
                     for batch in loader:
@@ -468,7 +469,8 @@ def _get_calibration_inputs(model,
                 dataset,
                 batch_size=128,
                 shuffle=False,
-                collate_fn=lambda b: binary_class_collate_fn(b, device=device))
+                collate_fn=lambda b: binary_class_collate_fn(b, device=device),
+                sampler=dataset.make_sampler())
             with torch.no_grad():
                 for _ in range(n_passes):
                     for batch in loader:
@@ -485,7 +487,8 @@ def _get_calibration_inputs(model,
                 dataset,
                 batch_size=128,
                 shuffle=False,
-                collate_fn=lambda b: survival_collate_fn(b, device=device))
+                collate_fn=lambda b: survival_collate_fn(b, device=device),
+                sampler=dataset.make_sampler())
             with torch.no_grad():
                 for _ in range(n_passes):
                     for batch in loader:

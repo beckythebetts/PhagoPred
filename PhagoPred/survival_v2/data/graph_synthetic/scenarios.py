@@ -66,13 +66,24 @@ class ScenarioCfg:
     val_num_cells: int = 1000
     cal_num_cells: int = 1000
     num_frames: int = 500
+    # Frames simulated before frame 0 and discarded; the last death_burn_in of
+    # them run the death process, and cells dying there are rejected (only
+    # cells alive when observation starts are kept). 0 disables either.
+    burn_in: int = 0
+    death_burn_in: int = 0
+    # Standard deviation of the Hazard signal after calibration's scaling,
+    # which sets how predictable deaths are (None: no rescaling).
+    hazard_spread: float | None = 3.0
 
     hazard_calibration_func: callable | None = None
     variances: ScenarioVariances | None = field(default=None, init=False)
 
     def __post_init__(self):
-        self.graph = CausalGraph(self._generate_features(), self.rules,
-                                 self.num_frames)
+        self.graph = CausalGraph(self._generate_features(),
+                                 self.rules,
+                                 self.num_frames,
+                                 burn_in=self.burn_in,
+                                 death_burn_in=self.death_burn_in)
 
     def _generate_features(self) -> list[Feature]:
         assert not bool(
@@ -111,6 +122,7 @@ class ScenarioCfg:
             calib_starts,
             calib_ends,
             target_death_fraction,
+            hazard_spread=self.hazard_spread,
         )
 
     def load(self, save_dir: Path) -> None:
@@ -250,18 +262,20 @@ _low_ar_coeff = 0
 
 _hazard_ar_coeff = 1 - 1e-5
 
-# _default_auto_coefficient = 0.8
+_default_ar_coeff = 0.99
+
+_default_k = 2
 
 
 # === RULES ===
 def auto_correlate(feature_coeffs: dict[str, float] = None,
-                   ar_coeff: float = _high_ar_coeff) -> list[Rule]:
+                   ar_coeff: float = _default_ar_coeff) -> list[Rule]:
     if feature_coeffs is None:
         feature_coeffs = {
             feat_name: ar_coeff
             for feat_name in ('A', 'B', 'C', 'D')
         }
-        feature_coeffs['Hazard'] = _hazard_ar_coeff
+        feature_coeffs['Hazard'] = ar_coeff
         # feature_coeffs['Hazard'] = 0.8
     rules = []
     for key, val in feature_coeffs.items():
@@ -270,39 +284,58 @@ def auto_correlate(feature_coeffs: dict[str, float] = None,
     return rules
 
 
-def mean_reversion(feature_params: dict[str, tuple] = None) -> list[Rule]:
-    if feature_params is None:
-        feature_params = {
-            feat_name: (0.0, 0.01)
-            for feat_name in ('A', 'B', 'C', 'D', 'Hazard')
-        }
-    rules = []
-    for key, val in feature_params.items():
-        rules.append(MeanReversionRule(key, *val))
+# def mean_reversion(feature_params: dict[str, tuple] = None) -> list[Rule]:
+#     if feature_params is None:
+#         feature_params = {
+#             feat_name: (0.0, 0.01)
+#             for feat_name in ('A', 'B', 'C', 'D', 'Hazard')
+#         }
+#     rules = []
+#     for key, val in feature_params.items():
+#         rules.append(MeanReversionRule(key, *val))
 
-    return rules
+#     return rules
 
 
 def _linear(ar_coeff: float) -> list[Rule]:
     return [
         Rule(target='Hazard',
-             expr=Var('A', 50) + Var('B', 100) + Var('C', 150))
+             expr=_default_k * (1 - ar_coeff) *
+             (Var('A', 50) + Var('B', 100) + Var('C', 150)))
     ] + auto_correlate(ar_coeff=ar_coeff)
 
 
 def _linear_chain(ar_coeff: float) -> list[Rule]:
     return [
-        Rule(target='B', expr=0.8 * Var('A', 50)),
-        Rule(target='C', expr=0.8 * Var('B', 50)),
-        Rule(target='Hazard', expr=Var('C', 50))
+        Rule(target='B', expr=_default_k * (1 - ar_coeff) * Var('A', 50)),
+        Rule(target='C', expr=_default_k * (1 - ar_coeff) * Var('B', 50)),
+        Rule(target='Hazard', expr=_default_k * (1 - ar_coeff) * Var('C', 50))
     ] + auto_correlate(ar_coeff=ar_coeff)
 
 
 def _nonlinear_chain(ar_coeff: float) -> list[Rule]:
     return [
-        Rule(target='B', expr=Sin(Var('A', 50))),
-        Rule(target='C', expr=Sin(Var('B', 50))),
-        Rule(target='Hazard', expr=Sin(Var('C', 50))),
+        Rule(target='B', expr=_default_k *
+             (1 - ar_coeff) * ReLU(Var('A', 50))),
+        Rule(target='C', expr=_default_k *
+             (1 - ar_coeff) * ReLU(Var('B', 50))),
+        Rule(target='Hazard',
+             expr=_default_k * (1 - ar_coeff) * ReLU(Var('C', 50))),
+    ] + auto_correlate(ar_coeff=ar_coeff)
+
+
+def _multiplicative_hazard(ar_coeff: float) -> list[Rule]:
+    return [
+        Rule(target='Hazard',
+             expr=_default_k * (1 - ar_coeff) * (Var('A', 50)) * Var('B', 150))
+    ] + auto_correlate(ar_coeff=ar_coeff)
+
+
+def _threshold_hazard(ar_coeff: float) -> list[Rule]:
+    return [
+        Rule(target='Hazard',
+             expr=_default_k * (1 - ar_coeff) * Threshold(
+                 (Var('A', 50) + Var('B', 100) + Var('C', 150)), thresh=6.0))
     ] + auto_correlate(ar_coeff=ar_coeff)
 
 
@@ -312,23 +345,33 @@ def _nonlinear_chain(ar_coeff: float) -> list[Rule]:
 
 # _ratio = [Rule(target='Hazard', expr=Sigmoid(Var('A', 50) / Var('B', 100)))
 #           ] + auto_correlate()
-_SCENARIO_BUILDERS = (
-    ('linear', _linear),
-    ('linear_chain', _linear_chain),
-    ('nonlinear_chain', _nonlinear_chain),
-)
+_SCENARIO_BUILDERS = (('linear', _linear), ('linear_chain', _linear_chain),
+                      ('nonlinear_chain', _nonlinear_chain),
+                      ('multiplicative_hazard', _multiplicative_hazard),
+                      ('threshold_hazard', _threshold_hazard))
 _AR_VARIANTS = (
     (_low_ar_coeff, 'low_ar'),
     (_med_ar_coeff, 'med_ar'),
     (_high_ar_coeff, 'high_ar'),
 )
 
+# ALL_CFGS: list[ScenarioCfg] = [
+#     ScenarioCfg(f'{name}_{ar_name}',
+#                 rules=build(ar),
+#                 noise_cfg=_low_noise,
+#                 missingness_cfg=_none_missing) for ar, ar_name in _AR_VARIANTS
+#     for name, build in _SCENARIO_BUILDERS
+# ]
+
 ALL_CFGS: list[ScenarioCfg] = [
-    ScenarioCfg(f'{name}_{ar_name}',
-                rules=build(ar),
-                noise_cfg=_low_noise,
-                missingness_cfg=_none_missing) for ar, ar_name in _AR_VARIANTS
-    for name, build in _SCENARIO_BUILDERS
+    ScenarioCfg(
+        name,
+        rules=build(_default_ar_coeff),
+        noise_cfg=_low_noise,
+        missingness_cfg=_none_missing,
+        burn_in=1000,
+        death_burn_in=200,
+    ) for name, build in _SCENARIO_BUILDERS
 ]
 
 

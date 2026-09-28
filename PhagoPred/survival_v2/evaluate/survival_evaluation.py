@@ -238,7 +238,8 @@ def _get_deep_predictions(
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        collate_fn=lambda batch: survival_collate_fn(batch, device=device))
+        collate_fn=lambda batch: survival_collate_fn(batch, device=device),
+        sampler=dataset.make_sampler())
 
     bin_edges = dataset.event_time_bins
     all_pmfs = []

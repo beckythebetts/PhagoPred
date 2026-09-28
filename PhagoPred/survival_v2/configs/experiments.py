@@ -207,150 +207,42 @@ EXPERIMENT_SUITES = {
                       training=TRAINING['Standard'],
                       feature_combo=FEATURE_COMBOS['All'],
                       calibration=CALIBRATION['Platt Scaling']), ),
-    'Graph Survival':
-    generate_experiment_grid(
-        ExperimentCfg(
-            model=[
-                MODELS['CNN Medium'],
-                MODELS['LSTM Medium'],
-                MODELS['Random Forest'],
-            ],
-            attention=ATTENTION['Last'],
-            loss=LOSSES['NLL + Ranking'],
-            dataset=[
-                DATASETS['Graph Linear'],
-                DATASETS['Graph Chain'],
-                DATASETS['Graph Multiplicative'],
-                # DATASETS['Graph Resetting Accumulation'],
-                # DATASETS['Graph Ratio'],
-                DATASETS['Graph Autocorr'],
-            ],
-            training=TRAINING['Standard'],
-            feature_combo=['A', 'B', 'C', 'D'],
-            calibration=CALIBRATION['Temperature Scaling'])),
-    'Graph Binary':
-    generate_experiment_grid(
-        ExperimentCfg(
-            model=[
-                MODELS['CNN Medium'],
-                MODELS['LSTM Medium'],
-                # MODELS['Random Forest'],
-            ],
-            attention=ATTENTION['Last'],
-            loss=LOSSES['Weighted BCE'],
-            dataset=[
-                DATASETS['Binary Graph Linear'],
-                DATASETS['Binary Graph Chain'],
-                DATASETS['Binary Graph Multiplicative'],
-                # # DATASETS['Binary Graph Resetting Accumulation'],
-                # DATASETS['Binary Graph Ratio'],
-                # DATASETS['Binary Graph Autocorr'],
-            ],
-            training=TRAINING['Standard'],
-            feature_combo=['A', 'B', 'C', 'D'],
-            calibration=[
-                CALIBRATION['Platt Scaling'],
-                # CALIBRATION['Isotonic Scaling'],
-            ])),
-    'Graph Noise Survival':
-    generate_experiment_grid(
-        ExperimentCfg(
-            model=[
-                MODELS['CNN Medium'],
-                MODELS['LSTM Medium'],
-                MODELS['Random Forest'],
-            ],
-            attention=ATTENTION['Last'],
-            loss=LOSSES['NLL'],
-            dataset=[
-                DATASETS['Graph Linear No Noise'],
-                DATASETS['Graph Linear Low Noise'],
-                DATASETS['Graph Linear High Noise'],
-            ],
-            training=TRAINING['Standard'],
-            feature_combo=['A', 'B', 'C', 'D'],
-        )),
-    'Graph Noise Binary':
-    generate_experiment_grid(
-        ExperimentCfg(
-            model=[
-                MODELS['CNN Medium'],
-                # MODELS['LSTM Medium'],
-                # MODELS['Random Forest'],
-            ],
-            attention=ATTENTION['Last'],
-            loss=LOSSES['Weighted BCE'],
-            dataset=[
-                DATASETS['Binary Graph Linear No Noise'],
-                DATASETS['Binary Graph Linear Low Noise'],
-                DATASETS['Binary Graph Linear High Noise'],
-            ],
-            training=TRAINING['Standard'],
-            feature_combo=['A', 'B', 'C', 'D'],
-        )),
-    'Learning Curve Survival':
-    generate_experiment_grid(
-        ExperimentCfg(
-            model=[
-                MODELS['CNN Medium'],
-                # MODELS['LSTM Medium'],
-                # MODELS['Random Forest'],
-            ],
-            attention=ATTENTION['Last'],
-            loss=[
-                # LOSSES['NLL a3 + Ranking'],
-                LOSSES['NLL + Ranking'],
-                # LOSSES['NLL a10'],
-            ],
-            dataset=[
-                #   DATASETS['Graph Linear N100'],
-                # DATASETS['Graph Linear N500'],
-                # DATASETS['Graph Linear N1000'],
-                DATASETS['Graph Linear'],
-            ],
-            training=TRAINING['Standard'],
-            feature_combo=['A', 'B', 'C', 'D'],
-            calibration=[
-                CALIBRATION['Vector Scaling'],
-                CALIBRATION['Temperature Scaling'],
-                CALIBRATION['None'],
-            ])),
-    # Compare scenario types (linear vs linear chain vs nonlinear chain),
-    # all at high autocorrelation.
-    'Graph Scenario Types Binary Attention':
-    generate_experiment_grid(
-        ExperimentCfg(model=MODELS['CNN Medium'],
-                      attention=list(ATTENTION.values()),
-                      loss=LOSSES['Weighted BCE'],
-                      dataset=[
-                          DATASETS['Binary Graph Linear High AR'],
-                          DATASETS['Binary Graph Linear Chain High AR'],
-                          DATASETS['Binary Graph Nonlinear Chain High AR'],
-                      ],
-                      training=TRAINING['Standard'],
-                      feature_combo=['A', 'B', 'C', 'D'],
-                      calibration=[
-                          CALIBRATION['Platt Scaling'],
-                      ])),
-    # Compare nonlinear chain scenario at different autocorrelation levels.
-    'Graph Linear AR Binary':
+    # Graph-synthetic feature structure: independent vs linear chain vs
+    # nonlinear chain (additive linear hazard throughout).
+    'Graph Chains Binary':
     generate_experiment_grid(
         ExperimentCfg(model=[
             MODELS['CNN Medium'],
             MODELS['LSTM Medium'],
         ],
-                      attention=ATTENTION['Last'],
+                      attention=ATTENTION['Mean Pooling'],
                       loss=LOSSES['Weighted BCE'],
                       dataset=[
-                          DATASETS['Binary Graph Linear Low AR'],
-                          DATASETS['Binary Graph Linear Med AR'],
-                          DATASETS['Binary Graph Linear High AR'],
+                          DATASETS['Binary Graph Linear'],
+                          DATASETS['Binary Graph Linear Chain'],
+                          DATASETS['Binary Graph Nonlinear Chain'],
                       ],
                       training=TRAINING['Standard'],
                       feature_combo=['A', 'B', 'C', 'D'],
-                      calibration=[
-                          CALIBRATION['Platt Scaling'],
-                      ])),
+                      calibration=CALIBRATION['Platt Scaling'])),
+    # Graph-synthetic hazard function: additive vs multiplicative vs
+    # threshold, all on independent features.
+    'Graph Hazard Functions Binary':
+    generate_experiment_grid(
+        ExperimentCfg(model=[
+            MODELS['CNN Medium'],
+            MODELS['LSTM Medium'],
+        ],
+                      attention=ATTENTION['Mean Pooling'],
+                      loss=LOSSES['Weighted BCE'],
+                      dataset=[
+                          DATASETS['Binary Graph Linear'],
+                          DATASETS['Binary Graph Multiplicative Hazard'],
+                          DATASETS['Binary Graph Threshold Hazard'],
+                      ],
+                      training=TRAINING['Standard'],
+                      feature_combo=['A', 'B', 'C', 'D'],
+                      calibration=CALIBRATION['Platt Scaling'])),
 }
 # EXPERIMENT_SUITES = {
 #     'quick_test':

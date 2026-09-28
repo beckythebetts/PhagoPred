@@ -39,7 +39,8 @@ def infer_scenario(experiment_dir: Path) -> ScenarioCfg | None:
 def _params_match(f: h5py.File, output_type: str, horizon: int,
                   hazard_bins: None | np.ndarray, num_permutations: int,
                   min_horizon_cif: float, num_background_samples: int,
-                  seg_attr: int) -> bool:
+                  seg_attr: int, burn_in: int = 0,
+                  death_burn_in: int = 0) -> bool:
     """Whether a cached file was generated with the same (everything but
     ``num_samples``) parameters — a mismatch on any of these makes its
     samples wrong for this request, unlike ``num_samples`` (see
@@ -51,7 +52,11 @@ def _params_match(f: h5py.File, output_type: str, horizon: int,
             and f.attrs['Num Permutations'] == num_permutations
             and f.attrs['Min Horizon CIF'] == min_horizon_cif
             and f.attrs['Num Background Samples'] == num_background_samples
-            and f.attrs.get('Num Segments', -1) == seg_attr)
+            and f.attrs.get('Num Segments', -1) == seg_attr
+            # files from before the burn-in existed were generated without one
+            and f.attrs.get('Burn In', 0) == burn_in
+            and f.attrs.get('Death Burn In', 0) == death_burn_in
+            and bool(f.attrs.get('Survival Conditioned', False)))
 
 
 def get_samples(
@@ -84,7 +89,9 @@ def get_samples(
             with h5py.File(file, 'r') as f:
                 if not _params_match(f, output_type, horizon, hazard_bins,
                                      num_permutations, min_horizon_cif,
-                                     num_background_samples, seg_attr):
+                                     num_background_samples, seg_attr,
+                                     scenario.graph.burn_in,
+                                     scenario.graph.death_burn_in):
                     continue
                 n = int(f.attrs['Num Samples'])
                 if n == num_samples:
@@ -157,6 +164,9 @@ def _generate_samples(
         f.attrs['Num Background Samples'] = num_background_samples
         f.attrs['Num Segments'] = -1 if num_segments is None else int(
             num_segments)
+        f.attrs['Burn In'] = scenario.graph.burn_in
+        f.attrs['Death Burn In'] = scenario.graph.death_burn_in
+        f.attrs['Survival Conditioned'] = True
 
     attempt_budget = num_samples * 200
     attempts = 0

@@ -72,8 +72,9 @@ class SurvivalCellDataset(CellDataset):
         """Compute event time bins based on quantiles of observed event times in the dataset."""
         times = []
         events = 0
-        for _ in range(num_samples):
-            idx = np.random.randint(len(self))
+        idxs = self.sample_indices(num_samples)
+        for idx in idxs:
+            # idx = np.random.randint(len(self))
             item: SurvivalCellSample = self[idx]
 
             e = item.event_indicator
@@ -108,8 +109,9 @@ class SurvivalCellDataset(CellDataset):
     def get_bin_weights(self, num_samples: int = 1000) -> list:
         """Inverse frequency of bins (for uncensored samles only), for weighting NLL loss."""
         counts = np.zeros(self.num_bins)
-        for _ in range(num_samples):
-            idx = np.random.randint(len(self))
+        idxs = self.sample_indices(num_samples)
+        for idx in idxs:
+            # idx = np.random.randint(len(self))
             sample = self[idx]
             if sample.event_indicator == 1:
                 counts[sample.time_to_event_bin] += 1
@@ -274,8 +276,10 @@ class SurvivalCellDataset(CellDataset):
         (cell, landmark) distribution used at evaluation.
         """
         pmfs, hazards = [], []
-        for _ in tqdm(range(sample_size), 'Sampling cells for total variance'):
-            cell_idx = np.random.randint(len(self))
+        idxs = self.sample_indices(sample_size)
+        # for _ in tqdm(range(sample_size), 'Sampling cells for total variance'):
+        for cell_idx in tqdm(idxs, desc='Sampling cells for total variance'):
+            # cell_idx = np.random.randint(len(self))
             cell = self[cell_idx]
             pmf = cell.binned_pmf
             if pmf is None:

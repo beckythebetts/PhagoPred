@@ -55,7 +55,8 @@ class TemporalSummary:
     def convert_ds(
         self,
         dataset: CellDataset,
-        num_landmarks_per_sample: int = 2
+        # num_landmarks_per_sample: int = 2
+        num_samples: int = 2000,
     ) -> Union[
             BinaryCellBatch,
             SurvivalCellBatch,
@@ -68,7 +69,7 @@ class TemporalSummary:
         self.base_feature_names = dataset.feature_names
         self.full_seq_len = dataset.full_len_frames
 
-        progress_bar = tqdm(total=num_landmarks_per_sample * len(dataset),
+        progress_bar = tqdm(total=num_samples,
                             desc="Generating temporal summaries")
 
         if isinstance(dataset, BinaryCellDataset):
@@ -77,21 +78,21 @@ class TemporalSummary:
             BatchClass = SurvivalTemopralSummaryDataset
 
         batch_lists = {f.name: [] for f in fields(BatchClass)}
+        idxs = dataset.sample_indices(num_samples)
+        # for _ in range(num_landmarks_per_sample):
+        for idx in idxs:
+            cell_sample = dataset[idx]
+            cell_features = cell_sample.features
+            cell_temporal_summary_features = self._apply_sliding_windows(
+                cell_features)
 
-        for _ in range(num_landmarks_per_sample):
-            for idx, _ in enumerate(dataset):
-                cell_sample = dataset[idx]
-                cell_features = cell_sample.features
-                cell_temporal_summary_features = self._apply_sliding_windows(
-                    cell_features)
+            for field in fields(cell_sample):
+                batch_lists[field.name].append(getattr(cell_sample,
+                                                       field.name))
+            batch_lists['temporal_summary_features'].append(
+                cell_temporal_summary_features)
 
-                for field in fields(cell_sample):
-                    batch_lists[field.name].append(
-                        getattr(cell_sample, field.name))
-                batch_lists['temporal_summary_features'].append(
-                    cell_temporal_summary_features)
-
-                progress_bar.update(1)
+            progress_bar.update(1)
         batch_dict = {}
         for key, value in batch_lists.items():
             if key in ['pmf', 'binned_pmf']:

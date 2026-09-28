@@ -47,6 +47,9 @@ class SampleWithSHAP:
     horizon_hazard: np.ndarray | None = None
     shap_vals: dict[tuple[ExplainerEnum, BackgroundEnum],
                     SHAPResult] = field(default_factory=dict)
+    # Ground truth only: burn-in frames immediately before frame 0, (num_feats,
+    # ctx). Never shown to a model; kept so the sample can be reproduced.
+    context_vals: np.ndarray | None = None
 
     def explainers(self):
         return list([x[0] for x in self.shap_vals.keys()])
@@ -84,6 +87,8 @@ class SampleWithSHAP:
             group.create_dataset('Horizon Hazard',
                                  data=self.horizon_hazard,
                                  dtype=float)
+        if self.context_vals is not None:
+            group.create_dataset('Context', data=self.context_vals, dtype=float)
 
         for (explainer, background), result in self.shap_vals.items():
             tf = (result.temporal_feature
@@ -129,10 +134,11 @@ class SampleWithSHAP:
         noise_vals = group['Noise'][:] if 'Noise' in group else None
         horizon_hazard = (group['Horizon Hazard'][:]
                           if 'Horizon Hazard' in group else None)
+        context_vals = group['Context'][:] if 'Context' in group else None
 
         shap_vals = {}
         for name, ds in group.items():
-            if name in ('Signals', 'Noise', 'Horizon Hazard'):
+            if name in ('Signals', 'Noise', 'Horizon Hazard', 'Context'):
                 continue
             explainer = ds.attrs.get('Explainer')
             if explainer is None:
@@ -161,4 +167,5 @@ class SampleWithSHAP:
             noise_vals=noise_vals,
             horizon_hazard=horizon_hazard,
             shap_vals=shap_vals,
+            context_vals=context_vals,
         )
