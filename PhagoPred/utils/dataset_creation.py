@@ -235,4 +235,4 @@ def redo_epi_16bit(name: str) -> None:
 
 if __name__ == '__main__':
     import sys
-    redo_epi_16bit(sys.argv[1:])
+    redo_epi_16bit(sys.argv[1])
