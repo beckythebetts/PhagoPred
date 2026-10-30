@@ -1,0 +1,194 @@
+{
+    "last": {
+        "bad_tracks": {
+            "all_folds": {
+                "cells": 295,
+                "bad": 95,
+                "auc": 0.939921052631579,
+                "at_0.3": {
+                    "correct": 259,
+                    "bad_found": 87,
+                    "good_flagged_bad": 28
+                },
+                "at_0.5": {
+                    "correct": 263,
+                    "bad_found": 82,
+                    "good_flagged_bad": 19
+                }
+            },
+            "per_fold": [
+                {
+                    "cells": 60,
+                    "bad": 19,
+                    "auc": 0.9088575096277278,
+                    "at_0.3": {
+                        "correct": 50,
+                        "bad_found": 16,
+                        "good_flagged_bad": 7
+                    },
+                    "at_0.5": {
+                        "correct": 50,
+                        "bad_found": 14,
+                        "good_flagged_bad": 5
+                    }
+                },
+                {
+                    "cells": 60,
+                    "bad": 19,
+                    "auc": 0.9242618741976893,
+                    "at_0.3": {
+                        "correct": 52,
+                        "bad_found": 17,
+                        "good_flagged_bad": 6
+                    },
+                    "at_0.5": {
+                        "correct": 52,
+                        "bad_found": 17,
+                        "good_flagged_bad": 6
+                    }
+                },
+                {
+                    "cells": 59,
+                    "bad": 19,
+                    "auc": 0.9447368421052632,
+                    "at_0.3": {
+                        "correct": 50,
+                        "bad_found": 17,
+                        "good_flagged_bad": 7
+                    },
+                    "at_0.5": {
+                        "correct": 53,
+                        "bad_found": 15,
+                        "good_flagged_bad": 2
+                    }
+                },
+                {
+                    "cells": 58,
+                    "bad": 19,
+                    "auc": 1.0,
+                    "at_0.3": {
+                        "correct": 56,
+                        "bad_found": 19,
+                        "good_flagged_bad": 2
+                    },
+                    "at_0.5": {
+                        "correct": 57,
+                        "bad_found": 18,
+                        "good_flagged_bad": 0
+                    }
+                },
+                {
+                    "cells": 58,
+                    "bad": 19,
+                    "auc": 0.9102564102564104,
+                    "at_0.3": {
+                        "correct": 51,
+                        "bad_found": 18,
+                        "good_flagged_bad": 6
+                    },
+                    "at_0.5": {
+                        "correct": 51,
+                        "bad_found": 18,
+                        "good_flagged_bad": 6
+                    }
+                }
+            ]
+        }
+    },
+    "best": {
+        "bad_tracks": {
+            "all_folds": {
+                "cells": 295,
+                "bad": 95,
+                "auc": 0.9436052631578947,
+                "at_0.3": {
+                    "correct": 257,
+                    "bad_found": 90,
+                    "good_flagged_bad": 33
+                },
+                "at_0.5": {
+                    "correct": 264,
+                    "bad_found": 85,
+                    "good_flagged_bad": 21
+                }
+            },
+            "per_fold": [
+                {
+                    "cells": 60,
+                    "bad": 19,
+                    "auc": 0.8870346598202824,
+                    "at_0.3": {
+                        "correct": 49,
+                        "bad_found": 18,
+                        "good_flagged_bad": 10
+                    },
+                    "at_0.5": {
+                        "correct": 50,
+                        "bad_found": 16,
+                        "good_flagged_bad": 7
+                    }
+                },
+                {
+                    "cells": 60,
+                    "bad": 19,
+                    "auc": 0.9409499358151476,
+                    "at_0.3": {
+                        "correct": 50,
+                        "bad_found": 17,
+                        "good_flagged_bad": 8
+                    },
+                    "at_0.5": {
+                        "correct": 52,
+                        "bad_found": 16,
+                        "good_flagged_bad": 5
+                    }
+                },
+                {
+                    "cells": 59,
+                    "bad": 19,
+                    "auc": 0.9434210526315789,
+                    "at_0.3": {
+                        "correct": 50,
+                        "bad_found": 17,
+                        "good_flagged_bad": 7
+                    },
+                    "at_0.5": {
+                        "correct": 52,
+                        "bad_found": 15,
+                        "good_flagged_bad": 3
+                    }
+                },
+                {
+                    "cells": 58,
+                    "bad": 19,
+                    "auc": 1.0,
+                    "at_0.3": {
+                        "correct": 56,
+                        "bad_found": 19,
+                        "good_flagged_bad": 2
+                    },
+                    "at_0.5": {
+                        "correct": 58,
+                        "bad_found": 19,
+                        "good_flagged_bad": 0
+                    }
+                },
+                {
+                    "cells": 58,
+                    "bad": 19,
+                    "auc": 0.923076923076923,
+                    "at_0.3": {
+                        "correct": 52,
+                        "bad_found": 19,
+                        "good_flagged_bad": 6
+                    },
+                    "at_0.5": {
+                        "correct": 52,
+                        "bad_found": 19,
+                        "good_flagged_bad": 6
+                    }
+                }
+            ]
+        }
+    }
+}

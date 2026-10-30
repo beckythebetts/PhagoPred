@@ -1,14 +1,49 @@
-from pathlib import Path
+from __future__ import annotations
 
+from pathlib import Path
+from typing import Callable
+
+import dask
 import dask.array as da
-import h5py
 import napari
 from qtpy import QtWidgets
 import numpy as np
 from tqdm import tqdm
-import numba
 
 from PhagoPred.display.GUI.one_cell import CellViewer
+from PhagoPred.utils.h5_file import H5File
+
+
+def _lazy_stack(get_frame: Callable[[int], np.ndarray], shape: tuple,
+                dtype: np.dtype) -> da.Array:
+    """(T, H, W) dask array reading each frame with get_frame only when
+    napari displays it, so no file is held open."""
+    frames = [
+        da.from_delayed(dask.delayed(get_frame)(i),
+                        shape=shape[1:],
+                        dtype=dtype) for i in range(shape[0])
+    ]
+    return da.stack(frames)
+
+
+def epi_contrast_limits(h5: H5File,
+                        num_samples: int = 3,
+                        upper_percentile: float = 99.9) -> tuple:
+    """Display limits for Epi from a few frames spread over the movie.
+
+    napari's automatic limits come from a single frame, which for raw 16
+    bit Epi is often all black or saturated: fluorescence grows over the
+    movie, so later frames dominate the upper limit here.
+
+    Returns:
+        (contrast_limits, contrast_limits_range): limits to start with, and
+        the slider range (0 to the brightest sampled pixel).
+    """
+    frames = np.linspace(0, h5.num_frames - 1, num_samples).astype(int)
+    samples = h5.get_epi(frames)
+    upper = float(np.percentile(samples, upper_percentile))
+    brightest = float(samples.max())
+    return (0.0, max(upper, 1.0)), (0.0, max(brightest, 1.0))
 
 
 class AllCellsViewer:
@@ -16,13 +51,16 @@ class AllCellsViewer:
 
     def __init__(self, viewer, hdf5_file_path: Path):
         self.viewer = viewer
-        self.hdf5_file_path = hdf5_file_path
-        self.hdf5_file = h5py.File(self.hdf5_file_path, mode="r")
+        self.h5 = H5File(hdf5_file_path)
+        # Every cell can be opened, including likely bad tracks
+        self.h5.bad_track_thresh = None
 
         self.phase_data = None
         self.epi_data = None
+        self.epi_contrast = None
         self.seg_data = None
         self.labels_layer = None
+        self.cell_viewer = None
 
         self._load_data()
         # self._fill_missing_segs()
@@ -56,9 +94,6 @@ class AllCellsViewer:
         self._connect_signals()
 
     def _connect_signals(self):
-        # self.viewer.events.destroyed.connect(self._close_hdf5)
-        app = QtWidgets.QApplication.instance()
-        app.aboutToQuit.connect(self._close_hdf5)
         self._connect_mouse_interactions()
         self.back_button.clicked.connect(self._return_to_overview)
         self.goto_button.clicked.connect(self._goto_cell_from_text)
@@ -81,41 +116,39 @@ class AllCellsViewer:
         self._open_cell_view(cell_idx)
 
     def _load_data(self):
+        phase_info = self.h5.ims_info(H5File.PHASE)
+        self.phase_data = _lazy_stack(self.h5.get_phase, *phase_info)
 
-        # Suppose your dataset is stored at f["images"]
-        hdf5_phase = self.hdf5_file['Images']['Phase']
-        if 'Epi' in self.hdf5_file['Images']:
-            hdf5_epi = self.hdf5_file['Images']['Epi']
-            self.epi_data = da.from_array(hdf5_epi, chunks=hdf5_epi.chunks)
-        else:
-            self.epi_data = None
+        epi_info = self.h5.ims_info(H5File.FLUOR)
+        if epi_info is not None:
+            self.epi_data = _lazy_stack(self.h5.get_epi, *epi_info)
+            self.epi_contrast = epi_contrast_limits(self.h5)
 
-        # Wrap it in a Dask array (each chunk corresponds to HDF5 chunks)
-        self.phase_data = da.from_array(hdf5_phase, chunks=hdf5_phase.chunks)
-
-        if 'Segmentations' in self.hdf5_file and 'Phase' in self.hdf5_file[
-                'Segmentations']:
-            hdf5_seg = self.hdf5_file['Segmentations']['Phase']
-            self.seg_data = da.from_array(hdf5_seg, chunks=hdf5_seg.chunks)
+        seg_info = self.h5.ims_info(H5File.SEGS)
+        if seg_info is not None:
+            self.seg_data = _lazy_stack(self.h5.get_segs, *seg_info)
 
     def _fill_missing_segs(self):
-        first_appearances = self.hdf5_file['Cells']['Phase']['First Frame'][0]
-        last_appearances = self.hdf5_file['Cells']['Phase']['Last Frame'][0]
-        self.seg_data = fill_missing_cells(self.seg_data, first_appearances,
-                                           last_appearances)
+        self.seg_data = fill_missing_cells(self.seg_data,
+                                           self.h5.first_frames,
+                                           self.h5.last_frames)
 
     def _show_ims(self):
         if "Phase" not in self.viewer.layers:
             self.viewer.add_image(self.phase_data,
                                   name='Phase',
                                   colormap='gray',
+                                  contrast_limits=(0, 255),
                                   opacity=1.0)
             if self.epi_data is not None:
-                self.viewer.add_image(self.epi_data,
-                                      name='Epi',
-                                      colormap='red',
-                                      blending='additive',
-                                      opacity=1.0)
+                limits, limits_range = self.epi_contrast
+                epi_layer = self.viewer.add_image(self.epi_data,
+                                                  name='Epi',
+                                                  colormap='red',
+                                                  blending='additive',
+                                                  contrast_limits=limits,
+                                                  opacity=1.0)
+                epi_layer.contrast_limits_range = limits_range
             if self.seg_data is not None:
                 self.labels_layer = self.viewer.add_labels(
                     self.seg_data + 1, name="Segmentations", opacity=0.3)
@@ -142,9 +175,6 @@ class AllCellsViewer:
         self._show_ims()
         self.back_button.setVisible(False)
         self.cell_death_label.setText("")
-
-    def _close_hdf5(self):
-        self.hdf5_file.close()
 
     def _connect_mouse_interactions(self):
         """Update status bar with label ID under cursor."""
@@ -177,9 +207,13 @@ class AllCellsViewer:
         self.back_button.setVisible(True)
 
         # Create a CellViewer instance
-        self.cell_viewer = CellViewer(self.viewer, self.hdf5_file, cell_idx)
+        self.cell_viewer = CellViewer(self.viewer,
+                                      self.h5,
+                                      cell_idx,
+                                      epi_contrast=self.epi_contrast)
         self.cell_viewer.cell_death_signal.connect(
-            lambda x: self.cell_death_label.setText(f'Death at frame: {x}'))
+            lambda x: self.cell_death_label.setText(
+                'No death predicted' if x is None else f'Death at frame: {x}'))
 
 
 def fill_missing_cells(seg_data, first_appearance, last_appearance):

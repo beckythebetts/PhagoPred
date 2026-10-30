@@ -1,4 +1,4 @@
-import sys
+from __future__ import annotations
 from pathlib import Path
 
 import h5py
@@ -13,7 +13,9 @@ from sklearn.metrics import precision_score, recall_score, f1_score
 from PhagoPred import SETTINGS
 from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
 from PhagoPred.feature_extraction import features
-from PhagoPred.utils import tools
+from PhagoPred.utils.logger import get_logger
+
+log = get_logger()
 
 
 class CellType:
@@ -363,7 +365,7 @@ class FeaturesExtraction:
 
 def extract_features(
     dataset=SETTINGS.DATASET,
-    phase_features=[
+    phase_features: features.BaseFeature | list[features.BaseFeature] = [
         # features.Fluorescence(),
         # features.ExternalFLuorcence(),
         features.Speed(),
@@ -375,10 +377,13 @@ def extract_features(
         features.RegionProps(),
         # features.CellDeath(),
         features.FirstLastFrame(),
+        features.EventDetection(),
+        # features.EventDetection
         # features.ExternalFluorescence(),
         # features.Fluorescence(),
     ]):
-
+    if isinstance(phase_features, features.BaseFeature):
+        phase_features = [phase_features]
     feature_extractor = FeaturesExtraction(h5py_file=dataset)
     for feature in phase_features:
         # if feature.derived_feature:
@@ -389,22 +394,14 @@ def extract_features(
 
 
 def main():
-    pass
-    # cell_death_hyperparamter_search(true_deaths_txt='/home/ubuntu/PhagoPred/temp/03_10_deaths.txt')
-    # cell_death_hyperparameter_search(
-    #     dataset=SETTINGS.DATASET,
-    #     true_deaths_txt='/home/ubuntu/PhagoPred/temp/03_10_deaths.txt',
-    #     save_csv=True,
-    #     csv_path='/home/ubuntu/PhagoPred/temp/death_hyperparamters.txt')
-    # plot_hyperparam_heatmaps(
-    #     '/home/ubuntu/PhagoPred/temp/death_hyperparamters.txt',
-    #     '/home/ubuntu/PhagoPred/temp/death_hyperparamters')
-    # extract_features(phase_features=[features.CellDeath()])
-    # with h5py.File('PhagoPred/Datasets/16_09_1.h5', 'r') as f:
-    #     print(np.nanmax(f['Cells']['Phase']['Circularity'][:]))
-    #     smallest = np.nanargmin(f['Cells']['Phase']['Perimeter'][:])
-    #     frame, cell = np.unravel_index(smallest, f['Cells']['Phase']['Area'].shape)
-    #     print(frame, cell)
+    datasets_dir = Path(
+        '~/thor_server').expanduser() / 'MacrophageData' / '14_08'
+    for h5_file in datasets_dir.glob('*.h5'):
+        print(f'Extracting features for file {h5_file.name}')
+        log.info(f'Extracting features for file at {h5_file}')
+        extract_features(h5_file,
+                         [features.EventDetection(),
+                          features.RegionProps()])
 
 
 if __name__ == '__main__':

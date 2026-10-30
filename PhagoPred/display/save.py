@@ -1,3 +1,4 @@
+from __future__ import annotations
 import h5py
 import io
 import textwrap
@@ -19,6 +20,62 @@ from PhagoPred.utils import tools, mask_funcs
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+
+
+def view_events(h5_file: Path | list[Path],
+                save_dir: Path = Path('temp') / 'events',
+                time_window: int = 20) -> None:
+    os.makedirs(save_dir, exist_ok=True)
+    with h5py.File(h5_file, 'r') as f:
+        events_ds = f['Cells']['Phase']['EventDetection']
+        for cell_idx in tqdm(range(events_ds.shape[1])):
+            event_frame = events_ds[:, cell_idx]
+            if np.isnan(event_frame):
+                continue
+            evnt_frames = np.arange(event_frame - time_window // 2,
+                                    event_frame + time_window // 2,
+                                    dtype=int)
+            evnt_frames = evnt_frames[evnt_frames >= 0]
+            evnt_frames = evnt_frames[evnt_frames <= 287]
+
+            cell_dir = save_dir / str(cell_idx)
+            os.makedirs(cell_dir, exist_ok=True)
+
+            for frame in evnt_frames:
+                im = get_cell_im(
+                    f,
+                    cell_idx,
+                    frame,
+                )
+                plt.imsave(cell_dir / f'{frame:03d}.png', im)
+
+
+def get_cell_im(h5_file: h5py.File,
+                cell_idx: int,
+                frame: int,
+                frame_size: int = 500) -> np.ndarray:
+    x_centre, y_centre = h5_file['Cells']['Phase']['X'][
+        frame, cell_idx], h5_file['Cells']['Phase']['Y'][frame, cell_idx]
+
+    image_size = h5_file['Segmentations']['Phase'][0].shape
+    ymin, ymax, xmin, xmax = mask_funcs.get_crop_indices(
+        (y_centre, x_centre), frame_size, image_size)
+
+    _slice = (slice(xmin, xmax), slice(ymin, ymax))
+    phase_im = np.array(h5_file['Images']['Phase'][frame])[_slice]
+    epi_im = np.array(h5_file['Images']['Epi'][frame])[_slice]
+    mask = np.array(h5_file['Segmentations']['Phase'][frame][_slice])
+    mask = (mask == cell_idx)
+    # overlay_red_on_gray expects (T, H, W) stacks and returns values in 0-255
+    merged_im = tools.overlay_red_on_gray(phase_im[np.newaxis],
+                                          epi_im[np.newaxis],
+                                          normalize=False)[0]
+
+    cell_outline = mask_funcs.mask_outline(
+        torch.tensor(mask).byte().to(device), thickness=2).cpu().numpy()
+    merged_im[..., 0][cell_outline] = 255
+    merged_im[..., 1][cell_outline] = 255
+    return merged_im / 255
 
 
 def save_masks(dir, first_frame=0, last_frame=50):
@@ -303,6 +360,12 @@ def save_cell_animation(
 
 
 def main():
+    for h5_file in (Path('~/thor_server').expanduser() / 'MacrophageData' /
+                    '21_08').glob('*.h5'):
+        view_events(h5_file, save_dir=Path('temp') / 'events' / h5_file.stem)
+    # view_events(
+    #     Path('~/thor_server').expanduser() / 'MacrophageData' / '18_09' /
+    #     '1.h5')
     # save_tracked_images(Path('PhagoPred\\Datasets\\06_03\\H.h5'),
     #                     Path('temp/06_03_view'), 0, 100)
     # save_cell_images(Path('PhagoPred\\Datasets\\06_03\\H.h5'),
@@ -310,50 +373,50 @@ def main():
     #                  0,
     #                  0,
     #                  100,
-    #                  frame_size=300)
-    feature_names = [
-        'Area',
-        # 'Circularity',
-        'Perimeter',
-        'Speed',
-        # 'Displacement',
-        # 'Mode 0',
-        # 'Mode 1',
-        # 'Mode 2',
-        # 'Mode 3',
-        # 'Mode 4',
-        # 'Speed',
-        # 'Alive Phagocytes within 100 pixels',
-        # 'Alive Phagocytes within 250 pixels',
-        'Alive Phagocytes within 500 pixels',
-        # 'Dead Phagocytes within 100 pixels',
-        # 'Dead Phagocytes within 250 pixels',
-        # 'Dead Phagocytes within 500 pixels',
+    # #                  frame_size=300)
+    # feature_names = [
+    #     'Area',
+    #     # 'Circularity',
+    #     'Perimeter',
+    #     'Speed',
+    #     # 'Displacement',
+    #     # 'Mode 0',
+    #     # 'Mode 1',
+    #     # 'Mode 2',
+    #     # 'Mode 3',
+    #     # 'Mode 4',
+    #     # 'Speed',
+    #     # 'Alive Phagocytes within 100 pixels',
+    #     # 'Alive Phagocytes within 250 pixels',
+    #     'Alive Phagocytes within 500 pixels',
+    #     # 'Dead Phagocytes within 100 pixels',
+    #     # 'Dead Phagocytes within 250 pixels',
+    #     # 'Dead Phagocytes within 500 pixels',
 
-        # 'X',
-        # 'Y',
-        # 'CellDeath',
-        'Total Fluorescence',
-        'Fluorescence Distance Mean',
-        # 'Fluorescence Distance Variance',
-        # 'Inner Total Fluorescnece',
-        # 'Outer Total FLuorescence',
-        # 'External Fluorescence Intensity within 10 pixels',
-        # 'External Fluorescence Intensity within 25 pixels',
-        'External Fluorescence Intensity within 50 pixels',
-        'Skeleton Length',
-        'Skeleton Branch Points',
-        # 'Skeleton End Points',
-        # 'Skeleton Branch Length Mean',
-        # 'Skeleton Branch Length Std',
-        # 'Skeleton Branch Length Max',
-    ]
-    save_cell_animation(Path('PhagoPred\\Datasets\\06_03\\H.h5'),
-                        Path('temp') / '06_03_0.gif',
-                        0,
-                        0,
-                        100,
-                        feature_names=feature_names)
+    #     # 'X',
+    #     # 'Y',
+    #     # 'CellDeath',
+    #     'Total Fluorescence',
+    #     'Fluorescence Distance Mean',
+    #     # 'Fluorescence Distance Variance',
+    #     # 'Inner Total Fluorescnece',
+    #     # 'Outer Total FLuorescence',
+    #     # 'External Fluorescence Intensity within 10 pixels',
+    #     # 'External Fluorescence Intensity within 25 pixels',
+    #     'External Fluorescence Intensity within 50 pixels',
+    #     'Skeleton Length',
+    #     'Skeleton Branch Points',
+    #     # 'Skeleton End Points',
+    #     # 'Skeleton Branch Length Mean',
+    #     # 'Skeleton Branch Length Std',
+    #     # 'Skeleton Branch Length Max',
+    # ]
+    # save_cell_animation(Path('PhagoPred\\Datasets\\06_03\\H.h5'),
+    #                     Path('temp') / '06_03_0.gif',
+    #                     0,
+    #                     0,
+    #                     100,
+    #                     feature_names=feature_names)
     # save_cell_images(Path('temp'), 60, 0, 100, as_gif=True)
     # save_cell_images(Path(r'C:\Users\php23rjb\Downloads\temp') / 'test_track', cell_idx=347, first_frame=0, last_frame=50)
     # save_masks(Path('secondwithlight_masks'), 0, SETTINGS.NUM_FRAMES)

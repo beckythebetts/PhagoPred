@@ -29,10 +29,6 @@ except:
     IMAGE_SIZE = None
     TIME_STEP = None
 
-# DATASET = Path('PhagoPred')/'Datasets'/'mac_07_03_short.h5'
-# DATASET = Path('PhagoPred')/'Datasets'/'mac_short_seg.h5'
-# MASK_RCNN_MODEL = Path("PhagoPred") / 'detectron_segmentation' / 'models' / 'mac_20x'
-
 MASK_RCNN_MODEL = Path(
     "PhagoPred") / 'detectron_segmentation' / 'models' / 'bio_20x_thp1'
 CELLPOSE_MODEL = Path(
@@ -44,6 +40,12 @@ CLASSES = {'phase': 'Amoeba', 'epi': 'Yeast'}
 REMOVE_EDGE_CELLS = True
 UMAP_MODEL = Path(
     'PhagoPred') / 'feature_extraction' / 'morphology' / 'UMAP_model.pickle'
+BAD_TRACK_MODEL = Path(
+    "/home/ubuntu/PhagoPred/PhagoPred/death_classifier/models/cv_bad_small_ds2/fold_0/last.pt"
+)
+DEATH_MODEL = Path(
+    "/home/ubuntu/PhagoPred/PhagoPred/death_classifier/models/cv_small_onedeath_dwp025_smooth_dim03_253/fold_0/last.pt"
+)
 
 # MODEL_IMAGE_SIZE = [5472, 3648]
 

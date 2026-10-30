@@ -4,8 +4,6 @@ from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QCheckBox, QPushButton, QSizePolicy,
     QScrollArea
 )
-import numpy as np
-import h5py
 
 
 class FeaturePlotsWidget(QWidget):
@@ -116,12 +114,3 @@ class FeaturePlotsWidget(QWidget):
     def toggle_feature_visibility(self):
         for feat, cb in self.checkboxes.items():
             self.plot_widgets[feat].setVisible(cb.isChecked())
-
-    # --- Update plots with new data ---
-    def update_plots(self, f: h5py.File, cell_idx: int, first_frame: int, last_frame: int):
-        x_data = np.arange(first_frame, last_frame)
-        for feat, pw in self.plot_widgets.items():
-            y_data = f['Cells']['Phase'][feat][first_frame:last_frame, cell_idx]
-            pw.getPlotItem().clear()
-            pw.plot(x_data, y_data, pen=pg.mkPen('k'))
-            pw.enableAutoRange(axis='y')

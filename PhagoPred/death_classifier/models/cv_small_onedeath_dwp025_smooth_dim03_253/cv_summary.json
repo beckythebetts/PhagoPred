@@ -1,0 +1,142 @@
+{
+    "last": {
+        "all_folds": {
+            "cells": 241,
+            "within_5": 153,
+            "within_10_both_die": 148,
+            "within_20_both_die": 174,
+            "both_die": 201,
+            "median_error_both_die": 2.0,
+            "state_correct": 0.9253112033195021,
+            "alive_correct": 22,
+            "alive": 27
+        },
+        "per_fold": [
+            {
+                "cells": 49,
+                "within_5": 34,
+                "within_10_both_die": 30,
+                "within_20_both_die": 34,
+                "both_die": 40,
+                "median_error_both_die": 1.0,
+                "state_correct": 0.9387755102040817,
+                "alive_correct": 6,
+                "alive": 6
+            },
+            {
+                "cells": 49,
+                "within_5": 34,
+                "within_10_both_die": 34,
+                "within_20_both_die": 37,
+                "both_die": 42,
+                "median_error_both_die": 1.0,
+                "state_correct": 0.9183673469387755,
+                "alive_correct": 3,
+                "alive": 6
+            },
+            {
+                "cells": 48,
+                "within_5": 28,
+                "within_10_both_die": 29,
+                "within_20_both_die": 35,
+                "both_die": 40,
+                "median_error_both_die": 3.5,
+                "state_correct": 0.9166666666666666,
+                "alive_correct": 4,
+                "alive": 5
+            },
+            {
+                "cells": 48,
+                "within_5": 28,
+                "within_10_both_die": 27,
+                "within_20_both_die": 34,
+                "both_die": 39,
+                "median_error_both_die": 2.0,
+                "state_correct": 0.8958333333333334,
+                "alive_correct": 4,
+                "alive": 5
+            },
+            {
+                "cells": 47,
+                "within_5": 29,
+                "within_10_both_die": 28,
+                "within_20_both_die": 34,
+                "both_die": 40,
+                "median_error_both_die": 2.5,
+                "state_correct": 0.9574468085106383,
+                "alive_correct": 5,
+                "alive": 5
+            }
+        ]
+    },
+    "best": {
+        "all_folds": {
+            "cells": 241,
+            "within_5": 155,
+            "within_10_both_die": 153,
+            "within_20_both_die": 177,
+            "both_die": 205,
+            "median_error_both_die": 2.0,
+            "state_correct": 0.946058091286307,
+            "alive_correct": 23,
+            "alive": 27
+        },
+        "per_fold": [
+            {
+                "cells": 49,
+                "within_5": 33,
+                "within_10_both_die": 31,
+                "within_20_both_die": 35,
+                "both_die": 42,
+                "median_error_both_die": 2.0,
+                "state_correct": 0.9795918367346939,
+                "alive_correct": 6,
+                "alive": 6
+            },
+            {
+                "cells": 49,
+                "within_5": 36,
+                "within_10_both_die": 37,
+                "within_20_both_die": 39,
+                "both_die": 43,
+                "median_error_both_die": 1.0,
+                "state_correct": 0.9591836734693877,
+                "alive_correct": 4,
+                "alive": 6
+            },
+            {
+                "cells": 48,
+                "within_5": 26,
+                "within_10_both_die": 27,
+                "within_20_both_die": 34,
+                "both_die": 40,
+                "median_error_both_die": 3.5,
+                "state_correct": 0.8958333333333334,
+                "alive_correct": 3,
+                "alive": 5
+            },
+            {
+                "cells": 48,
+                "within_5": 28,
+                "within_10_both_die": 26,
+                "within_20_both_die": 33,
+                "both_die": 39,
+                "median_error_both_die": 3.0,
+                "state_correct": 0.9166666666666666,
+                "alive_correct": 5,
+                "alive": 5
+            },
+            {
+                "cells": 47,
+                "within_5": 32,
+                "within_10_both_die": 32,
+                "within_20_both_die": 36,
+                "both_die": 41,
+                "median_error_both_die": 1.0,
+                "state_correct": 0.9787234042553191,
+                "alive_correct": 5,
+                "alive": 5
+            }
+        ]
+    }
+}

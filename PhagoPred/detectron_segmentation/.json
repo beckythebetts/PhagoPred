@@ -1,0 +1,3 @@
+metrics.json
+100%
+{"data_time": 0.0029527144998837684, "eta_seconds": 0.0, "fast_rcnn/cls_accuracy": 0.4111328125, "fast_rcnn/false_negative": 0.5859375, "fast_rcnn/fg_cls_accuracy": 0.4140625, "iteration": 9, "loss_box_reg": 0.650303065776825, "loss_cls": 0.7208177149295807, "loss_mask": 0.6797255873680115, "loss_rpn_cls": 0.4584111422300339, "loss_rpn_loc": 0.30128760635852814, "lr": 0.0009001, "mask_rcnn/accuracy": 0.6502112563775511, "mask_rcnn/false_negative": 0.010496974424827783, "mask_rcnn/false_positive": 0.7556131512595942, "rank_data_time": 0.0029527144998837684, "roi_head/num_bg_samples": 384.0, "roi_head/num_fg_samples": 128.0, "rpn/num_neg_anchors": 128.0, "rpn/num_pos_anchors": 128.0, "time": 0.7470885999999837, "total_loss": 2.66697296500206}

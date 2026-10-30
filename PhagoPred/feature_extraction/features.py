@@ -11,6 +11,7 @@ from skimage.morphology import skeletonize
 import pickle
 from skimage.measure import label, regionprops
 import time
+import warnings
 import kornia
 import matplotlib.pyplot as plt
 import skan  #skeletonising
@@ -975,6 +976,12 @@ class ExternalFluorescence(BaseFeature):
 
 
 #         return results
+def _remove_short_runs(mask: xr.DataArray, min_len: int,
+                       axis: str) -> xr.DataArray:
+    shape = [1] * mask.ndim
+    shape
+
+
 class EventDetection(BaseFeature):
     derived_feature = True
 
@@ -982,19 +989,25 @@ class EventDetection(BaseFeature):
     fit_window_size: int = 11
     min_slope = 0.0
     min_r2 = 0.9
-    min_mean_fluor = 150
+    min_mean_fluor = 50
+    min_exp_rise_len = 10  # Minimum number of frames the total fluorescnec must be expoenntially increasing for
 
-    def compute(self, phase_xr: xr.Dataset, epi_xr: xr.Dataset) -> np.array:
+    def __init__(self):
+        super().__init__()
+        self.struct_element = np.ones((self.min_exp_rise_len, 1), dtype=bool)
+
+    def compute(self, phase_xr: xr.Dataset, epi_xr: xr.Dataset) -> np.ndarray:
         """Detect exponeontial increases in total fluorescence."""
         total_fluor: xr.DataArray = phase_xr[
             'Fluor Total']  # dims: (Frame, Cell Index)
+        mean_fluor: xr.DataArray = phase_xr['Fluor Mean']
         not_nan = total_fluor.notnull()
         total_fluor = (total_fluor.rolling(
             Frame=self.smooth_window_size, center=True,
             min_periods=1).mean().where(not_nan))
-        mean_fluor = (total_fluor.rolling(Frame=self.smooth_window_size,
-                                          center=True,
-                                          min_periods=1).mean().where(not_nan))
+        mean_fluor = (mean_fluor.rolling(Frame=self.smooth_window_size,
+                                         center=True,
+                                         min_periods=1).mean().where(not_nan))
 
         log_fluor: xr.DataArray = np.log(total_fluor.where(total_fluor > 0))
 
@@ -1007,15 +1020,28 @@ class EventDetection(BaseFeature):
         pf = win.polyfit('Window', deg=1, skipna=True, full=True)
         slope = pf.polyfit_coefficients.sel(degree=1)
         Syy = ((win - win.mean('Window'))**2).sum('Window')
-        r2 = 1 - pf.polyfit_residuals / Syy
+        r2: xr.DataArray = 1 - pf.polyfit_residuals / Syy
 
         full_window = win.notnull().sum('Window') == self.fit_window_size
-        event_windows = ((slope > self.min_slope) & (r2 > self.min_r2)
-                         & full_window & (mean_fluor > self.min_mean_fluor))
-        event_windows = (event_windows.where(not_nan, False).transpose(
-            'Frame', 'Cell Index'))
 
-        return event_windows.values.astype(float)[:, :, np.newaxis]
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', np.RankWarning)
+            rising_windows = ((slope > self.min_slope) & (r2 > self.min_r2)
+                              & full_window).transpose(
+                                  'Frame', 'Cell Index').to_numpy()
+
+        rising_windows = ndimage.binary_opening(
+            rising_windows,
+            structure=self.struct_element)  # Filter out rises < min_len
+
+        above_mean_fluor = (mean_fluor.transpose('Frame',
+                                                 'Cell Index').to_numpy()
+                            > self.min_mean_fluor)
+        event_windows = rising_windows & above_mean_fluor  # (Frame, Cell Index)
+
+        event = event_windows.any(axis=0)
+        event_frame = np.where(event, event_windows.argmax(axis=0), np.nan)
+        return event_frame.astype(float)[np.newaxis, :, np.newaxis]
 
 
 class RegionProps(BaseFeature):

@@ -1,0 +1,6 @@
+                      cells dead   within_5  within_20 alive_to_dead dead_to_alive later_called_at_start median_error
+original 188, old run   188  163  132 (70%)  154 (82%)             4             8                    13          1.0
+original 188, new run   188  163  132 (70%)  161 (86%)             4            10                     9          1.0
+new random               11   10   10 (91%)  11 (100%)             0             0                     0          0.0
+new targeted             42   41   11 (26%)   24 (57%)             1             3                    11         16.5
+all, new run            241  214  153 (63%)  196 (81%)             5            13                    20          2.0

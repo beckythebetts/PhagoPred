@@ -1,751 +1,243 @@
 from __future__ import annotations
-import re
 
-import numpy as np
-import os
-import sys
-import tifffile
-import h5py
 from pathlib import Path
-from tqdm import tqdm
-import cv2
-import scipy
-from concurrent.futures import ThreadPoolExecutor
-import cv2
+import re
+from typing import Iterable, Iterator
 import math
-import basicpy
-import logging
+import shutil
+import os
 
-from PhagoPred import SETTINGS
-from .fluor_background_removal import (replace_hot_pixels, bg_removal,
-                                       rolling_ball_background, n2v_denoise,
-                                       gaussian_smooth)
-from .tools import remake_dir
+import tifffile
+from tqdm import tqdm
+import numpy as np
+import cv2
+import imagej_rolling_ball
+
+from .h5_file import H5File
 from .logger import get_logger
+from .hot_pixel_removal import HOT_PIXEL_PATH, RESIDUAL_THRESHOLD, correct_hot_pixels, get_mask
 
 log = get_logger()
 
-N2V_MODEL_DIR = Path('/home/ubuntu/PhagoPred/PhagoPred/Datasets/nv2_model')
-# N2V_MODEL_DIR = Path(
-#     '/home/ubuntu/PhagoPred/PhagoPred/Datasets/nv2_model_hicks_microscope')
+
+def _natural_sort_key(s) -> list:
+    return [
+        int(text) if text.isdigit() else text.lower()
+        for text in re.split(r'(\d+)', str(s))
+    ]
 
 
-def truncate_hdf5(dataset_path: Path, new_path: Path, start_frame: int,
-                  end_frame: int) -> None:
-    """Truncate given hdf5 path to only include frames from start_frame to end_frame."""
-    if not new_path.parent.exists():
-        os.makedirs(new_path.parent)
-    with h5py.File(dataset_path, 'r') as orig:
-        with h5py.File(new_path, 'x') as new:
-            for group in ['Segmentations', 'Images']:
-                orig_group = orig[group]
-                new_group = new.create_group(group)
+def find_ome_positions(tiff_dir: Path) -> dict[str, list[Path]]:
+    well_site = re.compile(r'MMStack_(?P<well>[A-Za-z]+\d+)-Site_(?P<site>\d+)'
+                           r'(?:_\d+)?\.ome\.tif$')
+    pos_pattern = re.compile(r'_Pos(?P<pos>\d+)(?:[._].*)?\.ome\.tif$')
+    groups = {}
+    for path in tiff_dir.glob('*.ome.tif'):
+        if match := well_site.search(path.name):
+            key = (match['well'].upper(), int(match['site']))
+        elif match := pos_pattern.search(path.name):
+            key = (None, int(match['pos']))
+        else:
+            log.warning(f'Skipping {path.name}: no well/site or Pos in name')
+            continue
+        groups.setdefault(key, []).append(path)
 
-                for name, dataset in orig_group.items():
-                    if isinstance(dataset, h5py.Dataset):
-                        log.info(
-                            f"Copying dataset '{name}' from frames {start_frame} to {end_frame}"
-                        )
-                        try:
-                            # Extract the slice of data
-                            sliced_data = dataset[start_frame:end_frame].copy()
-                            log.info(
-                                f"{name} sliced data shape: {sliced_data.shape}, dtype: {sliced_data.dtype}"
-                            )
-                            # Get creation properties
-                            kwargs = {
-                                'dtype': dataset.dtype,
-                                'compression': dataset.compression,
-                                'compression_opts': dataset.compression_opts,
-                                'chunks': dataset.chunks,
-                                'shuffle': dataset.shuffle,
-                                'fletcher32': dataset.fletcher32,
-                                'maxshape': dataset.maxshape
-                            }
-
-                            # Create dataset in destination
-                            new_group.create_dataset(
-                                name,
-                                data=sliced_data,
-                                shape=sliced_data.shape,
-                                **{
-                                    k: v
-                                    for k, v in kwargs.items() if v is not None
-                                })
-                            new.flush()
-
-                        except Exception as e:
-                            print(e)
-
-                for attr_name, attr_value in orig_group.attrs.items():
-                    new_group.attrs[attr_name] = attr_value
-
-                new_group.attrs['Number of frames'] = end_frame - start_frame
-                new.flush()
-            cells_group = 'Cells/Phase'
-            for group in orig[cells_group].keys():
-                orig_dset = orig[cells_group][group]
-                if orig_dset.shape[0] > 1:
-                    sliced_data = orig_dset[start_frame:end_frame].copy()
-                else:
-                    if group == 'Last Frame':
-                        sliced_data = orig_dset[:].copy()
-                        sliced_data[sliced_data > end_frame] = end_frame - 1
-                    elif group == 'CellDeath':
-                        sliced_data = orig_dset[:].copy()
-                        sliced_data[sliced_data >= end_frame] = np.nan
-                new_dset = new.create_dataset(
-                    f'Cells/Phase/{group}',
-                    shape=sliced_data.shape,
-                    dtype=orig_dset.dtype,
-                    chunks=True,
-                    compression=orig_dset.compression,
-                    compression_opts=orig_dset.compression_opts,
-                    data=sliced_data)
+    sites_per_well = {}
+    for well, site in groups:
+        sites_per_well.setdefault(well, set()).add(site)
+    positions = {}
+    for (well, site), files in sorted(groups.items(),
+                                      key=lambda kv: _natural_sort_key(kv[0])):
+        if well is None:
+            name = str(site)
+        elif len(sites_per_well[well]) > 1:
+            name = f'{well}_site{site}'
+        else:
+            name = well
+        positions[name] = sorted(files, key=_natural_sort_key)
+    return positions
 
 
-# new_dset[:] = sliced_data
+def process_ome_tiffs(
+    tiff_files_path: Path,
+    hdf5_dir: Path,
+    phase_channel: int | None = 1,
+    epi_channel: int | None = 2,
+    num_channels: int = 3,
+    frame_step: int = 1,
+    batch_size: int = 50,
+    overwrite: bool = False,
+    positions: list[str] | str | None = None,
+) -> None:
+    """One h5 file per position (named by find_ome_positions, e.g. A3.h5).
 
+    Each channel is read and written separately, so one channel can be
+    (re)made without touching the rest of an existing file, e.g. raw 16 bit
+    Epi only: phase_channel=None, overwrite=True.
 
-def compute_percentile_limits(
-        images: np.ndarray,
-        lower_percentile: float = 0.1,
-        upper_percentile: float = 99.9) -> tuple[float, float]:
+    Args:
+        phase_channel, epi_channel: channel index in the tiffs; None skips
+            that channel.
+        num_channels: channels interleaved in the tiff pages.
+        frame_step: keep every frame_step'th frame.
+        overwrite: replace existing Phase / Epi datasets, else raise.
     """
-    Compute the intensity limits on images according to lower_percentile, upper_percentile.
-    Parameters:
-        images: (T, X, Y)
-        lower_percentile: %
-        upper_percenrile: %
-    Returns
-        lower limit, upper limit
-    """
-    images = images.astype(np.float32)
+    log.info(f'Creating hdf5 files at {hdf5_dir} from {tiff_files_path}')
+    found_positions = find_ome_positions(tiff_files_path)
 
-    min_val = np.percentile(images, lower_percentile)
-    max_val = np.percentile(images, upper_percentile)
+    positions = [positions] if isinstance(positions, str) else positions
+    if positions is not None:
+        positions = {
+            k: v
+            for k, v in found_positions.items() if k in list(positions)
+        }
+    else:
+        positions = found_positions
+    log.info(f'Found {len(positions)} positions: {", ".join(positions)}')
+    for pos, tiff_files in positions.items():
+        h5 = H5File(hdf5_dir / f'{pos}.h5')
+        log.info(f'Writing {h5.path} from {[f.name for f in tiff_files]}')
 
-    return min_val, max_val
+        def read(channel: int) -> Iterator[np.ndarray]:
+            return _read_channel(tiff_files, channel, num_channels, frame_step,
+                                 batch_size)
+
+        if phase_channel is not None:
+            h5.write_phase(_scaled_to_8bit(read(phase_channel)),
+                           overwrite=overwrite)
+        if epi_channel is not None:
+            h5.write_epi(read(epi_channel), overwrite=overwrite)
 
 
-def to_8bit(images: np.array,
-            min_val: float = None,
-            max_val: float = None) -> np.ndarray:
-    """ 
-    Scale images to 8bit using min_val and max_val
-    Parameters:
-        images: (T, X, Y)
-        min_val: value which will go to 0 in 8bit array
-        max_val: value which will go to 2**8 - 1 in 8bit array
-    Returns:
-        np.array (T, X, Y) dtype=np.uint8
-    """
+def _read_channel(tiff_files: list[Path],
+                  channel: int,
+                  num_channels: int,
+                  frame_step: int = 1,
+                  batch_size: int = 50) -> Iterator[np.ndarray]:
+    """(t, H, W) batches of one channel's raw frames, through a position's
+    files in order (main file, then its continuation files)."""
+    first_frame = 0  # of each file, counted over the whole position
+    with tqdm(desc=f'Reading channel {channel}', unit='frame') as pbar:
+        for file in tiff_files:
+            with tifffile.TiffFile(str(file)) as tif:
+                pages = tif.pages
+                num_frames = len(pages) // num_channels
+                # Step counted over the whole position, not restarting per file
+                frames = np.arange(-first_frame % frame_step, num_frames,
+                                   frame_step)
+                first_frame += num_frames
+                pbar.total = (pbar.total or 0) + len(frames)
+                pbar.refresh()
+                for start in range(0, len(frames), batch_size):
+                    batch = []
+                    for frame in frames[start:start + batch_size]:
+                        batch.append(pages[int(frame) * num_channels +
+                                           channel].asarray())
+                        pbar.update()
+                    yield np.stack(batch)
+
+
+def _scaled_to_8bit(batches: Iterable[np.ndarray],
+                    lower_percentile: float = 0,
+                    upper_percentile: float = 100) -> Iterator[np.ndarray]:
+    """Batches scaled to uint8, with limits from the first batch's
+    percentiles applied to every batch."""
+    limits = None
+    for batch in batches:
+        if limits is None:
+            limits = np.percentile(batch, (lower_percentile, upper_percentile))
+        yield to_8bit(batch, *limits)
+
+
+def to_8bit(images: np.ndarray, min_val: float, max_val: float) -> np.ndarray:
+    """Scale so min_val -> 0 and max_val -> 255, clipping outside."""
     scale = max_val - min_val if max_val != min_val else 1
-    scaled = (images - min_val) / scale
+    scaled = (images.astype(np.float32) - min_val) / scale
     return np.clip(scaled * 255, 0, 255).astype(np.uint8)
 
 
-def set_hdf5_metadata(dataset: h5py.Dataset, x_size: int, y_size: int) -> None:
-    """
-    Set metadats associated with hdf5 datset.
-    Parameters:
-        dataset: open hdf5 datset to assign metadats to
-        x_size: image x dimension
-        y_size: image y dimension
-    """
-    dataset.attrs['Camera'] = "Orca Flash 4.0, C11440"
-    dataset.attrs['Pixel Size / um'] = 6.5
-    dataset.attrs['Image size / pixels'] = [y_size, x_size]
-    dataset.attrs['Objective magnification'] = 20
-    res_um = dataset.attrs['Pixel Size / um'] / dataset.attrs[
-        'Objective magnification']
-    dataset.attrs['Resolution / um'] = res_um
-    dataset.attrs['FOV / um'] = [y_size * res_um, x_size * res_um]
-    dataset.attrs['Phase exposure / ms'] = 500
-    dataset.attrs['Epi exposure / ms'] = 0
-    dataset.attrs['Time interval / s'] = 300
-    dataset.attrs['Objective NA'] = 0.45
-    dataset.attrs['Number of frames'] = 0  # to be updated later
-    dataset.attrs['Notes'] = (
-        "J774 macrophages, P11. Imaged in Flurobrite. 1*10**5 cells per dish. 07/10/2025"
-    )
-
-
-def hdf5_from_ome_tiffs(tiff_files_path: Path,
-                        hdf5_dir: Path,
-                        phase_channel: int = 1,
-                        epi_channel: int = 2,
-                        frame_step_size: int = 1,
-                        batch_size: int = 50,
-                        num_pos: int = 24) -> None:
-    log.info(f'Creating hdf5 files at {hdf5_dir} from {tiff_files_path}')
-
-    def natural_sort_key(s):
-
-        return [
-            int(text) if text.isdigit() else text.lower()
-            for text in re.split(r'(\d+)', str(s))
-        ]
-
-    for pos in range(num_pos):
-        # T, C, Y, X = None, None, None, None
-        dims = None
-        log.info(f'Creating hdf5 file for position {pos} in {hdf5_dir}')
-        hdf5_file = hdf5_dir / f'{pos}.h5'
-        if os.path.exists(hdf5_file):
-            os.remove(hdf5_file)
-
-        tiff_files = sorted(tiff_files_path.glob(f'*_Pos{pos}[._]*ome.tif'),
-                            key=natural_sort_key)
-
-        with h5py.File(hdf5_file, 'w') as h:
-            for i, file in enumerate(tiff_files):
-                with tifffile.TiffFile(str(file)) as tif:
-                    if dims is None:
-                        print(f'Getting metadata for {hdf5_file.name}')
-                        dims = tif.series[0].shape
-                        log.info(f'Got metadta for {hdf5_file}, dims: {dims}')
-
-                        T, _, C, Y, X = dims
-                        images = h.create_group('Images')
-                        set_hdf5_metadata(images, X, Y)
-
-                        phase_ds = images.create_dataset(
-                            'Phase',
-                            shape=(0, Y, X),
-                            maxshape=(None, Y, X),
-                            dtype='uint8',
-                            chunks=(1, Y, X),
-                        )
-                        epi_ds = images.create_dataset(
-                            'Epi',
-                            shape=(0, Y, X),
-                            maxshape=(None, Y, X),
-                            dtype='uint8',
-                            chunks=(1, Y, X),
-                        )
-
-                        phase_min, phase_max = None, None
-                        epi_min, epi_max = None, None
-
-                        frame_count = 0
-                    pages = tif.pages
-                    num_pages = len(pages)
-                    num_frames = num_pages // C
-
-                    selected_frames = np.arange(0, num_frames, frame_step_size)
-
-                    with tqdm(total=T,
-                              desc=f'Processing position {pos}') as pbar:
-                        for batch_start in range(0, len(selected_frames),
-                                                 batch_size):
-
-                            batch_end = min(batch_start + batch_size,
-                                            len(selected_frames))
-                            batch_frames = selected_frames[
-                                batch_start:batch_end]
-
-                            phase_page_idxs = batch_frames * C + phase_channel
-                            epi_page_idxs = batch_frames * C + epi_channel
-
-                            # Read one frame at a time to reduce memory usage
-                            phase_batch = []
-                            epi_batch = []
-                            for i in range(len(phase_page_idxs)):
-                                phase_batch.append(
-                                    pages[phase_page_idxs[i]].asarray())
-                                epi_batch.append(
-                                    pages[epi_page_idxs[i]].asarray())
-                                pbar.update(1)
-                            phase_batch = np.stack(phase_batch)
-                            epi_batch = np.stack(epi_batch)
-                            # phase_batch = np.stack(
-                            #     [pages[i].asarray() for i in phase_page_idxs])
-                            # epi_batch = np.stack(
-                            #     [pages[i].asarray() for i in epi_page_idxs])
-
-                            # Compute global scaling from first batch
-                            if phase_min is None:
-                                phase_min, phase_max = compute_percentile_limits(
-                                    phase_batch, 0, 100)
-                            if epi_min is None:
-                                epi_min, epi_max = compute_percentile_limits(
-                                    epi_batch, 0.1, 99.9)
-
-                            phase_batch = to_8bit(phase_batch, phase_min,
-                                                  phase_max)
-                            epi_batch = to_8bit(epi_batch, epi_min, epi_max)
-
-                            # Resize and write to HDF5
-                            batch_len = len(phase_batch)
-                            phase_ds.resize((frame_count + batch_len, Y, X))
-                            epi_ds.resize((frame_count + batch_len, Y, X))
-
-                            phase_ds[frame_count:frame_count +
-                                     batch_len] = phase_batch
-                            epi_ds[frame_count:frame_count +
-                                   batch_len] = epi_batch
-
-                            frame_count += batch_len
-            images.attrs['Number of frames'] = frame_count
-            print(f"\nHDF5 file created: {frame_count} frames")
-
-
-PREPROCESSED_ATTR = 'Preprocessed'
-
-
-def preprocessing(hdf5_file_path: str | Path) -> None:
-    """CLAHE on Phase, rolling ball + smoothing on Epi, both in place.
-
-    Each channel is marked with a 'Preprocessed' attr once done, and marked
-    channels are skipped, so an interrupted run can be resumed without
-    applying a step twice.
-    """
-    print(f'Preprocessing images in {hdf5_file_path}')
-    log.info(f'Applying preprocessing to {hdf5_file_path}')
-
-    with h5py.File(Path(hdf5_file_path), 'r+') as f:
-        phase_ds = f['Images']['Phase']
-        if phase_ds.attrs.get(PREPROCESSED_ATTR, False):
-            log.info('Phase already preprocessed, skipping CLAHE')
-        else:
-            clahe_grid_size = 20
-            T, Y, X = phase_ds.shape
-            x_tiles = math.floor(X / (clahe_grid_size * 2)) * 2 + 1
-            y_tiles = math.floor(Y / (clahe_grid_size * 2)) * 2 + 1
-            clahe = cv2.createCLAHE(tileGridSize=(y_tiles, x_tiles),
-                                    clipLimit=3.0)
-            phase_ims = phase_ds[:]
-            for i, im in tqdm(enumerate(phase_ims),
-                              total=phase_ims.shape[0],
-                              desc='Applying CLAHE to phase'):
-                phase_ds[i] = clahe.apply(im)
-            del phase_ims
-            phase_ds.attrs[PREPROCESSED_ATTR] = True
-            f.flush()
-
-        fluor_ds = f['Images']['Epi']
-        if fluor_ds.attrs.get(PREPROCESSED_ATTR, False):
-            log.info('Epi already preprocessed, skipping background removal')
-            return
-        # basic = basicpy.BaSiC(get_darkfield=False)
-        fluor_ims = fluor_ds[:]
-        log.info('Applying rolling ball background')
-        rolling_ball_background(fluor_ims)
-        log.info('Applying smoothing')
-        # Smooth and write frame by frame rather than via gaussian_smooth,
-        # which builds a second full copy of the stack
-        for i, im in tqdm(enumerate(fluor_ims),
-                          total=fluor_ims.shape[0],
-                          desc='Smoothing images'):
-            fluor_ds[i] = cv2.GaussianBlur(im, (0, 0), sigmaX=1.0, sigmaY=1.0)
-        fluor_ds.attrs[PREPROCESSED_ATTR] = True
-        # log.info('Applying N2V')
-        # fluor_ims = n2v_denoise(fluor_ims, N2V_MODEL_DIR)
-        # log.info('Applying BASIC')
-        # fluor_ims = basic.fit_transform(fluor_ims, is_timelapse=True)
-
-
-def make_short_test_copy(orig_file: Path,
-                         short_file: Path,
-                         start_frame: int = 0,
-                         end_frame: int = 50) -> None:
-    """
-    Copy the images group from the orig_file, taking only frames from start_frame to end_frame
-    """
-    if not short_file.parent.exists():
-        os.makedirs(short_file.parent)
-    group_name = 'Images'
-    with h5py.File(orig_file, 'r') as orig:
-        with h5py.File(short_file, 'x') as short:
-            orig_group = orig[group_name]
-            short_group = short.create_group(group_name)
-
-            for name, dataset in orig_group.items():
-                if isinstance(dataset, h5py.Dataset):
-                    print(f"Copying dataset '{name}'")
-                    try:
-                        # Extract the slice of data
-                        sliced_data = dataset[start_frame:end_frame].copy()
-                        print(
-                            f"{name} sliced data shape: {sliced_data.shape}, dtype: {sliced_data.dtype}"
-                        )
-                        # Get creation properties
-                        kwargs = {
-                            'dtype': dataset.dtype,
-                            'compression': dataset.compression,
-                            'compression_opts': dataset.compression_opts,
-                            'chunks': dataset.chunks,
-                            'shuffle': dataset.shuffle,
-                            'fletcher32': dataset.fletcher32,
-                            'maxshape': dataset.maxshape
-                        }
-
-                        # Create dataset in destination
-                        short_group.create_dataset(
-                            name,
-                            data=sliced_data,
-                            shape=sliced_data.shape,
-                            **{
-                                k: v
-                                for k, v in kwargs.items() if v is not None
-                            })
-                        short.flush()
-
-                    except Exception as e:
-                        print(e)
-
-            for attr_name, attr_value in orig_group.attrs.items():
-                short_group.attrs[attr_name] = attr_value
-
-            short_group.attrs['Number of frames'] = end_frame - start_frame
-            short.flush()
-
-
-def keep_only_group(hdf5_path, keep_groups=['Images']):
-    with h5py.File(hdf5_path, 'r+') as f:
-        # List all top-level groups
-        all_groups = list(f.keys())
-
-        for group in all_groups:
-            if group not in keep_groups:
-                print(f"Deleting group: {group}")
-                del f[group]  # Deletes the group and its contents
-
-        # Ensure changes are written to disk
-        f.flush()
-
-    print(f"Only '{keep_groups}' group retained.")
-
-
-def epi_background_correction(dataset=SETTINGS.DATASET,
-                              max_workers: int = 4) -> None:
-    """Apply Gaussian background correction to each Epi frame using multithreading."""
-
-    with h5py.File(dataset, 'r+') as f:
-        epi_ds = f['Images']['Epi']
-        n_frames, height, width = epi_ds.shape
-
-        # def process_frame(i):
-        #     epi_im = epi_ds[i].astype(np.float32)  # cast once to avoid precision issues
-        #     bg_estimate = scipy.ndimage.gaussian_filter(epi_im, sigma=sigma)
-        #     corrected = np.clip(epi_im - bg_estimate, 0, None).astype(np.uint8)
-        #     return i, corrected
-        def process_frame(i):
-            epi_im = epi_ds[i].astype(np.float32)
-            epi_im = replace_hot_pixels(epi_im)
-            epi_im = bg_removal(epi_im)
-            return i, epi_im
-
-        # Process in parallel
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(process_frame, i) for i in range(n_frames)
-            ]
-
-            for future in tqdm(futures, desc="Correcting frames"):
-                i, corrected_frame = future.result()
-                epi_ds[i] = corrected_frame
-
-
-def create_survival_analysis_dataset(dataset_path: Path,
-                                     new_path: Path = None) -> None:
-    """Create a new datset with only 'Cells group' and with chunks set to (num_frames, 1)"""
-    if new_path is None:
-        new_path = dataset_path.parent / f"{dataset_path.stem}_survival{dataset_path.suffix}"
-    if os.path.exists(new_path):
-        os.remove(new_path)
-    with h5py.File(dataset_path, 'r') as orig:
-        with h5py.File(new_path, 'x') as new:
-            orig_group = orig['Cells']['Phase']
-            new_group = new.create_group('Cells/Phase')
-
-            for name, dataset in tqdm(orig_group.items(),
-                                      desc='Copying datasets'):
-                if isinstance(dataset, h5py.Dataset):
-                    print(f"Copying dataset '{name}'")
-                    try:
-                        # Get creation properties
-                        kwargs = {
-                            'dtype': dataset.dtype,
-                            'compression': dataset.compression,
-                            'compression_opts': dataset.compression_opts,
-                            'chunks': (dataset.shape[0], 1),
-                            'shuffle': dataset.shuffle,
-                            'fletcher32': dataset.fletcher32,
-                            'maxshape': dataset.maxshape
-                        }
-
-                        # Create dataset in destination
-                        new_group.create_dataset(
-                            name,
-                            data=dataset[...],
-                            shape=dataset.shape,
-                            **{
-                                k: v
-                                for k, v in kwargs.items() if v is not None
-                            })
-                        new.flush()
-
-                    except Exception as e:
-                        print(e)
-
-            for attr_name, attr_value in orig_group.attrs.items():
-                new_group.attrs[attr_name] = attr_value
-
-            new.flush()
-
-
-def split_by_radius(hdf5_file: Path) -> None:
-    """Split cell dataset into two groups according to distance from image centre.
-    Threshold radius will be $\frac{L}{\sqrt(2 \pi)}$, where L is height/width of image. (Assuming square image)."""
-    with h5py.File(hdf5_file, 'r') as f:
-        features_group = f['Cells']['Phase']
-        frames, h, w = f['Images']['Phase'].shape
-        centre_coord = np.array([w // 2, w // 2])
-        threshold_radius = w / np.sqrt(2 * np.pi)
-        cell_positions = np.stack((features_group['X'], features_group['Y']),
-                                  axis=-1)
-        dist_from_centre = np.linalg.norm(
-            cell_positions - centre_coord[np.newaxis, np.newaxis, :], axis=-1)
-        inner_region_mask = np.nanmax(dist_from_centre,
-                                      axis=0) < threshold_radius
-        outer_region_mask = np.nanmin(dist_from_centre,
-                                      axis=0) > threshold_radius
-
-        def copy_dataset(src_group, dst_group, cell_mask):
-            for feature in src_group.keys():
-                src_dset = src_group[feature]
-                # Preserve chunks, compression, dtype
-                dst_dset = dst_group.create_dataset(
-                    feature,
-                    shape=(src_dset.shape[0], np.sum(cell_mask)),
-                    dtype=src_dset.dtype,
-                    chunks=True,
-                    compression=src_dset.compression,
-                    compression_opts=src_dset.compression_opts)
-                # Copy data selectively
-                dst_dset[:] = src_dset[:, cell_mask]
-
-        # Save inner region
-        inner_file = hdf5_file.parent / f'{hdf5_file.stem}_inner{hdf5_file.suffix}'
-        with h5py.File(inner_file, 'w') as f_inner:
-            inner_group = f_inner.create_group('Cells/Phase')
-            copy_dataset(features_group, inner_group, inner_region_mask)
-
-        # Save outer region
-        outer_file = hdf5_file.parent / f'{hdf5_file.stem}_outer{hdf5_file.suffix}'
-        with h5py.File(outer_file, 'w') as f_outer:
-            outer_group = f_outer.create_group('Cells/Phase')
-            copy_dataset(features_group, outer_group, outer_region_mask)
-
-        # print(cell_positions.shape)
-
-
-def replace_hot_pixels(image: np.ndarray,
-                       upper_percentile: float = 99.9,
-                       filter_size: int = 3) -> np.ndarray:
-    """
-    Replace the brightest pixels (above a given percentile)
-    with local median values.
-    """
-    # Ensure float
-    img = image.astype(np.float32)
-
-    # 1. Find threshold
-    cutoff = np.percentile(img, upper_percentile)
-
-    # 2. Create mask of "hot" pixels
-    hot_mask = img > cutoff
-
-    # 3. Compute median-filtered version
-    median_img = scipy.ndimage.median_filter(img, size=filter_size)
-
-    # 4. Replace only hot pixels
-    corrected = img.copy()
-    corrected[hot_mask] = median_img[hot_mask]
-
-    return corrected
-
-
-def get_channel_tiffs(channel_dir: Path,
-                      frame_step: int = 1,
-                      num_frames: int = None) -> list:
-    """Sorted tiffs of one channel, keeping every frame_step-th file, then at most num_frames of those."""
-    tiff_files = sorted(channel_dir.glob("*.tif*"))[::frame_step]
-    if num_frames is not None:
-        tiff_files = tiff_files[:num_frames]
-    return tiff_files
-
-
-def _get_min_max(tiff_files: list[Path],
-                 sample_size: int = 100) -> tuple[int, int]:
-    min_val, max_val = np.inf, -np.inf
-    T = len(tiff_files)
-    for i in tqdm(range(0, T, math.ceil(T / sample_size)),
-                  desc=f"Computing min/max"):
-        with tifffile.TiffFile(str(tiff_files[i])) as tif:
-            im = tif.series[0].asarray()
-        min_val = min(min_val, float(im.min()))
-        max_val = max(max_val, float(im.max()))
-    return min_val, max_val
-
-
-def hdf5_from_tiffs(tiff_files_path: Path,
-                    hdf5_file: Path,
-                    num_frames: int = None,
-                    frame_steps: int | dict = 1):
-    """Create hdf5 datasets from folder for each channel containg tiffs. 16 bit to 8 bit done using percntile instensities of 100 equally spaced frames.
-
-    frame_steps: keep only every nth tiff of a channel. Either one int applied to every channel, or a
-        {channel name: step} dict (unnamed channels keep every frame). e.g. {'Phase': 3} keeps every
-        3rd phase image, matching the fluor images that are already acquired at a third of that rate.
-    num_frames: frames kept per channel, applied after the frame step.
-    """
-    if os.path.exists(hdf5_file):
-        os.remove(hdf5_file)
-
-    channel_shapes = {}
-    channel_steps = {}
-
-    fluor_ims = []
-
-    for channel_dir in tiff_files_path.glob("*"):
-        if not channel_dir.is_dir():
+def preprocessing(h5_file: Path) -> None:
+    log.info(f'Applying preprocessing to {h5_file}')
+    phase_preprocessing(h5_file)
+    epi_preprocessing(h5_file)
+
+
+def phase_preprocessing(h5_file: Path,
+                        grid_size: int = 20,
+                        clip_limit: float = 3.0) -> None:
+    log.info(f'Running CLAHE on file {h5_file}')
+    file = H5File(h5_file)
+    Y, X = file.im_dims
+    x_tiles = math.floor(X / (grid_size * 2)) * 2 + 1
+    y_tiles = math.floor(Y / (grid_size * 2)) * 2 + 1
+    clahe = cv2.createCLAHE(tileGridSize=(y_tiles, x_tiles),
+                            clipLimit=clip_limit)
+
+    def _processed_frames():
+        for i in tqdm(range(file.num_frames), desc='Applying CLAHE'):
+            yield clahe.apply(file.get_phase(i))
+
+    file.write_phase(_processed_frames(), overwrite=True)
+    file.write_attr('CLAHE grid size', grid_size)
+    file.write_attr('CLAHE clip limit', clip_limit)
+
+
+def epi_preprocessing(h5_file: Path) -> None:
+    file = H5File(h5_file)
+
+    def processed_frames():
+        bg_subtractor = imagej_rolling_ball.BackgroundSubtracter(
+            java_options='-Xmx2g')
+        hot_pixel_mask = get_mask()
+        for i in tqdm(range(file.num_frames), desc='Preprocessing Epi'):
+            im = file.get_epi(i)
+            im = correct_hot_pixels(im, hot_pixel_mask)
+            bg_subtractor.rolling_ball_background(im,
+                                                  50,
+                                                  do_presmooth=True,
+                                                  use_paraboloid=False,
+                                                  inplace=True)
+
+            yield im
+
+    file.write_epi(processed_frames(), overwrite=True)
+    file.delete_attr('Total Fluorescence')
+    file.total_fluorescence
+    file.write_attr('Hot pixel mask', HOT_PIXEL_PATH)
+    file.write_attr('Hot pixel residual threshold', RESIDUAL_THRESHOLD)
+
+
+def redo_epi_16bit(name: str) -> None:
+    """Remake a MacrophageData folder's Epi as raw 16 bit from its tiffs (in
+    _1), preprocess it, and replace each server file once it's done. Wells
+    already with 16 bit Epi are skipped, so an interrupted run resumes."""
+    orig_datasets_dir = Path(
+        '~/thor_server/MacrophageData').expanduser() / name / '_1'
+    local_datasets_dir = Path('PhagoPred') / 'Datasets' / name
+    local_datasets_dir.mkdir(parents=True, exist_ok=True)
+    remote_datasets_dir = Path(
+        '~/thor_server/MacrophageData').expanduser() / name
+
+    for remote_file in sorted(remote_datasets_dir.glob('*.h5')):
+        if H5File(remote_file).ims_info(H5File.FLUOR)[1] == np.uint16:
+            print(f'Skipping {remote_file}: Epi already 16 bit')
             continue
+        local_file = local_datasets_dir / remote_file.name
+        print(f'Copying {local_file.name} from remote')
+        shutil.copy(remote_file, local_file)
+        process_ome_tiffs(orig_datasets_dir,
+                          local_datasets_dir,
+                          phase_channel=None,
+                          overwrite=True,
+                          positions=remote_file.stem)
 
-        channel_steps[channel_dir.name] = (frame_steps if isinstance(
-            frame_steps, int) else frame_steps.get(channel_dir.name, 1))
-        tiff_files = get_channel_tiffs(channel_dir,
-                                       channel_steps[channel_dir.name],
-                                       num_frames)
-        T = len(tiff_files)
-        if not tiff_files:
-            raise ValueError(f"No .tif files found in directory")
-
-        with tifffile.TiffFile(str(tiff_files[0])) as tif:
-            shape = tif.series[0].shape
-            Y, X = shape
-            channel_shapes[channel_dir.name] = (T, Y, X)
-
-        if channel_dir.name == 'Phase':
-            phase_min, phase_max = _get_min_max(tiff_files)
-
-    max_T = max(shape[0] for shape in channel_shapes.values())
-    max_X = max(shape[2] for shape in channel_shapes.values())
-    max_Y = max(shape[1] for shape in channel_shapes.values())
-
-    grid_size = 20
-    x_tiles = math.floor(max_X / (grid_size * 2)) * 2 + 1
-    y_tiles = math.floor(max_Y / (grid_size * 2)) * 2 + 1
-    clahe = cv2.createCLAHE(tileGridSize=(y_tiles, x_tiles), clipLimit=3.0)
-    basic = basicpy.BaSiC(get_darkfield=False)
-
-    with h5py.File(hdf5_file, 'w') as h:
-        images_group = h.create_group('Images')
-        set_hdf5_metadata(images_group, max_X, max_Y)
-        images_group.attrs['Number of frames'] = max_T
-        for channel, shape in channel_shapes.items():
-            channel_ds = images_group.create_dataset(channel,
-                                                     shape=(max_T, max_Y,
-                                                            max_X),
-                                                     dtype='uint8',
-                                                     chunks=(1, max_Y, max_X))
-            tiff_files = get_channel_tiffs(tiff_files_path / channel,
-                                           channel_steps[channel], num_frames)
-            channel_frame_step = (max_T - 1) / (shape[0] -
-                                                1) if shape[0] > 1 else 0
-
-            for i, tiff_file in tqdm(
-                    enumerate(tiff_files),
-                    total=len(tiff_files),
-                    desc=
-                    f"Processing channel {channel} for hdf5 file {hdf5_file.name}"
-            ):
-                frame_idx = int(round(i * channel_frame_step))
-
-                im = tifffile.imread(str(tiff_file))
-                if channel == 'Phase':
-                    im = to_8bit(im, phase_min, phase_max)
-                    im = clahe.apply(im)
-                    channel_ds[frame_idx] = im
-                elif channel == 'Fluor':
-                    fluor_ims.append(im)
-        if len(fluor_ims) > 0:
-            fluor_ims = np.stack(fluor_ims, axis=0)
-
-            fluor_ims = rolling_ball_background(fluor_ims)
-            fluor_ims = n2v_denoise(fluor_ims, N2V_MODEL_DIR)
-
-            fluor_min, fluor_max = np.percentile(fluor_ims,
-                                                 0.1), np.percentile(
-                                                     fluor_ims, 99.9)
-            fluor_ims = to_8bit(fluor_ims, fluor_min, fluor_max)
-
-            fluor_ims = basic.fit_transform(fluor_ims, is_timelapse=True)
-
-            for i, im in tqdm(enumerate(fluor_ims),
-                              total=len(fluor_ims),
-                              desc='Upscaling and writing fluor ims'):
-                im = cv2.resize(im, (max_X, max_Y),
-                                interpolation=cv2.INTER_NEAREST)
-                images_group['Fluor'][i] = im
-            # images_group['Fluor'][:] = fluor_ims
-            # basic.fit(fluor_ims)
-            # basic_batch_size = 286
-            # for batch_start in tqdm(range(0, len(fluor_ims), basic_batch_size),
-            #                         desc='BaSiC transform'):
-            #     batch = fluor_ims[batch_start:batch_start + basic_batch_size]
-            #     batch = basic.transform(batch, is_timelapse=True)
-            #     for i, im in enumerate(batch):
-            #         im = cv2.resize(im, (max_X, max_Y),
-            #                         interpolation=cv2.INTER_NEAREST)
-            #         images_group['Fluor'][batch_start + i] = im
-            images_group['Fluor'].attrs['Baseline'] = basic.baseline
-    print(
-        f"HDF5 file created: {hdf5_file} with channels: {list(channel_shapes.keys())}"
-    )
-
-
-# def _fit_basic(ims: list[Path])
-
-
-def rename_group(hdf5_file: Path, old_group_name: str,
-                 new_group_name: str) -> None:
-    """Rename a group in an HDF5 file."""
-    with h5py.File(hdf5_file, 'r+') as f:
-        if old_group_name not in f:
-            return
-            # raise ValueError(f"Group '{old_group_name}' not found in the HDF5 file.")
-        if new_group_name in f:
-            return
-            # raise ValueError(f"Group '{new_group_name}' already exists in the HDF5 file.")
-
-        f.move(old_group_name, new_group_name)
-        f.flush()
-    print(
-        f"Group '{old_group_name}' renamed to '{new_group_name}' in {hdf5_file}"
-    )
-
-
-def split_datasets_by_time(parent_path: Path, num_splits: int) -> None:
-    splits = None
-    paths = list(parent_path.glob('*.h5'))
-    for path in tqdm(paths, desc='Splitting datasets'):
-        if splits is None:
-            with h5py.File(path, 'r') as f:
-                length = f['Images']['Phase'].shape[0]
-                splits = np.linspace(0, length, num_splits + 1)
-        for i, (start, stop) in enumerate(zip(splits[:-1], splits[1:])):
-            new_path = path.parent / f'split_{i}' / path.name
-            truncate_hdf5(path, new_path, int(start), int(stop))
+        # epi_preprocessing(local_file)
+        H5File(local_file).repack()
+        temp_file = remote_file.with_suffix('.h5.tmp')
+        shutil.move(local_file, temp_file)
+        os.replace(temp_file, remote_file)
 
 
 if __name__ == '__main__':
-    # hdf5_from_ome_tiffs(
-    #     Path('~/thor_server/MacrophageData/18_09/_1').expanduser(),
-    #     hdf5_dir=Path('~/thor_server/MacrophageData/18_09/').expanduser())
-
-    preprocessing(Path('~/thor_server/MacrophageData/18_09/0.h5').expanduser())
-    # split_datasets_by_time(
-    #     Path('~/thor_server/MacrophageData/24_07').expanduser(), 3)
+    for name in ['02_10', '16_10']:
+        redo_epi_16bit(name)

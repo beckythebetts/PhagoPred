@@ -24,8 +24,7 @@ import re
 
 def natural_key(name):
     return [
-        int(s) if s.isdigit() else s.lower()
-        for s in re.split(r'(\d+)', name)
+        int(s) if s.isdigit() else s.lower() for s in re.split(r'(\d+)', name)
     ]
 
 
@@ -34,32 +33,39 @@ def is_processed(h5_file):
         return 'Cells' in f
 
 
-# from PhagoPred.survival_analysis import train, validate
-
 if __name__ == '__main__':
     orig_datasets_dir = Path(
-        '~/thor_server/MacrophageData/18_09/_1').expanduser()
-    machine_dataset_dir = Path('PhagoPred') / 'Datasets' / '18_09'
+        '~/thor_server/MacrophageData/16_10/_1').expanduser()
+    machine_dataset_dir = Path('PhagoPred') / 'Datasets' / '16_10'
     remote_datasets_dir = Path(
-        '~/thor_server/MacrophageData/18_09').expanduser()
+        '~/thor_server/MacrophageData/16_10').expanduser()
 
-    # hdf5_from_ome_tiffs(orig_datasets_dir, remote_datasets_dir)
-    # Files are moved here while being processed and back when finished, so
-    # a file left here is from an interrupted run and is resumed in place
+    hdf5_from_ome_tiffs(orig_datasets_dir, remote_datasets_dir)
+
     names = {p.name for p in remote_datasets_dir.glob('*.h5')}
     names |= {p.name for p in machine_dataset_dir.glob('*.h5')}
     for name in sorted(names, key=natural_key):
         h5_file = machine_dataset_dir / name
+        # if h5_file.name not in [
+        #         # '0.h5',
+        #         # '1.h5',
+        #         # '2.h5',
+        #         '3.h5',
+        #         '4.h5',
+        # ]:
+        #     continue
+
         if not h5_file.exists():
-            if is_processed(remote_datasets_dir / name):
-                print(f'Skipping {name}: already processed')
-                continue
+            # if is_processed(remote_datasets_dir / name):
+            #     print(f'Skipping {name}: already processed')
+            #     continue
             shutil.move(remote_datasets_dir / name, machine_dataset_dir)
+
         print(f'Processing {name}')
         with h5py.File(h5_file, 'r') as f:
             SETTINGS.IMAGE_SIZE = f['Images'].attrs['Image size / pixels']
-        if h5_file.name not in ['1.h5', '2.h5', '3.h5', '4.h5']:
-            preprocessing(h5_file)
+        # if h5_file.name not in ['1.h5', '2.h5', '3.h5', '4.h5']:
+        preprocessing(h5_file)
         cellpose_segment.seg_dataset(h5_file)
         trackpy_2_stage.run_tracking(h5_file)
         extract_features.extract_features(
