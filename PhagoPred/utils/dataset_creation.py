@@ -7,6 +7,7 @@ import math
 import shutil
 import os
 
+import jpype
 import tifffile
 from tqdm import tqdm
 import numpy as np
@@ -182,7 +183,18 @@ def phase_preprocessing(h5_file: Path,
     file.write_attr('CLAHE clip limit', clip_limit)
 
 
-def epi_preprocessing(h5_file: Path) -> None:
+def _rolling_ball(bg_subtractor, im: np.ndarray, radius: float) -> np.ndarray:
+    H, W = im.shape
+    pixels = jpype.JArray(jpype.JShort)(im.view(np.int16).ravel())
+    proc = jpype.JClass('ij.process.ShortProcessor')(W, H, pixels, None)
+    bg_subtractor.background_subtracter.rollingBallBackground(
+        proc, radius, False, False, False, True,
+        True)  # create_bg, light_bg, paraboloid, presmooth, correct_corners
+    return np.array(proc.getPixels(),
+                    dtype=np.int16).view(np.uint16).reshape(H, W)
+
+
+def epi_preprocessing(h5_file: Path, rolling_ball_radius: float) -> None:
     file = H5File(h5_file)
 
     def processed_frames():
@@ -192,11 +204,7 @@ def epi_preprocessing(h5_file: Path) -> None:
         for i in tqdm(range(file.num_frames), desc='Preprocessing Epi'):
             im = file.get_epi(i)
             im = correct_hot_pixels(im, hot_pixel_mask)
-            bg_subtractor.rolling_ball_background(im,
-                                                  50,
-                                                  do_presmooth=True,
-                                                  use_paraboloid=False,
-                                                  inplace=True)
+            im = _rolling_ball(bg_subtractor, im, rolling_ball_radius)
 
             yield im
 
@@ -205,6 +213,7 @@ def epi_preprocessing(h5_file: Path) -> None:
     # file.per_frame_fluorescence
     file.write_attr('Hot pixel mask', str(HOT_PIXEL_PATH))
     file.write_attr('Hot pixel residual threshold', RESIDUAL_THRESHOLD)
+    file.write_attr('Rolling ball radius', rolling_ball_radius)
 
 
 def redo_epi_16bit(name: str) -> None:
@@ -225,5 +234,5 @@ def redo_epi_16bit(name: str) -> None:
 
 
 if __name__ == '__main__':
-    for name in ['02_10', '16_10']:
-        redo_epi_16bit(name)
+    import sys
+    redo_epi_16bit(sys.argv[1:])
