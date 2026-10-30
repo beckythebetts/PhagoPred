@@ -194,7 +194,7 @@ def _rolling_ball(bg_subtractor, im: np.ndarray, radius: float) -> np.ndarray:
                     dtype=np.int16).view(np.uint16).reshape(H, W)
 
 
-def epi_preprocessing(h5_file: Path, rolling_ball_radius: float) -> None:
+def epi_preprocessing(h5_file: Path, rolling_ball_radius: float = 50) -> None:
     file = H5File(h5_file)
 
     def processed_frames():
