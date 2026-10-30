@@ -34,11 +34,9 @@ def _attr(name: str) -> property:
 
 def _ims_getter(path: str):
 
-    def get(
-        self: H5File,
-        frames: int | list[int] | np.ndarray | slice | None = None,
-        region: tuple[slice, slice] | None = None,
-    ) -> np.ndarray:
+    def get(self: H5File,
+            frames: int | list[int] | np.ndarray | slice | None = None,
+            region: tuple[slice, slice] | None = None) -> np.ndarray:
         return self._get_ims(path, frames, region)
 
     get.__doc__ = (f'Frames of {path}: (H, W) for an int frame, else '
@@ -65,6 +63,8 @@ def _ims_writer(path: str, dtype: str, **default_create_kwargs):
 
 class H5File:
     # === DATASET STRUCTURE ===
+    EPI_THRESHOLD = 100
+
     FEATURES = 'Cells/Phase'
     FRAME_DIM, CELLS_DIM = 0, 1
 
@@ -84,7 +84,6 @@ class H5File:
 
     # === Images / segmentations ===
     get_phase = _ims_getter(PHASE)
-    get_epi = _ims_getter(FLUOR)
     get_segs = _ims_getter(SEGS)
 
     write_phase = _ims_writer(PHASE, 'uint8')
@@ -98,6 +97,7 @@ class H5File:
     camera = _attr('Camera')
     fov = _attr('FOV')
     frame_time = _attr('Time Interval / min')
+    fluor_thresh = _attr('Fluor threshold')
 
     def __init__(self, path: Path | str):
         self.path = Path(path)
@@ -177,8 +177,8 @@ class H5File:
             The array for a single name, else {name: array}.
         """
         single = isinstance(names, str)
-        names = (self.feature_names if names is None else
-                 [names] if single else list(names))
+        names = (self.feature_names
+                 if names is None else [names] if single else list(names))
         cell_idxs = slice(None) if cell_idxs is None else cell_idxs
         frames = slice(None) if frames is None else frames
         # Features are chunked per cell, so int / slice indices are read
@@ -266,12 +266,10 @@ class H5File:
         self.reset_cache()
         return num_frames
 
-    def _get_ims(
-        self,
-        path: str,
-        frames: int | list[int] | np.ndarray | slice | None = None,
-        region: tuple[slice, slice] | None = None,
-    ) -> np.ndarray:
+    def _get_ims(self,
+                 path: str,
+                 frames: int | list[int] | np.ndarray | slice | None = None,
+                 region: tuple[slice, slice] | None = None) -> np.ndarray:
         if frames is None:
             frames = slice(None)
         rows, cols = (slice(None), slice(None)) if region is None else region
@@ -281,6 +279,15 @@ class H5File:
             # h5py only takes increasing, unique index lists
             unique, inverse = np.unique(frames, return_inverse=True)
             return f[path][unique, rows, cols][inverse]
+
+    def get_epi(self,
+                frames: int | list[int] | np.ndarray | slice | None = None,
+                region: tuple[slice, slice] | None = None,
+                threshold: bool = False) -> np.ndarray:
+        ims = self._get_ims(self.FLUOR, frames, region)
+        if threshold:
+            ims[ims < self.EPI_THRESHOLD] = 0
+        return ims
 
     # === UTILS ===
 
@@ -314,19 +321,20 @@ class H5File:
                 del f.attrs[name]
 
     @property
-    def total_fluorescence(self) -> np.ndarray:
-        """Summed Epi intensity per frame, computed once and saved in the file."""
+    def per_frame_fluorescence(self) -> np.ndarray:
+        """Summed thresholded Epi intensity per frame, computed once and saved in the file."""
         with self._open() as f:
             if 'Total Fluorescence' in f.attrs:
                 return f.attrs['Total Fluorescence']
-        with self._open(write=True) as f:
-            epi = f[self.FLUOR]
-            totals = np.array([
-                epi[i].sum(dtype=np.uint64)
-                for i in tqdm(range(epi.shape[0]),
-                              desc='Computing total fluorescnce')
-            ])
-            f.attrs['Total Fluorescence'] = totals
+
+        totals = np.array([
+            self.get_epi(i, threshold=True).sum(dtype=np.uint64)
+            for i in tqdm(range(self.num_frames),
+                          desc='Computing total fluorescnce')
+        ])
+
+        self.write_attr('Total Fluorescence', totals)
+        self.fluor_thresh = self.EPI_THRESHOLD
         return totals
 
     def repack(self) -> None:

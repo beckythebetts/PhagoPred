@@ -202,8 +202,8 @@ def epi_preprocessing(h5_file: Path) -> None:
 
     file.write_epi(processed_frames(), overwrite=True)
     file.delete_attr('Total Fluorescence')
-    file.total_fluorescence
-    file.write_attr('Hot pixel mask', HOT_PIXEL_PATH)
+    # file.per_frame_fluorescence
+    file.write_attr('Hot pixel mask', str(HOT_PIXEL_PATH))
     file.write_attr('Hot pixel residual threshold', RESIDUAL_THRESHOLD)
 
 
@@ -211,14 +211,16 @@ def redo_epi_16bit(name: str) -> None:
 
     dataset_dir = Path('~/MacrophageData').expanduser() / name
     orig_datasets_dir = dataset_dir / '_1'
-    for h5 in sorted(dataset_dir.glob('*.h5')):
-        process_ome_tiffs(orig_datasets_dir,
-                          dataset_dir,
-                          phase_channel=None,
-                          overwrite=True,
-                          positions=h5.stem)
 
-        # epi_preprocessing(local_file)
+    for h5 in sorted(dataset_dir.glob('*.h5')):
+        print(f'Processing file {h5}')
+        # process_ome_tiffs(orig_datasets_dir,
+        #                   dataset_dir,
+        #                   phase_channel=None,
+        #                   overwrite=True,
+        #                   positions=h5.stem)
+
+        epi_preprocessing(h5)
         H5File(h5).repack()
 
 
