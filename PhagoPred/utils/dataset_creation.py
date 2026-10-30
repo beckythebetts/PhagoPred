@@ -208,34 +208,18 @@ def epi_preprocessing(h5_file: Path) -> None:
 
 
 def redo_epi_16bit(name: str) -> None:
-    """Remake a MacrophageData folder's Epi as raw 16 bit from its tiffs (in
-    _1), preprocess it, and replace each server file once it's done. Wells
-    already with 16 bit Epi are skipped, so an interrupted run resumes."""
-    orig_datasets_dir = Path(
-        '~/thor_server/MacrophageData').expanduser() / name / '_1'
-    local_datasets_dir = Path('PhagoPred') / 'Datasets' / name
-    local_datasets_dir.mkdir(parents=True, exist_ok=True)
-    remote_datasets_dir = Path(
-        '~/thor_server/MacrophageData').expanduser() / name
 
-    for remote_file in sorted(remote_datasets_dir.glob('*.h5')):
-        if H5File(remote_file).ims_info(H5File.FLUOR)[1] == np.uint16:
-            print(f'Skipping {remote_file}: Epi already 16 bit')
-            continue
-        local_file = local_datasets_dir / remote_file.name
-        print(f'Copying {local_file.name} from remote')
-        shutil.copy(remote_file, local_file)
+    dataset_dir = Path('~/MacrophageData').expanduser() / name
+    orig_datasets_dir = dataset_dir / '_1'
+    for h5 in sorted(dataset_dir.glob('*.h5')):
         process_ome_tiffs(orig_datasets_dir,
-                          local_datasets_dir,
+                          dataset_dir,
                           phase_channel=None,
                           overwrite=True,
-                          positions=remote_file.stem)
+                          positions=h5.stem)
 
         # epi_preprocessing(local_file)
-        H5File(local_file).repack()
-        temp_file = remote_file.with_suffix('.h5.tmp')
-        shutil.move(local_file, temp_file)
-        os.replace(temp_file, remote_file)
+        H5File(h5).repack()
 
 
 if __name__ == '__main__':
