@@ -1,5 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
+from collections import defaultdict
 
 import h5py
 import numpy as np
@@ -13,6 +14,7 @@ from sklearn.metrics import precision_score, recall_score, f1_score
 from PhagoPred import SETTINGS
 from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
 from PhagoPred.feature_extraction import features
+from PhagoPred.utils.h5_file import H5File
 from PhagoPred.utils.logger import get_logger
 
 log = get_logger()
@@ -193,67 +195,39 @@ class CellType:
 class FeaturesExtraction:
 
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    DIMS = ['Frame', 'Cell Index']
 
     def __init__(
         self,
+        features: list[features.BaseFeature],
         h5py_file=SETTINGS.DATASET,
         frame_batchsize=10,
         cell_batch_size=100,
     ) -> None:
-
-        self.num_frames = None
-
-        self.h5py_file = h5py_file
+        self.h5py_file = H5File(h5py_file)
         self.frame_batchsize = frame_batchsize
         self.cell_batch_size = cell_batch_size
 
-        self.cell_types = [CellType('Phase')]
-        self.cell_type_names = [
-            cell_type.name for cell_type in self.cell_types
-        ]
+        self.primary_features = [f for f in features if f.primary_feature]
+        self.derived_features = [f for f in features if f.derived_feature]
 
-        self.set_up()
+    def extract_features(self) -> None:
 
-    def get_cell_type(self, cell_type_name: str):
-        return self.cell_types[self.cell_type_names.index(cell_type_name)]
+        self.extract_primary_features()
+        self.extract_derived_features()
+        self.h5py_file.write_attr('Epi threshold', H5File.EPI_THRESHOLD)
+        self.h5py_file.repack()
 
-    def add_feature(self, feature, cell_type: str) -> None:
-        """
-        Add feature to specified cell type
-        """
-        self.cell_types[self.cell_type_names.index(cell_type)].add_feature(
-            feature)
-
-    def set_up(self):
-        """
-        Prepare hdf5 file
-        """
-        with h5py.File(self.h5py_file, 'r+') as f:
-            # self.num_frames = SETTINGS.NUM_FRAMES
-            self.num_frames = f['Images']['Phase'].shape[0]
-            for cell_type in self.cell_types:
-                cell_type.get_feature_names()
-                cell_type.set_up_features_group(f)
-
-    def extract_features(self, crop: bool = True) -> None:
-        with h5py.File(self.h5py_file, 'r+') as f:
-            for cell_type in self.cell_types:
-                self.extract_primary_features(f, cell_type)
-                # self.extract_primary_derived_features(f, cell_type)
-                self.extract_derived_features(f, cell_type)
-
-    def extract_primary_features(self, f: h5py.File,
-                                 cell_type: CellType) -> None:
-        if len(cell_type.primary_features) > 0:
-            print(
-                f'\n=== Calculating Primary Features ({cell_type.name}) ===\n')
-
+    def extract_primary_features(self) -> None:
+        if len(self.primary_features) > 0:
+            print(f'\n=== Calculating Primary Features ===\n')
+            num_frames, num_cells = self.h5py_file.num_frames, self.h5py_file.num_cells
+            results = {}
             crop_features = [
-                feature for feature in cell_type.primary_features
-                if feature.crop
+                feature for feature in self.primary_features if feature.crop
             ]
             no_crop_features = [
-                feature for feature in cell_type.primary_features
+                feature for feature in self.primary_features
                 if not feature.crop
             ]
 
@@ -261,28 +235,28 @@ class FeaturesExtraction:
                                            [no_crop_features, crop_features]):
                 if len(features_list) > 0:
                     if crop:
-                        centre_coords = cell_type.get_features_xr(
-                            f, ['X', 'Y'])
-                        x_centres = torch.from_numpy(centre_coords['X'].values)
-                        y_centres = torch.from_numpy(centre_coords['Y'].values)
-                        # print(x_centres.shape)
+                        centre_coords = self.h5py_file.get_features(
+                            ['X', 'Y'], filter_bad=False)
+                        x_centres = torch.from_numpy(centre_coords['X'])
+                        y_centres = torch.from_numpy(centre_coords['Y'])
 
                         x_centres, y_centres = x_centres.to(
                             self.DEVICE), y_centres.to(self.DEVICE)
 
-                    for frame_idx in tqdm(range(self.num_frames),
+                    for frame_idx in tqdm(range(num_frames),
                                           desc=f'Cropped = {crop}'):
 
-                        mask = cell_type.get_masks(f, frame_idx)
-                        num_cells = np.max(mask) + 1
+                        mask = self.h5py_file.get_segs(frame_idx)
                         mask = torch.tensor(mask).to(self.DEVICE)
                         binary_mask = mask >= 0
 
-                        image = torch.tensor(cell_type.get_images(
-                            f, frame_idx)).to(self.DEVICE)
-                        epi_image = torch.tensor(
-                            CellType('Epi').get_images(f, frame_idx)).to(
+                        image = torch.tensor(
+                            self.h5py_file.get_phase(frame_idx)).to(
                                 self.DEVICE)
+                        epi_image = torch.tensor(
+                            self.h5py_file.get_epi(
+                                frame_idx, threshold=True).astype(
+                                    np.float32)).to(self.DEVICE)
 
                         for first_cell in range(0, num_cells,
                                                 self.cell_batch_size):
@@ -318,54 +292,60 @@ class FeaturesExtraction:
                                     result = result[:, np.newaxis]
                                 for i, feature_name in enumerate(
                                         feature.get_names()):
-
-                                    #resize dataset if too many cells
-                                    if num_cells > f[cell_type.features_group][
-                                            feature_name].shape[
-                                                cell_type.CELL_DIM]:
-                                        f[cell_type.
-                                          features_group][feature_name].resize(
-                                              num_cells, cell_type.CELL_DIM)
-
-                                    f[cell_type.features_group][feature_name][
+                                    if feature_name not in results:
+                                        results[feature_name] = np.full(
+                                            (num_frames, num_cells), np.nan,
+                                            np.float32)
+                                    results[feature_name][
                                         frame_idx,
                                         first_cell:last_cell] = result[:, i]
-
                             torch.cuda.empty_cache()
 
-    def extract_derived_features(self, f: h5py.File,
-                                 cell_type: CellType) -> None:
-        if len(cell_type.derived_features) > 0:
-            print(
-                f'\n=== Calculating derived features ({cell_type.name}) ===\n')
+            self.h5py_file.write_features(results)
 
-            phase_features_xr = self.cell_types[self.cell_type_names.index(
-                'Phase')].get_features_xr(f)
+    def extract_derived_features(self) -> None:
+        if len(self.derived_features) > 0:
+            print('\n=== Calculating derived features ===\n')
 
-            epi_features_xr = None
-            if 'Epi' in self.cell_type_names:
-                epi_features_xr = self.cell_types[np.argwhere(
-                    self.cell_type_names == 'Epi')].get_features_xr(f)
-
-            for feature in cell_type.derived_features:
+            phase_features_xr = self._get_features_xr()
+            shape = (self.h5py_file.num_frames, self.h5py_file.num_cells)
+            results = {}
+            for feature in self.derived_features:
                 print(f'Calculating {", ".join(feature.get_names())}...')
                 result = feature.compute(phase_xr=phase_features_xr,
-                                         epi_xr=epi_features_xr)
+                                         epi_xr=None)
 
                 if result.ndim == 2:
                     result = result[:, :, np.newaxis]
 
                 for i, feature_name in enumerate(feature.get_names()):
-                    if result.shape[cell_type.FRAME_DIM] == 1:
-                        f[cell_type.features_group][feature_name].resize(
-                            1, cell_type.FRAME_DIM)
-                    f[cell_type.features_group][feature_name][:] = result[:, :,
-                                                                          i]
+                    results[feature_name] = result[:, :, i]
+                    # Later derived features can use this one (e.g. Death
+                    # Frame), as when they were read lazily from the file
+                    phase_features_xr[feature_name] = (self.DIMS,
+                                                       np.broadcast_to(
+                                                           result[:, :, i],
+                                                           shape))
+
+            self.h5py_file.write_features(results)
+
+    def _get_features_xr(self) -> xr.Dataset:
+        """Every feature in the file, in memory, as (Frame, Cell Index);
+        per-cell features (one row) are broadcast over frames. Bad tracks
+        aren't filtered."""
+        with h5py.File(self.h5py_file.path, 'r') as f:
+            names = list(f[H5File.FEATURES])
+        features = self.h5py_file.get_features(names, filter_bad=False)
+        shape = (self.h5py_file.num_frames, self.h5py_file.num_cells)
+        return xr.Dataset({
+            name: (self.DIMS, np.broadcast_to(values, shape))
+            for name, values in features.items()
+        })
 
 
 def extract_features(
     dataset=SETTINGS.DATASET,
-    phase_features: features.BaseFeature | list[features.BaseFeature] = [
+    feature_list: features.BaseFeature | list[features.BaseFeature] = [
         # features.Fluorescence(),
         # features.ExternalFLuorcence(),
         features.Speed(),
@@ -382,26 +362,21 @@ def extract_features(
         # features.ExternalFluorescence(),
         # features.Fluorescence(),
     ]):
-    if isinstance(phase_features, features.BaseFeature):
-        phase_features = [phase_features]
-    feature_extractor = FeaturesExtraction(h5py_file=dataset)
-    for feature in phase_features:
-        # if feature.derived_feature:
-        feature_extractor.add_feature(feature, 'Phase')
-
-    feature_extractor.set_up()
-    feature_extractor.extract_features()
+    if isinstance(feature_list, features.BaseFeature):
+        feature_list = [feature_list]
+    FeaturesExtraction(feature_list=features,
+                       h5py_file=dataset).extract_features()
 
 
 def main():
-    datasets_dir = Path(
-        '~/thor_server').expanduser() / 'MacrophageData' / '14_08'
-    for h5_file in datasets_dir.glob('*.h5'):
-        print(f'Extracting features for file {h5_file.name}')
-        log.info(f'Extracting features for file at {h5_file}')
-        extract_features(h5_file,
-                         [features.EventDetection(),
-                          features.RegionProps()])
+    datasets = ['02_10', '16_10']
+    datasets_dir = Path('~/thor_server').expanduser() / 'MacrophageData'
+    for dataset in datasets:
+        dataset = datasets_dir / dataset
+        for h5_file in dataset.glob('*.h5'):
+            print(f'Extracting features for file {h5_file.name}')
+            log.info(f'Extracting features for file at {h5_file}')
+            extract_features(h5_file)
 
 
 if __name__ == '__main__':

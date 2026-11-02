@@ -194,18 +194,23 @@ def _rolling_ball(bg_subtractor, im: np.ndarray, radius: float) -> np.ndarray:
                     dtype=np.int16).view(np.uint16).reshape(H, W)
 
 
-def epi_preprocessing(h5_file: Path, rolling_ball_radius: float = 50) -> None:
+def epi_preprocessing(h5_file: Path,
+                      rolling_ball_radius: float = 50,
+                      gaussian_blur_sigma: int = 1) -> None:
     file = H5File(h5_file)
 
     def processed_frames():
-        bg_subtractor = imagej_rolling_ball.BackgroundSubtracter(
-            java_options='-Xmx2g')
-        hot_pixel_mask = get_mask()
+        # bg_subtractor = imagej_rolling_ball.BackgroundSubtracter(
+        #     java_options='-Xmx2g')
+        # hot_pixel_mask = get_mask()
         for i in tqdm(range(file.num_frames), desc='Preprocessing Epi'):
             im = file.get_epi(i)
-            im = correct_hot_pixels(im, hot_pixel_mask)
-            im = _rolling_ball(bg_subtractor, im, rolling_ball_radius)
-
+            # im = correct_hot_pixels(im, hot_pixel_mask)
+            # im = _rolling_ball(bg_subtractor, im, rolling_ball_radius)
+            im = cv2.GaussianBlur(im,
+                                  ksize=(0, 0),
+                                  sigmaX=gaussian_blur_sigma,
+                                  sigmaY=gaussian_blur_sigma)
             yield im
 
     file.write_epi(processed_frames(), overwrite=True)
@@ -214,6 +219,7 @@ def epi_preprocessing(h5_file: Path, rolling_ball_radius: float = 50) -> None:
     file.write_attr('Hot pixel mask', str(HOT_PIXEL_PATH))
     file.write_attr('Hot pixel residual threshold', RESIDUAL_THRESHOLD)
     file.write_attr('Rolling ball radius', rolling_ball_radius)
+    file.write_attr('Gaussian blur sigma', gaussian_blur_sigma)
 
 
 def redo_epi_16bit(name: str) -> None:

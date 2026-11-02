@@ -63,7 +63,7 @@ def _ims_writer(path: str, dtype: str, **default_create_kwargs):
 
 class H5File:
     # === DATASET STRUCTURE ===
-    EPI_THRESHOLD = 100
+    EPI_THRESHOLD = 29
 
     FEATURES = 'Cells/Phase'
     FRAME_DIM, CELLS_DIM = 0, 1
@@ -111,7 +111,7 @@ class H5File:
     @cached_property
     def num_cells(self) -> int:
         with self._open() as f:
-            return f[self.FEATURES]['First Frame'].shape[self.CELLS_DIM]
+            return f[self.FEATURES]['X'].shape[self.CELLS_DIM]
 
     @cached_property
     def num_frames(self) -> int:
@@ -163,6 +163,7 @@ class H5File:
         names: str | list[str] | None = None,
         cell_idxs: int | list[int] | None = None,
         frames: int | list[int] | slice | None = None,
+        filter_bad: bool = True,
     ) -> dict | np.ndarray:
         """Per-frame features, (frames, cells); cells failing good_cells
         are NaN.
@@ -181,24 +182,37 @@ class H5File:
                  if names is None else [names] if single else list(names))
         cell_idxs = slice(None) if cell_idxs is None else cell_idxs
         frames = slice(None) if frames is None else frames
-        # Features are chunked per cell, so int / slice indices are read
-        # straight from the file (one cell is a single chunk); lists, which
-        # h5py only partly supports, index a whole read instead
         direct = all(
             isinstance(i, (int, np.integer, slice))
             for i in (frames, cell_idxs))
-        bad = ~self.good_cells[cell_idxs]
+
         values = {}
         with self._open() as f:
             for name in names:
                 dataset = f[self.FEATURES][name]
                 feature = (dataset[frames, cell_idxs] if direct else
                            dataset[()][frames, cell_idxs]).astype(float)
-                # bad broadcasts over frames: cells are the last axis
-                values[name] = np.where(bad, np.nan, feature)
+                if filter_bad:
+                    bad = ~self.good_cells[cell_idxs]
+                    feature = np.where(bad, np.nan, feature)
+                values[name] = feature
         return values[names[0]] if single else values
 
     def write_feature(self, name: str, values: np.ndarray, **attrs) -> None:
+        self.num_cells
+        with self._open(write=True) as f:
+            self._write_feature(f, name, values, **attrs)
+        self.reset_cache()
+
+    def write_features(self, features: dict[str, np.ndarray], **attrs) -> None:
+        self.num_cells
+        with self._open(create=True) as f:
+            for k, v in features.items():
+                self._write_feature(f, k, v, **attrs)
+        self.reset_cache()
+
+    def _write_feature(self, f: h5py.File, name: str, values: np.ndarray,
+                       **attrs) -> None:
         if values.ndim == 1:
             values = values[None, :]
 
@@ -207,15 +221,15 @@ class H5File:
                 f'{name}: {values.shape[self.CELLS_DIM]} values for '
                 f'{self.num_cells} cells')
 
-        with self._open(write=True) as f:
-            if name in f[self.FEATURES]:
-                del f[self.FEATURES][name]
-            dataset = f[self.FEATURES].create_dataset(name, data=values)
-            dataset.attrs['dimensions'] = ['Frame', 'Cell Index']
-            for k, v in attrs.items():
-                dataset.attrs[k] = v
-
-        self.reset_cache()
+        if name in f[self.FEATURES]:
+            del f[self.FEATURES][name]
+        dataset = f[self.FEATURES].create_dataset(
+            name,
+            data=values.astype(np.float32),
+            chunks=(values.shape[self.FRAME_DIM], 1))
+        dataset.attrs['dimensions'] = ['Frame', 'Cell Index']
+        for k, v in attrs.items():
+            dataset.attrs[k] = v
 
     # === READ/WRITE IMAGES/SEGMENATAIONS ===
 

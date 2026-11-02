@@ -833,77 +833,75 @@ class Circularity(BaseFeature):
 #         dominant_scales = self.gabor.get_dominant_scales_batch(image, mask)
 #         return np.array(dominant_scales)
 
+# class ExternalFluorescence(BaseFeature):
+#     """Quantify intensity of fluorescence at different distances away from cells."""
+#     primary_feature = True
+#     distances = [10, 25, 50]
+#     crop = True
 
-class ExternalFluorescence(BaseFeature):
-    """Quantify intensity of fluorescence at different distances away from cells."""
-    primary_feature = True
-    distances = [10, 25, 50]
-    crop = True
+#     def __init__(self):
+#         super().__init__()
+#         self.device = torch.device(
+#             'cuda' if torch.cuda.is_available() else 'cpu')
+#         self.kernels = {d: self._circular_kernel(d) for d in self.distances}
 
-    def __init__(self):
-        super().__init__()
-        self.device = torch.device(
-            'cuda' if torch.cuda.is_available() else 'cpu')
-        self.kernels = {d: self._circular_kernel(d) for d in self.distances}
+#     def _circular_kernel(self, radius: int) -> torch.Tensor:
+#         """Create a circular kernel for a given radius."""
+#         size = 2 * radius + 1
+#         y, x = torch.meshgrid(torch.arange(size),
+#                               torch.arange(size),
+#                               indexing='ij')
+#         center = radius
+#         mask = ((x - center)**2 + (y - center)**2) <= radius**2
+#         kernel = mask.float().to(self.device)  # float32 for conv2d
+#         return kernel.unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
 
-    def _circular_kernel(self, radius: int) -> torch.Tensor:
-        """Create a circular kernel for a given radius."""
-        size = 2 * radius + 1
-        y, x = torch.meshgrid(torch.arange(size),
-                              torch.arange(size),
-                              indexing='ij')
-        center = radius
-        mask = ((x - center)**2 + (y - center)**2) <= radius**2
-        kernel = mask.float().to(self.device)  # float32 for conv2d
-        return kernel.unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
+#     def get_names(self):
+#         return [
+#             f'External Fluorescence Intensity within {dist} pixels'
+#             for dist in self.distances
+#         ]
 
-    def get_names(self):
-        return [
-            f'External Fluorescence Intensity within {dist} pixels'
-            for dist in self.distances
-        ]
+#     def compute(self,
+#                 mask: torch.Tensor = None,
+#                 image: torch.Tensor = None,
+#                 epi_image: torch.Tensor = None,
+#                 binary_mask: torch.Tensor = None) -> np.ndarray:
 
-    def compute(self,
-                mask: torch.Tensor = None,
-                image: torch.Tensor = None,
-                epi_image: torch.Tensor = None,
-                binary_mask: torch.Tensor = None) -> np.ndarray:
+#         num_cells, H, W = mask.shape
+#         results = torch.full((num_cells, len(self.distances)),
+#                              float("nan"),
+#                              device=self.device)
 
-        num_cells, H, W = mask.shape
-        results = torch.full((num_cells, len(self.distances)),
-                             float("nan"),
-                             device=self.device)
+#         valid = torch.sum(mask, dim=(1, 2)) > 0
+#         if not valid.any():
+#             return results.cpu().numpy()
 
-        valid = torch.sum(mask, dim=(1, 2)) > 0
-        if not valid.any():
-            return results.cpu().numpy()
+#         temp_mask = mask.unsqueeze(1).float()  # (C,1,H,W)
+#         # epi = (epi_image * binary_mask).float()  # (C,H,W)
 
-        temp_mask = mask.unsqueeze(1).float()  # (C,1,H,W)
-        # epi = (epi_image * binary_mask).float()  # (C,H,W)
+#         for i, distance in enumerate(self.distances):
+#             kernel = self.kernels[distance]
 
-        for i, distance in enumerate(self.distances):
-            kernel = self.kernels[distance]
+#             padding = distance
 
-            padding = distance
+#             dilated_mask = torch.nn.functional.conv2d(
+#                 temp_mask, kernel, padding=padding).squeeze(1)
 
-            dilated_mask = torch.nn.functional.conv2d(
-                temp_mask, kernel, padding=padding).squeeze(1)
+#             dilated_mask = dilated_mask > 0
+#             dilated_mask = dilated_mask * ~binary_mask
+#             fluor_intensity = torch.sum(epi_image * dilated_mask, dim=(1, 2))
 
-            dilated_mask = dilated_mask > 0
-            dilated_mask = dilated_mask * ~binary_mask
-            fluor_intensity = torch.sum(epi_image * dilated_mask, dim=(1, 2))
+#             mask_sum = torch.sum(dilated_mask, dim=(1, 2))
+#             # normalise_factor = torch.where(mask_sum == 0, torch.tensor(0, device=mask_sum.device), 1/mask_sum)
 
-            mask_sum = torch.sum(dilated_mask, dim=(1, 2))
-            # normalise_factor = torch.where(mask_sum == 0, torch.tensor(0, device=mask_sum.device), 1/mask_sum)
+#             normalised_fluor_intensity = torch.where(
+#                 mask_sum > 0, fluor_intensity / mask_sum,
+#                 torch.tensor(0, device=mask_sum.device))
+#             # print(normalised_fluor_intensity.shape)
+#             results[valid, i] = normalised_fluor_intensity[valid]
 
-            normalised_fluor_intensity = torch.where(
-                mask_sum > 0, fluor_intensity / mask_sum,
-                torch.tensor(0, device=mask_sum.device))
-            # print(normalised_fluor_intensity.shape)
-            results[valid, i] = normalised_fluor_intensity[valid]
-
-        return results.cpu().numpy()
-
+#         return results.cpu().numpy()
 
 # class FluorescenceRadial(BaseFeature):
 #     """SLOWQuantify and describe distribution of fluorescence wihtin cells"""
@@ -974,12 +972,11 @@ class ExternalFluorescence(BaseFeature):
 #             # results[valid_np, 3] = inner_fluorescence.cpu().numpy()
 #             # results[valid_np, 4] = outer_fluorescence.cpu().numpy()
 
-
 #         return results
-def _remove_short_runs(mask: xr.DataArray, min_len: int,
-                       axis: str) -> xr.DataArray:
-    shape = [1] * mask.ndim
-    shape
+# def _remove_short_runs(mask: xr.DataArray, min_len: int,
+#                        axis: str) -> xr.DataArray:
+#     shape = [1] * mask.ndim
+#     shape
 
 
 class EventDetection(BaseFeature):
@@ -1186,7 +1183,7 @@ def crop_masks_images(
     epi_crops = torch.full(shape,
                            0,
                            device=expanded_mask.device,
-                           dtype=torch.uint8)
+                           dtype=epi_image.dtype)
     phase_crops = torch.full(shape,
                              0,
                              device=expanded_mask.device,
@@ -1239,7 +1236,7 @@ def crop_masks_images(
         binary_mask_crops_valid = binary_padded[batch_idx, xx, yy]
 
         mask_crops[valid] = mask_crops_valid
-        epi_crops[valid] = epi_crops_valid.to(torch.uint8)
+        epi_crops[valid] = epi_crops_valid
         phase_crops[valid] = phase_crops_valid.to(torch.uint8)
         binary_mask_crops[valid] = binary_mask_crops_valid.to(torch.bool)
 

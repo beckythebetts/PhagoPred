@@ -42,7 +42,7 @@ def run(dataset=SETTINGS.DATASET):
 
 
 def main():
-    h5_file = Path('~/thor_server/MacrophageData/16_10/B1.h5').expanduser()
+    h5_file = Path('~/thor_server/MacrophageData/02_10/1.h5').expanduser()
     run(h5_file)
 
 

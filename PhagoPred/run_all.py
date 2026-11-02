@@ -14,7 +14,7 @@ from PhagoPred.feature_extraction.morphology.UMAP import UMAP_embedding
 from PhagoPred.prediction.decision_tree import model
 from PhagoPred.utils.tools import fill_missing_cells, repack_hdf5, rechunk_hdf5, hdf5_needs_rechunk
 from PhagoPred.utils.dataset_creation import epi_background_correction, keep_only_group, truncate_hdf5, hdf5_from_tiffs, rename_group, hdf5_from_ome_tiffs, preprocessing
-import PhagoPred.display.GUI.main as GUI
+import PhagoPred.display.GUI.__main__ as GUI
 from PhagoPred.tracking import trackpy_2_stage
 
 from PhagoPred.survival_analysis.models import losses
