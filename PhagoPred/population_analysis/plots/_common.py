@@ -11,6 +11,8 @@ from tqdm import tqdm
 from PhagoPred.utils.h5_file import H5File
 
 CMAP = plt.get_cmap('Set1')
+LINESTYLES = ['-', '--', ':', '-.']
+HATCHES = ['', '//', '..', 'xx']
 
 
 def group_colours(labels: list, colours: dict | None = None) -> list:
@@ -26,6 +28,53 @@ def group_colours(labels: list, colours: dict | None = None) -> list:
     ]
 
 
+def running_mean(values: np.ndarray, axis: int = 0) -> np.ndarray:
+    """Mean over all frames up to and including each one, ignoring NaN.
+    NaN where nothing has been seen yet, and where the cell isn't tracked."""
+    seen = ~np.isnan(values)
+    total = np.cumsum(np.where(seen, values, 0), axis=axis)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        means = total / np.cumsum(seen, axis=axis)
+    return np.where(seen, means, np.nan)
+
+
+def alive_mask(h5_file: Path, frames: np.ndarray) -> np.ndarray:
+    """(len(frames), cells): tracked (First Frame <= t <= Last Frame) and
+    before Death Frame. Likely bad tracks are False."""
+    h5 = H5File(h5_file)
+    first, last, death = h5.first_frames, h5.last_frames, h5.death_frames
+    # NaN (bad tracks, alive cells' Death Frame) compares False throughout
+    t = frames[:, None]
+    return (first <= t) & (t <= last) & ~(death <= t)
+
+
+def alive_and_deaths(h5_file: Path, frames: np.ndarray) -> tuple:
+    """Alive cells at each of frames, and deaths between consecutive frames.
+
+    A cell is alive while tracked (First Frame <= t <= Last Frame) and before
+    its Death Frame. Deaths are only those during a track: cells dead from
+    the start of their track (Death Frame == First Frame) were never seen
+    alive, and a track ending isn't a death. Likely bad tracks are left out.
+
+    Returns:
+        (len(frames),) alive counts, (len(frames) - 1,) death counts.
+    """
+    h5 = H5File(h5_file)
+
+    alive = alive_mask(h5_file, frames).sum(axis=1)
+    first, last, death = h5.first_frames, h5.last_frames, h5.death_frames
+    # # NaN (bad tracks, alive cells' Death Frame) compares False throughout
+    # t = frames[:, None]
+    # tracked = (first <= t) & (t <= last)
+    # alive = (tracked & ~(death <= t)).sum(axis=1)
+
+    dies_in_track = death > first
+    deaths = (dies_in_track & (death >= frames[:-1, None]) &
+              (death < frames[1:, None])).sum(axis=1)
+    deaths = -np.diff(alive)
+    return alive, deaths
+
+
 def plot_mean_std(ax: plt.axes,
                   times: np.ndarray,
                   means: np.ndarray,
@@ -34,7 +83,9 @@ def plot_mean_std(ax: plt.axes,
                   bar: bool,
                   idx: int = 0,
                   n_groups: int = 1,
-                  color=None) -> None:
+                  color=None,
+                  linestyle: str = '-',
+                  hatch: str = '') -> None:
     """One group's mean +- std over wells, as a line and band, or as bars
     side by side with the other groups.
     """
@@ -50,21 +101,26 @@ def plot_mean_std(ax: plt.axes,
                capsize=3,
                label=label,
                color=color,
-               edgecolor='none')
+               edgecolor='white',
+               linewidth=0,
+               hatch=hatch)
 
     else:
         ax.plot(times, means, label=label, color=color)
-        ax.fill_between(times,
-                        means - stds,
-                        means + stds,
-                        alpha=0.5,
-                        color=color,
-                        edgecolor='none')
+        ax.fill_between(
+            times,
+            means - stds,
+            means + stds,
+            alpha=0.5,
+            color=color,
+            edgecolor='none',
+            linestyle=linestyle,
+        )
 
 
 def plot_by_label(
     label_to_files: dict[str | int, list[Path]],
-    well_values: Callable[[Path], tuple[np.ndarray, np.ndarray]],
+    well_values: Callable[[Path], tuple[np.ndarray, np.ndarray | dict]],
     ylabel: str,
     save_as: Path,
     bar: bool = False,
@@ -72,6 +128,7 @@ def plot_by_label(
     label_suffix: str = "",
     colours: dict | None = None,
     start_at: int = 0,
+    log_y: bool = False,
 ) -> None:
     """Mean +- standard error over each group's wells, one line (or set of
     bars) per group.
@@ -106,21 +163,28 @@ def plot_by_label(
         times = wells[0][0]
         if not all(np.array_equal(t, times) for t, _ in wells):
             raise ValueError(f'{label}: wells have different time points')
-        values = np.array([v for _, v in wells], dtype=float)
-        means = np.nanmean(values, axis=0)
-        sems = np.nanstd(values, axis=0) / np.sqrt(len(values))
-        plot_mean_std(
-            ax,
-            times[start_at:],
-            means[start_at:],
-            sems[start_at:],
-            f'{label_prefix}{label}{label_suffix}',
-            bar,
-            idx,
-            len(labels),
-            color=colours[idx],
-        )
+        wells = [v if isinstance(v, dict) else {"": v} for _, v in wells]
+        keys = list(wells[0])
+        for k, key in enumerate(keys):
+            values = np.array([w[key] for w in wells], dtype=float)
+            means = np.nanmean(values, axis=0)
+            sems = np.nanstd(values, axis=0) / np.sqrt(len(values))
+            plot_mean_std(
+                ax,
+                times[start_at:],
+                means[start_at:],
+                sems[start_at:],
+                f'{label_prefix}{label}{label_suffix} {key}'.rstrip(),
+                bar,
+                idx,
+                len(labels),
+                color=colours[idx],
+                linestyle=LINESTYLES[k],
+                hatch=HATCHES[k],
+            )
 
+    if log_y:
+        ax.set_yscale('log')
     ax.set_xlabel('Time / hours')
     ax.set_ylabel(ylabel)
     ax.legend()
@@ -153,6 +217,8 @@ def generate_files_mapping(mapping: dict[str | int, str],
     file_mapping = defaultdict(list)
     for file in h5_dir.glob('*.h5'):
         for k, v in mapping.items():
-            if v in file.stem:
-                file_mapping[k].append(file)
+            v = list(v)
+            for v_i in v:
+                if v_i in file.stem:
+                    file_mapping[k].append(file)
     return file_mapping

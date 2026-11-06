@@ -20,6 +20,7 @@ class CellViewer(QWidget):
 
     # Death frame, or None if no death is predicted
     cell_death_signal = Signal(object)
+    cell_event_signal = Signal(object)
 
     def __init__(self,
                  viewer: napari.Viewer,
@@ -48,7 +49,9 @@ class CellViewer(QWidget):
         self.first_frame = int(self.h5.first_frames[self.cell_idx])
         self.last_frame = int(self.h5.last_frames[self.cell_idx])
         death_frame = self.h5.death_frames[self.cell_idx]
+        event_frame = self.h5.event_frames[self.cell_idx]
         self.cell_death = None if np.isnan(death_frame) else int(death_frame)
+        self.event_frame = None if np.isnan(event_frame) else event_frame
 
         self.progress_bar = None
         self.feature_names = [
@@ -83,6 +86,7 @@ class CellViewer(QWidget):
     def on_load_finished(self, phase_data, epi_data, mask):
         self.progress_bar.close()
         self.cell_death_signal.emit(self.cell_death)
+        self.cell_event_signal.emit(self.event_frame)
         self.phase_data = phase_data
         self.epi_data = epi_data
 
@@ -92,13 +96,13 @@ class CellViewer(QWidget):
                               contrast_limits=(0, 255),
                               translate=(self.first_frame, 0, 0))
         if self.epi_data is not None:
-            epi_layer = self.viewer.add_image(
-                self.epi_data,
-                name=f'Epi {self.cell_idx}',
-                blending='additive',
-                colormap='red',
-                opacity=0.5,
-                translate=(self.first_frame, 0, 0))
+            epi_layer = self.viewer.add_image(self.epi_data,
+                                              name=f'Epi {self.cell_idx}',
+                                              blending='additive',
+                                              colormap='red',
+                                              opacity=0.5,
+                                              translate=(self.first_frame, 0,
+                                                         0))
             if self.epi_contrast is not None:
                 limits, limits_range = self.epi_contrast
                 epi_layer.contrast_limits_range = limits_range

@@ -570,7 +570,7 @@ class DensityPhase(BaseFeature):
 
         # Coords builds X from the row axis and Y from the column axis, so X is
         # bounded by the image height and Y by its width - not the other way round.
-        x_max, y_max = SETTINGS.IMAGE_SIZE
+        x_max, y_max = phase_xr.attrs['im_shape']
 
         for first_frame in tqdm(range(0, n_frames, self.frame_batch_size)):
             last_frame = min(first_frame + self.frame_batch_size, n_frames)
@@ -687,7 +687,7 @@ class DensityPhaseWithDeath(BaseFeature):
 
         # Coords builds X from the row axis and Y from the column axis, so X is
         # bounded by the image height and Y by its width - not the other way round.
-        x_max, y_max = SETTINGS.IMAGE_SIZE
+        x_max, y_max = phase_xr.attrs['im_shape']
 
         for first_frame in tqdm(range(0, n_frames, self.frame_batch_size)):
             last_frame = min(first_frame + self.frame_batch_size, n_frames)
@@ -986,7 +986,7 @@ class EventDetection(BaseFeature):
     fit_window_size: int = 11
     min_slope = 0.0
     min_r2 = 0.9
-    min_mean_fluor = 50
+    min_mean_fluor = 0
     min_exp_rise_len = 10  # Minimum number of frames the total fluorescnec must be expoenntially increasing for
 
     def __init__(self):
@@ -1169,7 +1169,7 @@ def coefficient_of_variation(means: cupy.array,
 def crop_masks_images(
         expanded_mask: torch.tensor,
         epi_image: torch.tensor,
-        phase_image: torch.tensor,
+        phase_image: torch.tensor | None,
         binary_mask: torch.tensor,
         x_centres: torch.tensor,
         y_centres=torch.tensor,
@@ -1184,10 +1184,9 @@ def crop_masks_images(
                            0,
                            device=expanded_mask.device,
                            dtype=epi_image.dtype)
-    phase_crops = torch.full(shape,
-                             0,
-                             device=expanded_mask.device,
-                             dtype=torch.uint8)
+    phase_crops = torch.full(
+        shape, 0, device=expanded_mask.device,
+        dtype=torch.uint8) if phase_image is not None else None
     binary_mask_crops = torch.full(shape,
                                    0,
                                    device=expanded_mask.device,
@@ -1205,9 +1204,9 @@ def crop_masks_images(
         epi_padded = torch.nn.functional.pad(epi_image,
                                              pad).unsqueeze(0).expand(
                                                  num_valid, -1, -1)
-        phase_padded = torch.nn.functional.pad(phase_image,
-                                               pad).unsqueeze(0).expand(
-                                                   num_valid, -1, -1)
+        phase_padded = torch.nn.functional.pad(
+            phase_image, pad).unsqueeze(0).expand(
+                num_valid, -1, -1) if phase_image is not None else None
         binary_padded = torch.nn.functional.pad(binary_mask,
                                                 pad).unsqueeze(0).expand(
                                                     num_valid, -1, -1)
@@ -1232,12 +1231,16 @@ def crop_masks_images(
             N, 1, 1).expand_as(xx)
         mask_crops_valid = mask_padded[batch_idx, xx, yy]
         epi_crops_valid = epi_padded[batch_idx, xx, yy]
-        phase_crops_valid = phase_padded[batch_idx, xx, yy]
+        phase_crops_valid = phase_padded[
+            batch_idx, xx, yy] if phase_padded is not None else None
         binary_mask_crops_valid = binary_padded[batch_idx, xx, yy]
 
         mask_crops[valid] = mask_crops_valid
         epi_crops[valid] = epi_crops_valid
-        phase_crops[valid] = phase_crops_valid.to(torch.uint8)
+        if phase_image is not None:
+            phase_crops[valid] = phase_crops_valid.to(torch.uint8)
+        else:
+            phase_crops = None
         binary_mask_crops[valid] = binary_mask_crops_valid.to(torch.bool)
 
     return mask_crops, epi_crops, phase_crops, binary_mask_crops

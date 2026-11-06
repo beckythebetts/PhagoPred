@@ -199,7 +199,7 @@ class FeaturesExtraction:
 
     def __init__(
         self,
-        features: list[features.BaseFeature],
+        feature_list: list[features.BaseFeature],
         h5py_file=SETTINGS.DATASET,
         frame_batchsize=10,
         cell_batch_size=100,
@@ -208,15 +208,14 @@ class FeaturesExtraction:
         self.frame_batchsize = frame_batchsize
         self.cell_batch_size = cell_batch_size
 
-        self.primary_features = [f for f in features if f.primary_feature]
-        self.derived_features = [f for f in features if f.derived_feature]
+        self.primary_features = [f for f in feature_list if f.primary_feature]
+        self.derived_features = [f for f in feature_list if f.derived_feature]
 
     def extract_features(self) -> None:
 
         self.extract_primary_features()
         self.extract_derived_features()
         self.h5py_file.write_attr('Epi threshold', H5File.EPI_THRESHOLD)
-        self.h5py_file.repack()
 
     def extract_primary_features(self) -> None:
         if len(self.primary_features) > 0:
@@ -231,32 +230,30 @@ class FeaturesExtraction:
                 if not feature.crop
             ]
 
-            for crop, features_list in zip([False, True],
-                                           [no_crop_features, crop_features]):
-                if len(features_list) > 0:
-                    if crop:
-                        centre_coords = self.h5py_file.get_features(
-                            ['X', 'Y'], filter_bad=False)
-                        x_centres = torch.from_numpy(centre_coords['X'])
-                        y_centres = torch.from_numpy(centre_coords['Y'])
+            centre_coords = self.h5py_file.get_features(['X', 'Y'],
+                                                        filter_bad=False)
+            x_centres = torch.from_numpy(centre_coords['X'])
+            y_centres = torch.from_numpy(centre_coords['Y'])
 
-                        x_centres, y_centres = x_centres.to(
-                            self.DEVICE), y_centres.to(self.DEVICE)
+            x_centres, y_centres = x_centres.to(self.DEVICE), y_centres.to(
+                self.DEVICE)
 
-                    for frame_idx in tqdm(range(num_frames),
-                                          desc=f'Cropped = {crop}'):
+            for frame_idx in tqdm(range(num_frames), unit='frames'):
 
-                        mask = self.h5py_file.get_segs(frame_idx)
-                        mask = torch.tensor(mask).to(self.DEVICE)
-                        binary_mask = mask >= 0
+                mask = self.h5py_file.get_segs(frame_idx)
+                mask = torch.tensor(mask).to(self.DEVICE)
+                binary_mask = mask >= 0
 
-                        image = torch.tensor(
-                            self.h5py_file.get_phase(frame_idx)).to(
-                                self.DEVICE)
-                        epi_image = torch.tensor(
-                            self.h5py_file.get_epi(
-                                frame_idx, threshold=True).astype(
-                                    np.float32)).to(self.DEVICE)
+                # image = torch.tensor(self.h5py_file.get_phase(frame_idx)).to(
+                #     self.DEVICE)
+                image = None
+                epi_image = torch.tensor(
+                    self.h5py_file.get_epi(frame_idx, threshold=True).astype(
+                        np.float32)).to(self.DEVICE)
+
+                for crop, features_list in zip(
+                    [False, True], [no_crop_features, crop_features]):
+                    if len(features_list) > 0:
 
                         for first_cell in range(0, num_cells,
                                                 self.cell_batch_size):
@@ -337,10 +334,12 @@ class FeaturesExtraction:
             names = list(f[H5File.FEATURES])
         features = self.h5py_file.get_features(names, filter_bad=False)
         shape = (self.h5py_file.num_frames, self.h5py_file.num_cells)
-        return xr.Dataset({
+        ds = xr.Dataset({
             name: (self.DIMS, np.broadcast_to(values, shape))
             for name, values in features.items()
         })
+        ds.attrs['im_shape'] = self.h5py_file.im_dims
+        return ds
 
 
 def extract_features(
@@ -348,35 +347,35 @@ def extract_features(
     feature_list: features.BaseFeature | list[features.BaseFeature] = [
         # features.Fluorescence(),
         # features.ExternalFLuorcence(),
-        features.Speed(),
-        features.DensityPhase(),
-        features.Displacement(),
-        features.Perimeter(),
-        features.Circularity(),
-        features.Skeleton(),
+        # features.Speed(),
+        # features.DensityPhase(),
+        # features.Displacement(),
+        # features.Perimeter(),
+        # features.Circularity(),
+        # features.Skeleton(),
         features.RegionProps(),
         # features.CellDeath(),
-        features.FirstLastFrame(),
-        features.EventDetection(),
+        # features.FirstLastFrame(),
+        # features.EventDetection(),
         # features.EventDetection
         # features.ExternalFluorescence(),
         # features.Fluorescence(),
     ]):
     if isinstance(feature_list, features.BaseFeature):
         feature_list = [feature_list]
-    FeaturesExtraction(feature_list=features,
+    FeaturesExtraction(feature_list=feature_list,
                        h5py_file=dataset).extract_features()
 
 
 def main():
-    datasets = ['02_10', '16_10']
+    datasets = ['16_10']
     datasets_dir = Path('~/thor_server').expanduser() / 'MacrophageData'
     for dataset in datasets:
         dataset = datasets_dir / dataset
         for h5_file in dataset.glob('*.h5'):
             print(f'Extracting features for file {h5_file.name}')
             log.info(f'Extracting features for file at {h5_file}')
-            extract_features(h5_file)
+            extract_features(h5_file, features.EventDetection())
 
 
 if __name__ == '__main__':

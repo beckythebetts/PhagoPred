@@ -32,19 +32,6 @@ def _attr(name: str) -> property:
     return property(getattr, setattr)
 
 
-def _ims_getter(path: str):
-
-    def get(self: H5File,
-            frames: int | list[int] | np.ndarray | slice | None = None,
-            region: tuple[slice, slice] | None = None) -> np.ndarray:
-        return self._get_ims(path, frames, region)
-
-    get.__doc__ = (f'Frames of {path}: (H, W) for an int frame, else '
-                   '(T, H, W); None for all frames. region=(rows, cols) '
-                   'slices crops each frame.')
-    return get
-
-
 def _ims_writer(path: str, dtype: str, **default_create_kwargs):
 
     def write(self: H5File,
@@ -83,9 +70,6 @@ class H5File:
     event_frames = _cell_feature('EventDetection')
 
     # === Images / segmentations ===
-    get_phase = _ims_getter(PHASE)
-    get_segs = _ims_getter(SEGS)
-
     write_phase = _ims_writer(PHASE, 'uint8')
     write_epi = _ims_writer(FLUOR,
                             'uint16',
@@ -302,6 +286,35 @@ class H5File:
         if threshold:
             ims[ims < self.EPI_THRESHOLD] = 0
         return ims
+
+    def get_segs(self,
+                 frames: int | list[int] | np.ndarray | slice | None = None,
+                 region: tuple[slice, slice] | None = None,
+                 filter_bad: bool = False,
+                 alive_only: bool = False) -> np.ndarray:
+        """Frames of Segmentations/Phase: (H, W) for an int frame, else
+        (T, H, W); None for all frames. region=(rows, cols) slices crops each
+        frame. filter_bad hides cells failing good_cells, alive_only hides
+        cells from their Death Frame on; hidden cells become background."""
+        segs = self._get_ims(self.SEGS, frames, region)
+        if not (filter_bad or alive_only):
+            return segs
+        t = np.arange(
+            self.num_frames)[slice(None) if frames is None else frames]
+        # (frames, cells + 1); the last column is background (-1), never hidden
+        hide = np.zeros((np.size(t), self.num_cells + 1), dtype=bool)
+        if filter_bad:
+            hide[:, :-1] |= ~self.good_cells
+        if alive_only:
+            # NaN Death Frame (no death seen) compares False
+            hide[:, :-1] |= self.death_frames <= np.reshape(t, (-1, 1))
+        rows = 0 if np.ndim(t) == 0 else np.arange(np.size(t))[:, None, None]
+        return np.where(hide[rows, segs], -1, segs).astype(segs.dtype)
+
+    def get_phase(self,
+                  frames: int | list[int] | np.ndarray | slice | None = None,
+                  region: tuple[slice, slice] | None = None) -> np.ndarray:
+        return self._get_ims(self.PHASE, frames, region)
 
     # === UTILS ===
 

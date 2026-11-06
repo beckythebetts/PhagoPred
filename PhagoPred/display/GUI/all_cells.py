@@ -1,4 +1,5 @@
 from __future__ import annotations
+from functools import partial
 
 from pathlib import Path
 from typing import Callable
@@ -61,6 +62,9 @@ class AllCellsViewer:
         self.seg_data = None
         self.labels_layer = None
         self.cell_viewer = None
+        self.missed_layer = None
+        self.missed_points = np.empty((0, 3))  # (frame, y, x)
+        self.count_label = QtWidgets.QLabel("")
 
         self._load_data()
         # self._fill_missing_segs()
@@ -68,9 +72,11 @@ class AllCellsViewer:
 
         self.status_label = QtWidgets.QLabel(" ")
         self.cell_death_label = QtWidgets.QLabel("")
+        self.cell_event_label = QtWidgets.QLabel("")
         label_dock = self.viewer.window.add_dock_widget(self.status_label,
                                                         area='right')
         self.viewer.window.add_dock_widget(self.cell_death_label, area='right')
+        self.viewer.window.add_dock_widget(self.cell_event_label, area='right')
 
         self.back_button = QtWidgets.QPushButton("← Back to All Cells")
         self.back_button.setVisible(False)
@@ -91,6 +97,17 @@ class AllCellsViewer:
 
         self.viewer.window.add_dock_widget(self.goto_widget, area="right")
 
+        counter_widget = QtWidgets.QWidget()
+        counter_layout = QtWidgets.QHBoxLayout(counter_widget)
+        counter_layout.setContentsMargins(0, 0, 0, 0)
+        self.reset_frame_button = QtWidgets.QPushButton("Reset frame")
+        self.reset_all_button = QtWidgets.QPushButton("Reset all")
+        counter_layout.addWidget(self.count_label)
+        counter_layout.addWidget(self.reset_frame_button)
+        counter_layout.addWidget(self.reset_all_button)
+        self.viewer.window.add_dock_widget(counter_widget, area="right")
+        self._update_count()
+
         self._connect_signals()
 
     def _connect_signals(self):
@@ -98,6 +115,11 @@ class AllCellsViewer:
         self.back_button.clicked.connect(self._return_to_overview)
         self.goto_button.clicked.connect(self._goto_cell_from_text)
         self.goto_input.returnPressed.connect(self._goto_cell_from_text)
+        self.reset_frame_button.clicked.connect(
+            partial(self._reset_missed, frame_only=True))
+        self.reset_all_button.clicked.connect(
+            partial(self._reset_missed, frame_only=False))
+        self.viewer.dims.events.current_step.connect(self._update_count)
 
     def _goto_cell_from_text(self):
         """Open a cell index typed into the text box."""
@@ -121,16 +143,19 @@ class AllCellsViewer:
 
         epi_info = self.h5.ims_info(H5File.FLUOR)
         if epi_info is not None:
-            self.epi_data = _lazy_stack(self.h5.get_epi, *epi_info)
+            self.epi_data = _lazy_stack(
+                partial(self.h5.get_epi, threshold=True), *epi_info)
             self.epi_contrast = epi_contrast_limits(self.h5)
 
         seg_info = self.h5.ims_info(H5File.SEGS)
         if seg_info is not None:
-            self.seg_data = _lazy_stack(self.h5.get_segs, *seg_info)
+            self.seg_data = _lazy_stack(
+                partial(H5File(self.h5.path).get_segs,
+                        filter_bad=True,
+                        alive_only=True), *seg_info)
 
     def _fill_missing_segs(self):
-        self.seg_data = fill_missing_cells(self.seg_data,
-                                           self.h5.first_frames,
+        self.seg_data = fill_missing_cells(self.seg_data, self.h5.first_frames,
                                            self.h5.last_frames)
 
     def _show_ims(self):
@@ -152,14 +177,48 @@ class AllCellsViewer:
             if self.seg_data is not None:
                 self.labels_layer = self.viewer.add_labels(
                     self.seg_data + 1, name="Segmentations", opacity=0.3)
+            self._add_missed_layer()
         else:
-            for layer_name in ("Phase", "Epi", "Segmentations"):
+            for layer_name in ("Phase", "Epi", "Segmentations",
+                               "Missed cells"):
                 if layer_name in self.viewer.layers:
                     self.viewer.layers[layer_name].visible = True
 
+    def _add_missed_layer(self):
+        """Points layer for clicking on cells the segmentation missed; kept
+        in missed_points so they survive opening a cell."""
+        self.missed_layer = self.viewer.add_points(self.missed_points,
+                                                   ndim=3,
+                                                   name='Missed cells',
+                                                   face_color='cyan',
+                                                   size=15)
+        self.missed_layer.mode = 'add'
+        self.missed_layer.events.data.connect(self._on_missed_edit)
+
+    def _on_missed_edit(self, event=None):
+        self.missed_points = self.missed_layer.data
+        self._update_count()
+
+    def _update_count(self, event=None):
+        frame = self.viewer.dims.current_step[0]
+        on_frame = np.round(self.missed_points[:, 0]) == frame
+        self.count_label.setText(f'Missed cells: {on_frame.sum()} this frame, '
+                                 f'{len(self.missed_points)} total')
+
+    def _reset_missed(self, frame_only: bool):
+        if frame_only:
+            frame = self.viewer.dims.current_step[0]
+            keep = np.round(self.missed_points[:, 0]) != frame
+        else:
+            keep = np.zeros(len(self.missed_points), dtype=bool)
+        self.missed_points = self.missed_points[keep]
+        if self.missed_layer in self.viewer.layers:
+            self.missed_layer.data = self.missed_points
+        self._update_count()
+
     def _hide_overview_layers(self):
         """Hide the overview (full field) layers."""
-        for layer_name in ("Phase", "Epi", "Segmentations"):
+        for layer_name in ("Phase", "Epi", "Segmentations", "Missed cells"):
             if layer_name in self.viewer.layers:
                 self.viewer.layers[layer_name].visible = False
 
@@ -193,6 +252,9 @@ class AllCellsViewer:
         def _click_callback(viewer, event):
             if self.labels_layer is None:
                 return True
+            if (viewer.layers.selection.active is self.missed_layer
+                    and self.missed_layer.mode == 'add'):
+                return True  # counting: don't open the cell
             label_val = self.labels_layer.get_value(event.position)
             if label_val > 0:
                 label_val = label_val - 1
@@ -214,6 +276,9 @@ class AllCellsViewer:
         self.cell_viewer.cell_death_signal.connect(
             lambda x: self.cell_death_label.setText(
                 'No death predicted' if x is None else f'Death at frame: {x}'))
+        self.cell_viewer.cell_event_signal.connect(
+            lambda x: self.cell_event_label.setText(
+                'No event' if x is None else f'Event at frame: {x}'))
 
 
 def fill_missing_cells(seg_data, first_appearance, last_appearance):
