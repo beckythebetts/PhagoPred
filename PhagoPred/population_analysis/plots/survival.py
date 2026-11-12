@@ -177,21 +177,50 @@ def _well_alive(h5_file: Path,
     return (frames[:-1] + frames[1:]) / 2 * hours_per_frame, rates
 
 
+def _reacquired(h5: H5File,
+                lost: np.ndarray,
+                max_gap: int = 20,
+                max_dist: float = 100) -> np.ndarray:
+    """Which lost tracks are followed by a new track on the same cell: one
+    alive at its start, starting from 5 frames before to max_gap frames
+    after the loss, within max_dist pixels of where the cell was lost."""
+    first, last, death = h5.first_frames, h5.last_frames, h5.death_frames
+    coords = h5.get_features(['X', 'Y'])
+    X, Y = coords['X'], coords['Y']
+    cells = np.arange(len(first))
+    starts = np.nan_to_num(first).astype(int)
+    start_xy = np.stack([X[starts, cells], Y[starts, cells]], axis=1)
+    starts_alive = ~np.isnan(first) & ~(death <= first + 2)
+
+    reacquired = np.zeros_like(lost)
+    for c in np.flatnonzero(lost):
+        lost_at = int(last[c])
+        new = starts_alive & (first > lost_at - 5) & (first <= lost_at +
+                                                       max_gap)
+        new[c] = False
+        dists = np.hypot(*(start_xy[new] - [X[lost_at, c], Y[lost_at, c]]).T)
+        reacquired[c] = (dists < max_dist).any()
+    return reacquired
+
+
 def _censoring_vs_death(
         h5_file: Path,
-        edges: np.ndarray) -> tuple[np.ndarray, np.ndarray, int]:
-    """One well's deaths and mid-experiment censorings (tracks lost before a
-    death is seen) binned by frame, and the number censored by the
-    experiment ending. Bad tracks and cells dead from the start are left
-    out."""
+        edges: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """One well's deaths, mid-experiment censorings (tracks lost before a
+    death is seen) and those of them never picked up again by a new track,
+    binned by frame, and the number censored by the experiment ending. Bad
+    tracks and cells dead from the start are left out."""
     h5 = H5File(h5_file)
     first, last, death = h5.first_frames, h5.last_frames, h5.death_frames
     good = ~np.isnan(last)
     dies = good & (death > first)
     censored = good & np.isnan(death)
     at_end = censored & (last == h5.num_frames - 1)
+    lost = censored & ~at_end
+    never_found = lost & ~_reacquired(h5, lost)
     return (np.histogram(death[dies], edges)[0],
-            np.histogram(last[censored & ~at_end], edges)[0], at_end.sum())
+            np.histogram(last[lost], edges)[0],
+            np.histogram(last[never_found], edges)[0], at_end.sum())
 
 
 # def _kaplan_meier(h5_file: Path)
@@ -201,28 +230,39 @@ def plot_censoring_vs_death(
     label_to_files: dict[str, list[Path]],
     save_as: Path = Path('temp') / 'censoring_vs_death.png',
     num_bins: int = 20,
+    label_prefix: str = 'MOI ',
 ) -> None:
     """Death and censoring time histograms (summed over wells), one panel
-    per group."""
+    per group. Censored tracks never picked up again by a new track are
+    shown separately, as those are the ones that could be missed deaths."""
     plt.rcParams["font.family"] = 'serif'
     fig, axs = plt.subplots(len(label_to_files),
                             1,
-                            figsize=(4, 2 * len(label_to_files)),
+                            figsize=(6.5, 2 * len(label_to_files)),
                             sharex=True,
                             squeeze=False)
     for ax, (label, files) in zip(axs[:, 0], label_to_files.items()):
         hours_per_frame = frame_time(files[0])
         edges = np.linspace(0, H5File(files[0]).num_frames, num_bins + 1)
-        deaths, censored, at_end = np.zeros(num_bins), np.zeros(num_bins), 0
+        deaths, censored, never_found = (np.zeros(num_bins)
+                                         for _ in range(3))
+        at_end = 0
         for h5_file in tqdm(files, desc=f'Censoring vs death for {label}'):
-            d, c, e = _censoring_vs_death(h5_file, edges)
-            deaths, censored, at_end = deaths + d, censored + c, at_end + e
+            d, c, n, e = _censoring_vs_death(h5_file, edges)
+            deaths, censored, never_found, at_end = (deaths + d, censored + c,
+                                                     never_found + n,
+                                                     at_end + e)
         ax.stairs(deaths, edges * hours_per_frame, label='Deaths')
         ax.stairs(censored, edges * hours_per_frame, label='Censored')
-        ax.set_title(f'MOI {label}: {at_end} censored at end of experiment',
-                     fontsize=9)
+        ax.stairs(never_found,
+                  edges * hours_per_frame,
+                  label='Censored, not picked up again',
+                  linestyle='--')
+        ax.set_title(
+            f'{label_prefix}{label}: {at_end} censored at end of experiment',
+            fontsize=9)
         ax.set_ylabel('Cells', fontsize=8)
-    axs[0, 0].legend(fontsize=8)
+    axs[0, 0].legend(fontsize=8, loc='upper left', bbox_to_anchor=(1.01, 1))
     axs[-1, 0].set_xlabel('Time / hours')
     fig.tight_layout()
     plt.savefig(save_as)

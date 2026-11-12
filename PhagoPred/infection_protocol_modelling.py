@@ -40,14 +40,16 @@ class Scenario:
     MOI: int = 5
     infection_volume: int = 0.5  # mL
     infection_duration: int = 6  # hours
-    wash_at: int = 6  # hours
+    # wash_at: int = 6  # hours
+    lag_before_growth: float = 0.75  # hours
+    agr_0: float = 0.05
 
     @property
     def time_steps(self) -> np.ndarray:
         return np.arange(0, (self.infection_duration), DT)
 
     def __str__(self) -> str:
-        return f'MOI: {self.MOI}, infection_volume: {self.infection_volume}, infection-duration: {self.infection_duration}, wash_duration: {self.wash_at}'
+        return f'MOI: {self.MOI}, infection_volume: {self.infection_volume}, infection-duration: {self.infection_duration}'
 
 
 @dataclass
@@ -89,6 +91,15 @@ def _read_results(results: Results, file: Path) -> Results:
     return results
 
 
+def _plot_deposited_over_toxin(results: Results, ax: plt.Axes) -> plt.Axes:
+    time_steps = results.scenario.time_steps
+    ax.plot(time_steps,
+            results.deposited_bacteria / results.toxin_exposure,
+            color='k')
+    ax.set_ylabel('Deposited bacteria / toxin exposure (a.u)', color='k')
+    ax.set_yscale('log')
+
+
 def _plot_results(results: Results, ax: plt.Axes) -> plt.Axes:
     time_steps = results.scenario.time_steps
     ax.plot(time_steps,
@@ -107,14 +118,20 @@ def _plot_results(results: Results, ax: plt.Axes) -> plt.Axes:
                   results.toxin_exposure,
                   color=_COLOURS['toxin'],
                   label='Toxin exposure')
-    toxin_ax.set_ylabel('Toxin exposure', color=_COLOURS['toxin'])
+    toxin_ax.set_ylabel('Toxin exposure (a.u)', color=_COLOURS['toxin'])
+    # toxin_ax.plot(time_steps,
+    #               results.deposited_bacteria / results.toxin_exposure,
+    #               color=_COLOURS['toxin'])
+    # toxin_ax.set_ylabel('Deposited bacteria / toxin exposure (a.u)',
+    #                     color=_COLOURS['toxin'])
+    # toxin_ax.set_yscale('log')
 
-    ax.axvline(results.scenario.wash_at,
-               linestyle='--',
-               color='k',
-               label='Media change')
+    # ax.axvline(results.scenario.wash_at,
+    #            linestyle='--',
+    #            color='k',
+    #            label='Media change')
 
-    # ax.axhline(results.scenario.MOI * MACROPHAGE_COUNT,
+    # ax.axhline(MACROPHAGE_COUNT,
     #            linestyle='--',
     #            color='k',
     #            label='Deposited MOI of 1')
@@ -122,7 +139,7 @@ def _plot_results(results: Results, ax: plt.Axes) -> plt.Axes:
     ax.legend()
     # toxin_ax.legend()
 
-    ax.set_title(f'media change at: {results.scenario.wash_at} hours')
+    # ax.set_title(f'media change at: {results.scenario.wash_at} hours')
     # ax.set_title(f'MOI = {results.scenario.MOI}')
     # ax.set_title(f'Volume = {results.scenario.infection_volume} mL')
     return toxin_ax
@@ -134,22 +151,25 @@ def _plot_results(results: Results, ax: plt.Axes) -> plt.Axes:
 def make_plot(results: Results | list[Results], save_as: Path) -> None:
     if isinstance(results, Results):
         results = [results]
-    fig, axs = plt.subplots(1,
-                            len(results),
-                            sharex=True,
-                            sharey=True,
-                            squeeze=False,
-                            figsize=(4 * len(results), 4))
-    toxin_axs = [
-        _plot_results(result, ax) for result, ax in zip(results, axs[0])
-    ]
-    for toxin_ax in toxin_axs[1:]:
-        toxin_ax.sharey(toxin_axs[0])
-    # Limits were set before sharing, so rescale over every panel's data
-    toxin_axs[0].autoscale(axis='y')
+    fig, axs = plt.subplots(
+        len(results),
+        2,
+        sharex=True,
+        # sharey=True,
+        squeeze=False,
+        figsize=(8, 4 * (len(results))))
+    toxin_axs = []
+    for result, (res_ax, ratio_ax) in zip(results, axs):
+        toxin_axs.append(_plot_results(result, res_ax))
+        _plot_deposited_over_toxin(result, ratio_ax)
 
-    # fig.suptitle('MOI = 5')
-    fig.suptitle('MOI5, 0.5mL')
+    for column in (list(axs[:, 0]), list(axs[:, 1]), toxin_axs):
+        for ax in column[1:]:
+            ax.sharey(column[0])
+        column[0].autoscale(axis='y')
+    axs[-1, 1].set_xlabel('Time (hours)')
+
+    # fig.suptitle('MOI5, 0.5mL')
     fig.tight_layout()
     plt.savefig(save_as)
     plt.close(fig)
@@ -191,17 +211,17 @@ def simulate(scenario: Scenario) -> Results:
             cleared_depth += settling_height
 
         # Toxin
-        conc = (suspended + deposited) / scenario.infection_volume
+        # conc = (suspended + deposited) / scenario.infection_volume
         # hill = conc**HILL_N / (AGR_THRESHOLD**HILL_N + conc**HILL_N)
 
         # rate_per_cell = TOXIN_OFF + (TOXIN_ON - TOXIN_OFF) * hill
         rate_per_cell = 1
         toxin += rate_per_cell * (suspended + deposited) * DT
 
-        # Wash
-        if scenario.wash_at <= t < scenario.wash_at + DT:
-            suspended *= (1.0 - WASH_EFFICIENCY)
-            toxin *= (1.0 - WASH_EFFICIENCY)
+        # # Wash
+        # if scenario.wash_at <= t < scenario.wash_at + DT:
+        #     suspended *= (1.0 - WASH_EFFICIENCY)
+        #     toxin *= (1.0 - WASH_EFFICIENCY)
 
         results.append_step(suspended, deposited, toxin)
 
@@ -218,14 +238,14 @@ def main():
     volumes = [
         # 0.1,
         # 0.25,
-        0.5,
-        # 1.0,
+        # 0.5,
+        1.0,
     ]
     infection_times = [
         # 1,
         # 2,
         # 4,
-        6,
+        5,
     ]
     wash_times = [
         # 0,
@@ -234,13 +254,12 @@ def main():
         # 3,
         # 4,
         # 5,
-        6,
+        20,
     ]
 
     all_scenarios = [
-        Scenario(moi, volume, infection_time, wash_time) for moi in mois
+        Scenario(moi, volume, infection_time) for moi in mois
         for volume in volumes for infection_time in infection_times
-        for wash_time in wash_times
     ]
 
     out_dir = Path('temp') / 'infection_protocol'

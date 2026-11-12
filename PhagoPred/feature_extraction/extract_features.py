@@ -230,13 +230,14 @@ class FeaturesExtraction:
                 if not feature.crop
             ]
 
-            centre_coords = self.h5py_file.get_features(['X', 'Y'],
-                                                        filter_bad=False)
-            x_centres = torch.from_numpy(centre_coords['X'])
-            y_centres = torch.from_numpy(centre_coords['Y'])
+            if len(crop_features) > 0:
+                centre_coords = self.h5py_file.get_features(['X', 'Y'],
+                                                            filter_bad=False)
+                x_centres = torch.from_numpy(centre_coords['X'])
+                y_centres = torch.from_numpy(centre_coords['Y'])
 
-            x_centres, y_centres = x_centres.to(self.DEVICE), y_centres.to(
-                self.DEVICE)
+                x_centres, y_centres = x_centres.to(self.DEVICE), y_centres.to(
+                    self.DEVICE)
 
             for frame_idx in tqdm(range(num_frames), unit='frames'):
 
@@ -347,16 +348,16 @@ def extract_features(
     feature_list: features.BaseFeature | list[features.BaseFeature] = [
         # features.Fluorescence(),
         # features.ExternalFLuorcence(),
-        # features.Speed(),
-        # features.DensityPhase(),
-        # features.Displacement(),
-        # features.Perimeter(),
-        # features.Circularity(),
-        # features.Skeleton(),
+        features.Speed(),
+        features.DensityPhase(),
+        features.Displacement(),
+        features.Perimeter(),
+        features.Circularity(),
+        features.Skeleton(),
         features.RegionProps(),
         # features.CellDeath(),
-        # features.FirstLastFrame(),
-        # features.EventDetection(),
+        features.FirstLastFrame(),
+        features.EventDetection(),
         # features.EventDetection
         # features.ExternalFluorescence(),
         # features.Fluorescence(),
@@ -375,7 +376,7 @@ def main():
         for h5_file in dataset.glob('*.h5'):
             print(f'Extracting features for file {h5_file.name}')
             log.info(f'Extracting features for file at {h5_file}')
-            extract_features(h5_file, features.EventDetection())
+            extract_features(h5_file, features.Clearance())
 
 
 if __name__ == '__main__':

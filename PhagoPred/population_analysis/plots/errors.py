@@ -24,7 +24,8 @@ def automated_counts(h5_file: Path, frames: np.ndarray) -> np.ndarray:
 
 def plot_missed_cells(
     h5_file: Path,
-    missed: dict[int, int],
+    missed: dict[int, int] | None = None,
+    true: dict[int, int] | None = None,
     show_counts: bool = False,
     save_as: Path = Path('temp') / 'missed_cells.png',
 ) -> None:
@@ -34,10 +35,18 @@ def plot_missed_cells(
     Args:
         missed: {frame: cells missed}, counted with the GUI's counter.
     """
-    frames = np.array(sorted(missed))
-    num_missed = np.array([missed[f] for f in frames])
+    frames = np.array(sorted(missed)) if missed is not None else np.array(
+        sorted(true))
     auto = automated_counts(h5_file, frames)
-    true = auto + num_missed
+    if missed is not None:
+        num_missed = np.array([missed[f] for f in frames])
+        true = auto + num_missed
+    elif true is not None:
+        true = np.array([true[f] for f in frames])
+        num_missed = None
+
+    if num_missed is None:
+        num_missed = true - auto
     times = frames * frame_time(h5_file)
 
     plt.rcParams["font.family"] = 'serif'
@@ -66,22 +75,55 @@ def plot_missed_cells(
 
 if __name__ == '__main__':
     h5_file = Path(
-        '~/thor_server').expanduser() / 'MacrophageData' / '16_10' / 'A1.h5'
-    missed = {
-        0: 53,
-        20: 40,
-        40: 41,
-        60: 42,
-        80: 44,
-        100: 42,
-        120: 44,
-        140: 34,
-        160: 32,
-        180: 27,
-        200: 30,
-        220: 30,
-        240: 24,
-        260: 23,
-        280: 20
+        '~/thor_server').expanduser() / 'MacrophageData' / '06_11' / 'B4.h5'
+    # h5_file = Path('/home/ubuntu/PhagoPred/PhagoPred/Datasets/A1.h5')
+    true_counts_1 = {
+        0: 171,
+        20: 157,
+        40: 154,
+        60: 154,
+        80: 154,
+        100: 150,
+        120: 147,
+        140: 127,
+        160: 118,
+        180: 107,
+        200: 109,
+        220: 104,
+        240: 97,
+        260: 88,
+        280: 82
+    }  # first count (against the old 40/60 px tracking)
+    true_counts_2 = {
+        0: 175,
+        20: 166,
+        40: 160,
+        60: 157,
+        80: 159,
+        100: 156,
+        120: 145,
+        140: 143,
+        160: 125,
+        180: 116,
+        200: 117,
+        220: 106,
+        240: 99,
+        260: 84,
+        280: 77
+    }  # second count (against the new tracking)
+    true_counts = {
+        t: (true_counts_1[t] + true_counts_2[t]) / 2
+        for t in true_counts_1
     }
-    plot_missed_cells(h5_file, missed, show_counts=True)
+    b4_missed = {
+        0: 8,
+        40: 4,
+        80: 8,
+        120: 6,
+        160: 1,
+        200: 5,
+        240: 5,
+        280: 7,
+    }
+
+    plot_missed_cells(h5_file, missed=b4_missed, show_counts=True)

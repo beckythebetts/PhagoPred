@@ -95,7 +95,7 @@ class H5File:
     @cached_property
     def num_cells(self) -> int:
         with self._open() as f:
-            return f[self.FEATURES]['X'].shape[self.CELLS_DIM]
+            return f[self.FEATURES]['Macrophage'].shape[self.CELLS_DIM]
 
     @cached_property
     def num_frames(self) -> int:
@@ -210,7 +210,8 @@ class H5File:
         dataset = f[self.FEATURES].create_dataset(
             name,
             data=values.astype(np.float32),
-            chunks=(values.shape[self.FRAME_DIM], 1))
+            chunks=(values.shape[self.FRAME_DIM], 1),
+            maxshape=(values.shape[self.FRAME_DIM], None))
         dataset.attrs['dimensions'] = ['Frame', 'Cell Index']
         for k, v in attrs.items():
             dataset.attrs[k] = v
@@ -336,7 +337,10 @@ class H5File:
 
     def get_attr(self, name: str) -> object:
         with self._open() as f:
-            return f.attrs[name]
+            if name in f.attrs:
+                return f.attrs[name]
+            else:
+                return None
 
     def write_attr(self, name: str, value: object) -> None:
         with self._open(write=True) as f:
@@ -374,3 +378,8 @@ class H5File:
                 src.copy(src[name], dst, name=name)
         os.replace(tmp, self.path)
         self.reset_cache()
+
+
+if __name__ == '__main__':
+    H5File(Path(
+        '/home/ubuntu/PhagoPred/PhagoPred/Datasets/06_11/A1.h5')).repack()

@@ -21,12 +21,6 @@ class TrackerWithTrackpy2Stage:
         self.track_id_map = None  # will be a 2D array: frames x max_cells
         self.min_cell_size = 500
 
-        self.max_log_area_ratio = 1.4
-        self.log_area_ratio_per_frame = 0.15
-        self.area_cost_weight = 12.0
-
-        self.feature_extractor = extract_features.FeaturesExtraction(self.file)
-
     def extract_features_for_tracking(self):
         # Load coordinates (X, Y) for all cells in all frames
         with h5py.File(self.file, 'r') as f:
@@ -56,7 +50,9 @@ class TrackerWithTrackpy2Stage:
               search_range=10,
               memory=3,
               stage2_search_range=None,
-              stage2_memory=None):
+              stage2_memory=None,
+              area_scale=45,
+              max_overlap=5):
         """
         Two-stage tracking:
           Stage 1: Link with small search_range to build reliable short tracklets.
@@ -76,12 +72,16 @@ class TrackerWithTrackpy2Stage:
 
         coords, num_frames = self.extract_features_for_tracking()
         coords = pd.DataFrame(coords)
+        coords['log_area'] = area_scale * np.log(coords['area'])
 
         # --- Stage 1: fine-grained linking with small search_range ---
         print(
             f'\nStage 1: Linking with search_range={search_range}, memory={memory}'
         )
-        df = tp.link_df(coords, search_range=search_range, memory=memory)
+        df = tp.link_df(coords,
+                        search_range=search_range,
+                        memory=memory,
+                        pos_columns=['x', 'y', 'log_area'])
         n_tracklets = df['particle'].nunique()
         print(f'Stage 1 produced {n_tracklets} tracklets')
 
@@ -89,7 +89,9 @@ class TrackerWithTrackpy2Stage:
         print(
             f'\nStage 2: Linking tracklets with search_range={stage2_search_range}, memory={stage2_memory}'
         )
-        df = self._link_tracklets(df, stage2_search_range, stage2_memory)
+        df = self._link_tracklets(
+            df, stage2_search_range, stage2_memory, 0, max_overlap
+        )  # Use area sclae = 0 for tracklet linking. Cell often change size significantly when dying.
         n_tracks = df['particle'].nunique()
         print(f'Stage 2 merged into {n_tracks} tracks')
 
@@ -110,7 +112,8 @@ class TrackerWithTrackpy2Stage:
                 'Tracking search range stage 2'] = stage2_search_range
             f['Segmentations']['Phase'].attrs['Tracking memory'] = memory
 
-    def _link_tracklets(self, df, max_dist, max_time_gap):
+    def _link_tracklets(self, df, max_dist, max_time_gap, area_scale,
+                        max_overlap):
         """
         Match END positions of tracklets to START positions of other tracklets
         using KDTree for spatial lookup + Hungarian algorithm for optimal matching.
@@ -142,27 +145,41 @@ class TrackerWithTrackpy2Stage:
 
         # Use KDTree on start_coords to find spatial neighbours for each end_coord
         # max possible distance is max_dist * max_time_gap (distance scales with time gap)
-        spatial_radius = max_dist * max_time_gap
+        spatial_radius = max_dist * np.sqrt(max_time_gap)
         start_tree = cKDTree(start_coords)
 
         # Collect valid (end_idx, start_idx, distance, |log area ratio|) pairs
+        tracks = {
+            pid: (sub['frame'].to_numpy(), sub[['x', 'y']].to_numpy(),
+                  sub['area'].to_numpy())
+            for pid, sub in df.sort_values('frame').groupby('particle')
+        }
+
         candidate_pairs = []
         for i, end_coord in enumerate(end_coords):
-            nearby_j_indices = start_tree.query_ball_point(end_coord,
-                                                           r=spatial_radius)
-            for j in nearby_j_indices:
-                time_gap = start_frames[j] - end_frames[i]
-                if time_gap <= 0 or time_gap > max_time_gap:
+            e = end_frames[i]
+            frames_i = tracks[all_tracklet_ids[i]][0]
+            for j in start_tree.query_ball_point(end_coord, r=spatial_radius):
+                if end_frames[j] <= e or start_frames[j] - e > max_time_gap:
                     continue
-                dist = np.linalg.norm(end_coord - start_coords[j])
-                if dist >= max_dist * time_gap:
+                frames_j, xy_j, area_j = tracks[all_tracklet_ids[j]]
+                if start_frames[j] <= e:
+                    # j began before i ended: only the same cell if they took
+                    # turns (segmentation flicker), never both in one frame
+                    if (e - start_frames[j] >= max_overlap or np.isin(
+                            frames_j[frames_j <= e], frames_i).any()):
+                        continue
+                k = np.searchsorted(
+                    frames_j, e, side='right')  # j's first detection after e
+                time_gap = frames_j[k] - e
+                if time_gap > max_time_gap:
                     continue
-                log_area_ratio = abs(np.log(end_areas[i] / start_areas[j]))
-                if log_area_ratio > (self.max_log_area_ratio +
-                                     self.log_area_ratio_per_frame *
-                                     (time_gap - 1)):
-                    continue
-                candidate_pairs.append((i, j, dist, log_area_ratio))
+                dist = np.linalg.norm(end_coord - xy_j[k])
+                log_area_ratio = abs(np.log(end_areas[i] / area_j[k]))
+                step = (np.hypot(dist, area_scale * log_area_ratio) /
+                        np.sqrt(time_gap))
+                if step < max_dist:
+                    candidate_pairs.append((i, j, step, time_gap))
 
         if not candidate_pairs:
             return df
@@ -170,44 +187,30 @@ class TrackerWithTrackpy2Stage:
         candidate_pairs = np.array(candidate_pairs)
         end_idxs = candidate_pairs[:, 0].astype(int)
         start_idxs = candidate_pairs[:, 1].astype(int)
-        dists = candidate_pairs[:, 2]
-        log_area_ratios = candidate_pairs[:, 3]
-        gaps = start_frames[start_idxs] - end_frames[end_idxs]
+        steps = candidate_pairs[:, 2]
+        # log_area_ratios = candidate_pairs[:, 3]
+        # gaps = start_frames[start_idxs] - end_frames[end_idxs]
 
-        # Build small cost matrix for only the tracklets involved in valid pairs
         unique_ends = np.unique(end_idxs)
         unique_starts = np.unique(start_idxs)
         end_remap = {v: k for k, v in enumerate(unique_ends)}
         start_remap = {v: k for k, v in enumerate(unique_starts)}
 
-        # BIG_COST = 1e18
-        # cost_matrix = np.full((len(unique_ends), len(unique_starts)), BIG_COST)
-        # for ei, si, d in zip(end_idxs, start_idxs, dists):
-        #     cost_matrix[end_remap[ei], start_remap[si]] = d
-        # Non-edges stay at 0 and a real edge scores (cost - max_dist) < 0, so a
-        # good link is worth more than a marginal one and cardinality alone
-        # cannot trade away an obvious join. The size penalty can push a gated
-        # edge back above 0; that is fine, the solver prefers the 0 non-edge and
-        # the `< 0` filter below drops it either way.
+        gaps = candidate_pairs[:, 3]
         cost_matrix = np.zeros((len(unique_ends), len(unique_starts)))
-        for ei, si, d, gap, lr in zip(end_idxs, start_idxs, dists, gaps,
-                                      log_area_ratios):
+        for ei, si, step, gap in zip(end_idxs, start_idxs, steps, gaps):
             cost_matrix[end_remap[ei],
-                        start_remap[si]] = ((d / gap) - max_dist +
-                                            self.area_cost_weight * lr)
+                        start_remap[si]] = (step - max_dist) / gap
 
-        # Optimal assignment on the small matrix
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
         valid = cost_matrix[row_ind, col_ind] < 0
         row_ind, col_ind = row_ind[valid], col_ind[valid]
 
-        # Map back to tracklet IDs
         merge_from = all_tracklet_ids[
             unique_ends[row_ind]]  # end tracklets (earlier)
         merge_into = all_tracklet_ids[
             unique_starts[col_ind]]  # start tracklets (later)
 
-        # Build merge mapping: later tracklet -> earlier tracklet
         merge_map = dict(zip(merge_into, merge_from))
 
         # Resolve chains
@@ -288,10 +291,7 @@ class TrackerWithTrackpy2Stage:
         """
         Add each cells centroid cooridnates and areas to cells dataset
         """
-        self.feature_extractor.add_feature(features.Coords(),
-                                           cell_type=self.channel)
-        self.feature_extractor.set_up()
-        self.feature_extractor.extract_features(crop=False)
+        extract_features.extract_features(self.file, features.Coords())
 
 
 def run_tracking(dataset=SETTINGS.DATASET):
@@ -299,17 +299,19 @@ def run_tracking(dataset=SETTINGS.DATASET):
 
     tracker.get_cell_info()
     tracker.track(
-        search_range=SETTINGS.MAXIMUM_DISTANCE_THRESHOLD / 1.5,
-        stage2_search_range=SETTINGS.MAXIMUM_DISTANCE_THRESHOLD,
-        memory=0,
-        stage2_memory=SETTINGS.FRAME_MEMORY,
+        search_range=SETTINGS.STAGE_1_RANGE,
+        stage2_search_range=SETTINGS.STAGE_2_RANGE,
+        memory=SETTINGS.STAGE_1_MEMORY,
+        stage2_memory=SETTINGS.STAGE_2_MEMORY,
+        area_scale=SETTINGS.TRACK_AREA_SCALE,
+        max_overlap=SETTINGS.TRACK_MAX_OVERLAP,
     )
     tracker.remove_short_tracks(SETTINGS.MINIMUM_TRACK_LENGTH)
     tracker.apply_track_id_map()
 
 
 def main():
-    run_tracking()
+    run_tracking('/home/ubuntu/PhagoPred/PhagoPred/Datasets/A1.h5')
 
 
 if __name__ == "__main__":

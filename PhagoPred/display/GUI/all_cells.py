@@ -65,6 +65,7 @@ class AllCellsViewer:
         self.missed_layer = None
         self.missed_points = np.empty((0, 3))  # (frame, y, x)
         self.count_label = QtWidgets.QLabel("")
+        self.cell_info = None
 
         self._load_data()
         # self._fill_missing_segs()
@@ -154,6 +155,15 @@ class AllCellsViewer:
                         filter_bad=True,
                         alive_only=True), *seg_info)
 
+        self.cell_info = {}
+        for name, feature in [('Death', 'Death Frame'),
+                              ('Event', 'EventDetection'),
+                              ('Clearance', 'Clearance')]:
+            try:
+                self.cell_info[name] = self.h5.get_cell_feature(feature)
+            except KeyError:
+                pass
+
     def _fill_missing_segs(self):
         self.seg_data = fill_missing_cells(self.seg_data, self.h5.first_frames,
                                            self.h5.last_frames)
@@ -235,6 +245,14 @@ class AllCellsViewer:
         self.back_button.setVisible(False)
         self.cell_death_label.setText("")
 
+    def _hover_text(self, cell_idx: int) -> str:
+        lines = [f'Cell index: {cell_idx}']
+        if self.cell_info is not None:
+            for name, frames in self.cell_info.items():
+                if cell_idx < len(frames) and not np.isnan(frames[cell_idx]):
+                    lines.append(f'{name} frame: {int(frames[cell_idx])}')
+        return '\n'.join(lines)
+
     def _connect_mouse_interactions(self):
         """Update status bar with label ID under cursor."""
 
@@ -244,7 +262,7 @@ class AllCellsViewer:
             label_val = self.labels_layer.get_value(event.position)
             if label_val:
                 if label_val > 0:
-                    self.status_label.setText(f'Cell index: {label_val-1}')
+                    self.status_label.setText(self._hover_text(label_val - 1))
                     return True
             self.status_label.setText('')
             return True

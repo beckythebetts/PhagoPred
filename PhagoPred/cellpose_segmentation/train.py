@@ -67,7 +67,7 @@ def cellpose_train(directory: Path):
 def main():
 
     model_directory = Path(
-        '/home/ubuntu/PhagoPred/PhagoPred/cellpose_segmentation/Models/bio_20x_thp1_clahe_withrescale'
+        '/home/ubuntu/PhagoPred/PhagoPred/cellpose_segmentation/Models/bio_and_hicks_20x_thp1_clahe_with_rescale'
     )
     # mask_funcs.convert_coco_file(model_directory / 'train' / 'labels.json',
     #                              model_directory / 'train' / 'images',

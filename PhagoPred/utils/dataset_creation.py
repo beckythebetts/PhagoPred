@@ -12,11 +12,13 @@ import tifffile
 from tqdm import tqdm
 import numpy as np
 import cv2
+import h5py
 import imagej_rolling_ball
 
 from .h5_file import H5File
 from .logger import get_logger
 from .hot_pixel_removal import HOT_PIXEL_PATH, RESIDUAL_THRESHOLD, correct_hot_pixels, get_mask
+from .registration import shift_frame
 
 log = get_logger()
 
@@ -28,7 +30,9 @@ def _natural_sort_key(s) -> list:
     ]
 
 
-def find_ome_positions(tiff_dir: Path) -> dict[str, list[Path]]:
+def find_ome_positions(
+        tiff_dir: Path,
+        filter: str | list[str] | None = None) -> dict[str, list[Path]]:
     well_site = re.compile(r'MMStack_(?P<well>[A-Za-z]+\d+)-Site_(?P<site>\d+)'
                            r'(?:_\d+)?\.ome\.tif$')
     pos_pattern = re.compile(r'_Pos(?P<pos>\d+)(?:[._].*)?\.ome\.tif$')
@@ -56,6 +60,12 @@ def find_ome_positions(tiff_dir: Path) -> dict[str, list[Path]]:
         else:
             name = well
         positions[name] = sorted(files, key=_natural_sort_key)
+    if filter is not None:
+        filter = {filter} if isinstance(filter, str) else set(filter)
+        positions = {
+            k: v
+            for k, v in positions.items() if any(f in k for f in filter)
+        }
     return positions
 
 
@@ -196,21 +206,24 @@ def _rolling_ball(bg_subtractor, im: np.ndarray, radius: float) -> np.ndarray:
 
 def epi_preprocessing(h5_file: Path,
                       rolling_ball_radius: float = 50,
-                      gaussian_blur_sigma: int = 1) -> None:
+                      gaussian_blur_sigma: int = 1,
+                      offsets: np.ndarray | None = None) -> None:
     file = H5File(h5_file)
 
     def processed_frames():
-        # bg_subtractor = imagej_rolling_ball.BackgroundSubtracter(
-        #     java_options='-Xmx2g')
-        # hot_pixel_mask = get_mask()
+        bg_subtractor = imagej_rolling_ball.BackgroundSubtracter(
+            java_options='-Xmx2g')
+        hot_pixel_mask = get_mask()
         for i in tqdm(range(file.num_frames), desc='Preprocessing Epi'):
             im = file.get_epi(i)
-            # im = correct_hot_pixels(im, hot_pixel_mask)
-            # im = _rolling_ball(bg_subtractor, im, rolling_ball_radius)
+            im = correct_hot_pixels(im, hot_pixel_mask)
+            im = _rolling_ball(bg_subtractor, im, rolling_ball_radius)
             im = cv2.GaussianBlur(im,
                                   ksize=(0, 0),
                                   sigmaX=gaussian_blur_sigma,
                                   sigmaY=gaussian_blur_sigma)
+            if offsets is not None:
+                im = shift_frame(im, offsets[i])
             yield im
 
     file.write_epi(processed_frames(), overwrite=True)
@@ -222,23 +235,33 @@ def epi_preprocessing(h5_file: Path,
     file.write_attr('Gaussian blur sigma', gaussian_blur_sigma)
 
 
-def redo_epi_16bit(name: str) -> None:
+def redo_epi(name: str) -> None:
 
     dataset_dir = Path('~/MacrophageData').expanduser() / name
     orig_datasets_dir = dataset_dir / '_1'
 
     for h5 in sorted(dataset_dir.glob('*.h5')):
         print(f'Processing file {h5}')
-        # process_ome_tiffs(orig_datasets_dir,
-        #                   dataset_dir,
-        #                   phase_channel=None,
-        #                   overwrite=True,
-        #                   positions=h5.stem)
+        offsets = H5File(h5).get_attr('Frame offsets (rows, cols)')
+        process_ome_tiffs(orig_datasets_dir,
+                          dataset_dir,
+                          phase_channel=None,
+                          overwrite=True,
+                          positions=h5.stem)
 
-        epi_preprocessing(h5)
+        epi_preprocessing(h5, offsets=offsets)
         H5File(h5).repack()
+
+
+def copy_images(src: Path, dst: Path) -> None:
+    """New file with only src's preprocessed images and their attrs, so
+    segmentation onwards can be rerun without remaking them."""
+    with h5py.File(src, 'r') as s, h5py.File(dst, 'w-') as d:
+        s.copy(s['Images'], d)
+        d.attrs.update(s.attrs)
 
 
 if __name__ == '__main__':
     import sys
-    redo_epi_16bit(sys.argv[1])
+    for d in sys.argv[1:]:
+        redo_epi(d)

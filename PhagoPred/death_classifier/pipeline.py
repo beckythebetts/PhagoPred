@@ -82,10 +82,6 @@ def process(file: Path) -> None:
 
 
 if __name__ == '__main__':
-    datasets_folder = Path('~/thor_server').expanduser() / 'MacrophageData'
-    for folder in (datasets_folder / '02_10', datasets_folder / '16_10'):
-        for file in sorted(folder.glob('*.h5')):
-            try:
-                process(file)
-            except Exception as e:
-                print(f'{file} failed: {e!r}', flush=True)
+    h5_file = Path('/home/ubuntu/PhagoPred/PhagoPred/Datasets/A1.h5')
+    predict_bad_tracks(h5_file)
+    predict_death(h5_file)

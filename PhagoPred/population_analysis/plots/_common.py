@@ -71,7 +71,7 @@ def alive_and_deaths(h5_file: Path, frames: np.ndarray) -> tuple:
     dies_in_track = death > first
     deaths = (dies_in_track & (death >= frames[:-1, None]) &
               (death < frames[1:, None])).sum(axis=1)
-    deaths = -np.diff(alive)
+    # deaths = -np.diff(alive)
     return alive, deaths
 
 

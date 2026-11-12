@@ -43,8 +43,8 @@ def run(dataset=SETTINGS.DATASET):
 
 def main():
     import sys
-    h5_files = Path('~/thor_server/MacrophageData').expanduser()
-    h5_file = h5_files / sys.argv[1]
+    # h5_files = Path('~/thor_server/MacrophageData').expanduser()
+    h5_file = sys.argv[1]
     run(h5_file)
 
 

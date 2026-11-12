@@ -1,5 +1,6 @@
 from pathlib import Path
 import shutil
+import os
 
 import h5py
 from tqdm import tqdm
@@ -7,15 +8,15 @@ from tqdm import tqdm
 from PhagoPred import SETTINGS
 from PhagoPred.detectron_segmentation import segment, fine_tune_class, eval
 from PhagoPred.cellpose_segmentation import segment as cellpose_segment
-from PhagoPred.tracking import trackpy
 from PhagoPred.display import save, plots, napari_GUI
 from PhagoPred.feature_extraction import extract_features, clean_features, features
 from PhagoPred.feature_extraction.morphology.UMAP import UMAP_embedding
 from PhagoPred.prediction.decision_tree import model
 from PhagoPred.utils.tools import fill_missing_cells, repack_hdf5, rechunk_hdf5, hdf5_needs_rechunk
-from PhagoPred.utils.dataset_creation import epi_background_correction, keep_only_group, truncate_hdf5, hdf5_from_tiffs, rename_group, hdf5_from_ome_tiffs, preprocessing
+from PhagoPred.utils.dataset_creation import process_ome_tiffs, preprocessing, copy_images
 import PhagoPred.display.GUI.__main__ as GUI
 from PhagoPred.tracking import trackpy_2_stage
+from PhagoPred.death_classifier.pipeline import predict_bad_tracks, predict_death
 
 from PhagoPred.survival_analysis.models import losses
 
@@ -34,48 +35,60 @@ def is_processed(h5_file):
 
 
 if __name__ == '__main__':
-    orig_datasets_dir = Path(
-        '~/thor_server/MacrophageData/16_10/_1').expanduser()
-    machine_dataset_dir = Path('PhagoPred') / 'Datasets' / '16_10'
-    remote_datasets_dir = Path(
-        '~/thor_server/MacrophageData/16_10').expanduser()
+    file = Path('/home/ubuntu/PhagoPred/PhagoPred/Datasets/A1.h5')
+    trackpy_2_stage.run_tracking(file)
+    extract_features.extract_features(file, features.FirstLastFrame())
+    predict_death(file)
+    predict_bad_tracks(file)
 
-    hdf5_from_ome_tiffs(orig_datasets_dir, remote_datasets_dir)
+# if __name__ == '__main__':
+#     orig_datasets_dir = Path(
+#         '~/thor_server/MacrophageData/16_10/_1').expanduser()
+#     machine_dataset_dir = Path('PhagoPred') / 'Datasets' / '16_10'
+#     remote_datasets_dir_old = Path(
+#         '~/thor_server/MacrophageData/16_10').expanduser()
+#     remote_datasets_dir = Path(
+#         '~/thor_server/MacrophageData/16_10/seg_only').expanduser()
+#     remote_datasets_dir.mkdir(exist_ok=True)
+#     # process_ome_tiffs(orig_datasets_dir, remote_datasets_dir)
 
-    names = {p.name for p in remote_datasets_dir.glob('*.h5')}
-    names |= {p.name for p in machine_dataset_dir.glob('*.h5')}
-    for name in sorted(names, key=natural_key):
-        h5_file = machine_dataset_dir / name
-        # if h5_file.name not in [
-        #         # '0.h5',
-        #         # '1.h5',
-        #         # '2.h5',
-        #         '3.h5',
-        #         '4.h5',
-        # ]:
-        #     continue
+#     names = {p.name for p in remote_datasets_dir_old.glob('*.h5')}
+#     # names |= {p.name for p in machine_dataset_dir.glob('*.h5')}
 
-        if not h5_file.exists():
-            # if is_processed(remote_datasets_dir / name):
-            #     print(f'Skipping {name}: already processed')
-            #     continue
-            shutil.move(remote_datasets_dir / name, machine_dataset_dir)
+#     names = {}
+#     for name in sorted(names, key=natural_key):
+#         print(f'Processing {name}')
+#         # if name not in [
+#         #         'A1.h5',
+#         # ]:
+#         #     continue
+#         h5_file = machine_dataset_dir / name
 
-        print(f'Processing {name}')
-        with h5py.File(h5_file, 'r') as f:
-            SETTINGS.IMAGE_SIZE = f['Images'].attrs['Image size / pixels']
-        # if h5_file.name not in ['1.h5', '2.h5', '3.h5', '4.h5']:
-        preprocessing(h5_file)
-        cellpose_segment.seg_dataset(h5_file)
-        trackpy_2_stage.run_tracking(h5_file)
-        extract_features.extract_features(
-            h5_file, phase_features=[features.FirstLastFrame()])
+#         # copy_images(remote_datasets_dir_old / name, remote_datasets_dir / name)
 
-        fill_missing_cells(h5_file)
+#         if not h5_file.exists():
+#             # if is_processed(remote_datasets_dir / name):
+#             #     print(f'Skipping {name}: already processed')
+#             #     continue
+#             shutil.copyfile(remote_datasets_dir / name,
+#                             machine_dataset_dir / name)
 
-        extract_features.extract_features(h5_file)
+#         with h5py.File(h5_file, 'r') as f:
+#             SETTINGS.IMAGE_SIZE = f['Images'].attrs['Image size / pixels']
+#         # if h5_file.name not in ['1.h5', '2.h5', '3.h5', '4.h5']:
+#         # preprocessing(h5_file)
+#         cellpose_segment.seg_dataset(h5_file)
+#         # trackpy_2_stage.run_tracking(h5_file)
+#         # extract_features.extract_features(
+#         #     h5_file, phase_features=[features.FirstLastFrame()])
 
-        shutil.move(h5_file, remote_datasets_dir)
+#         # fill_missing_cells(h5_file)
+
+#         # extract_features.extract_features(h5_file)
+#         temp_file = remote_datasets_dir / (name + '.tmp')
+#         shutil.move(h5_file, temp_file)
+#         os.replace(temp_file, remote_datasets_dir / name)
+#         h5_file.unlink()
 
 # if __name__ == '__main__':
 #     datasets = Path(

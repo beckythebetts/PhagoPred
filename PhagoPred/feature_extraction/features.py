@@ -148,7 +148,7 @@ class FirstLastFrame(BaseFeature):
         areas = phase_xr['Area']
 
         not_nan_mask = ~np.isnan(areas)
-        start = not_nan_mask.argmax(axis=0) + 1
+        start = not_nan_mask.argmax(axis=0)
         reversed_mask = not_nan_mask[::-1, :]
         last = areas.shape[0] - 1 - reversed_mask.argmax(axis=0)
 
@@ -977,6 +977,30 @@ class Circularity(BaseFeature):
 #                        axis: str) -> xr.DataArray:
 #     shape = [1] * mask.ndim
 #     shape
+
+
+class Clearance(BaseFeature):
+    derived_feature: bool = True
+    cleared_threshold: float = 0.21  # Mean Fluor value below which a cell is considered cleared.
+
+    smooth_window_size: int = 3
+
+    def compute(self, phase_xr: xr.Dataset, epi_xr: xr.Dataset) -> np.ndarray:
+        mean_fluor = phase_xr['Fluor Mean'].transpose('Frame', 'Cell Index')
+        tracked = mean_fluor.notnull().to_numpy()
+        smoothed = mean_fluor.rolling(Frame=self.smooth_window_size,
+                                      center=True,
+                                      min_periods=1).mean().to_numpy()
+
+        before_track = np.cumsum(tracked, axis=0) == 0
+        below = np.where(tracked, smoothed < self.cleared_threshold,
+                         ~before_track)
+        stays_below = np.minimum.accumulate(below[::-1],
+                                            axis=0)[::-1] & tracked
+
+        cleared = np.where(stays_below.any(axis=0), stays_below.argmax(axis=0),
+                           np.nan)
+        return cleared[np.newaxis, :, np.newaxis]
 
 
 class EventDetection(BaseFeature):

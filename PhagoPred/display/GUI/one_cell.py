@@ -47,11 +47,12 @@ class CellViewer(QWidget):
         self.epi_data = None
 
         self.first_frame = int(self.h5.first_frames[self.cell_idx])
-        self.last_frame = int(self.h5.last_frames[self.cell_idx])
+        self.last_frame = int(
+            min(self.h5.last_frames[self.cell_idx] + 20, self.h5.num_frames))
         death_frame = self.h5.death_frames[self.cell_idx]
-        event_frame = self.h5.event_frames[self.cell_idx]
+        # event_frame = self.h5.event_frames[self.cell_idx]
         self.cell_death = None if np.isnan(death_frame) else int(death_frame)
-        self.event_frame = None if np.isnan(event_frame) else event_frame
+        # self.event_frame = None if np.isnan(event_frame) else event_frame
 
         self.progress_bar = None
         self.feature_names = [
@@ -86,7 +87,7 @@ class CellViewer(QWidget):
     def on_load_finished(self, phase_data, epi_data, mask):
         self.progress_bar.close()
         self.cell_death_signal.emit(self.cell_death)
-        self.cell_event_signal.emit(self.event_frame)
+        # self.cell_event_signal.emit(self.event_frame)
         self.phase_data = phase_data
         self.epi_data = epi_data
 
