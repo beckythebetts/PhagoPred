@@ -1163,7 +1163,7 @@ class RegionProps(BaseFeature):
         ],
                        axis=1)
 
-        results[(vals - 1).cpu().numpy()] = xp.asnumpy(row)
+        results[(vals - 1).cpu().numpy()] = to_numpy(row)
 
         return results
 
