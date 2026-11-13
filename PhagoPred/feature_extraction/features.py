@@ -5,10 +5,8 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from shapely.geometry import Point, box
-from scipy.signal import convolve
 from scipy import ndimage
 from skimage.morphology import skeletonize
-import pickle
 from skimage.measure import label, regionprops
 import time
 import warnings
@@ -22,16 +20,25 @@ from pathlib import Path
 # installs (nvidia-cuda-nvrtc-cu12) sits in a package directory that isn't on
 # the dynamic linker's search path. Preload it explicitly so CuPy finds it
 # regardless of LD_LIBRARY_PATH.
-import nvidia.cuda_nvrtc
+try:
+    import nvidia.cuda_nvrtc
+    ctypes.CDLL(
+        str(
+            Path(nvidia.cuda_nvrtc.__file__).parent / 'lib' /
+            'libnvrtc.so.12'),
+        mode=ctypes.RTLD_GLOBAL,
+    )
+    import cupy as xp
+    import cupyx.scipy.ndimage as ndi
+    import cucim.skimage.measure as measure
+    xp.cuda.runtime.getDeviceCount()  # raises if there's no GPU/driver
+    GPU = True
 
-ctypes.CDLL(
-    str(Path(nvidia.cuda_nvrtc.__file__).parent / 'lib' / 'libnvrtc.so.12'),
-    mode=ctypes.RTLD_GLOBAL,
-)
-
-import cupy
-import cucim.skimage.measure
-import cupyx.scipy.ndimage as cndi
+except Exception:
+    import numpy as xp
+    import scipy.ndimage as ndi
+    import skimage.measure as measure
+    GPU = False
 
 from PhagoPred.feature_extraction.morphology.fitting import MorphologyFit
 from PhagoPred.feature_extraction.morphology.UMAP import load_UMAP, UMAP_embedding
@@ -39,6 +46,14 @@ from PhagoPred.feature_extraction.texture.gabor import Gabor
 from PhagoPred import SETTINGS
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def to_backend(t: torch.Tensor):
+    return xp.asarray(t.detach()) if GPU else t.detach().cpu().numpy()
+
+
+def to_numpy(a):
+    return xp.asnumpy(a) if GPU else np.asarray(a)
 
 
 class BaseFeature:
@@ -768,13 +783,13 @@ class Perimeter(BaseFeature):
         if mask.shape[1] < 3 or mask.shape[2] < 3:
             return np.full((mask.shape[0], ), np.nan)
 
-        mask_cupy = cupy.asarray(mask.to(torch.uint8).contiguous())
+        mask_cupy = to_backend(mask.to(torch.uint8).contiguous())
 
         result = np.full((mask.shape[0], ), np.nan)
         for i in range(mask.shape[0]):
             crop = mask_cupy[i]
             if crop.any():
-                result[i] = float(cucim.skimage.measure.perimeter(crop))
+                result[i] = float(measure.perimeter(crop))
 
         result[result == 0] = np.nan
 
@@ -1105,9 +1120,8 @@ class RegionProps(BaseFeature):
 
         # Unexpand mask :/ change this later
         batch_size = len(mask)
-        mask = mask * torch.arange(1, batch_size + 1,
-                                   device=mask.get_device()).view(
-                                       batch_size, 1, 1)
+        mask = mask * torch.arange(1, batch_size + 1, device=mask.device).view(
+            batch_size, 1, 1)
         mask = torch.sum(mask, dim=0)
 
         vals = torch.unique(mask)
@@ -1117,10 +1131,10 @@ class RegionProps(BaseFeature):
         if len(vals) == 0:
             return results
 
-        mask = cupy.asarray(mask.detach())
-        epi = cupy.asarray(epi_image.detach())
+        mask = to_backend(mask.detach())
+        epi = to_backend(epi_image.detach())
 
-        region_props = cucim.skimage.measure.regionprops_table(
+        region_props = measure.regionprops_table(
             mask,
             intensity_image=epi,
             properties=self.prop_names,
@@ -1136,7 +1150,7 @@ class RegionProps(BaseFeature):
         fluor_cv = coefficient_of_variation(region_props['intensity_mean'],
                                             region_props['intensity_std'])
 
-        row = cupy.stack([
+        row = xp.stack([
             region_props['axis_major_length'],
             region_props['axis_minor_length'],
             region_props['eccentricity'],
@@ -1147,46 +1161,45 @@ class RegionProps(BaseFeature):
             fluor_asymmetry,
             fluor_cv,
         ],
-                         axis=1)
+                       axis=1)
 
-        results[(vals - 1).cpu().numpy()] = cupy.asnumpy(row)
+        results[(vals - 1).cpu().numpy()] = xp.asnumpy(row)
 
         return results
 
 
-def fluor_radial(mask: cupy.array, intensity: cupy.array) -> cupy.array:
+def fluor_radial(mask: xp.array, intensity: xp.array) -> xp.array:
     """Extra property in reginprops, calculate [total, dist_mean, dist_var], with dist_mean and sit_var weighted by raidal distance from cell edge."""
     intensity = intensity * mask
     total = intensity.sum()
     if total <= 0:
-        return cupy.array([0.0, 0.0, 0.0])
-    dt = cndi.distance_transform_edt(mask)
+        return xp.array([0.0, 0.0, 0.0])
+    dt = ndi.distance_transform_edt(mask)
 
     dt /= (dt.max() + 1e-6)
 
     mean = (intensity * dt).sum() / total
     var = (intensity * dt**2).sum() / total - mean**2
-    var = cupy.clip(var, 0.0, None)
+    var = xp.clip(var, 0.0, None)
 
-    return cupy.stack([total, mean, var])
+    return xp.stack([total, mean, var])
 
 
-def asymmetry(cy: cupy.ndarray, cx: cupy.ndarray, wcy: cupy.ndarray,
-              wcx: cupy.ndarray, areas: cupy.ndarray) -> cupy.ndarray:
+def asymmetry(cy: xp.ndarray, cx: xp.ndarray, wcy: xp.ndarray, wcx: xp.ndarray,
+              areas: xp.ndarray) -> xp.ndarray:
     """Fluorescence distribution asymmetry.
     """
     dy = cy - wcy
     dx = cx - wcx
-    return cupy.hypot(dy, dx) / cupy.sqrt(areas / np.pi)
+    return xp.hypot(dy, dx) / xp.sqrt(areas / np.pi)
 
 
-def coefficient_of_variation(means: cupy.array,
-                             stds: cupy.array) -> cupy.array:
+def coefficient_of_variation(means: xp.array, stds: xp.array) -> xp.array:
     """Realative spread.
     Low = diffuse, High = punctate.
     """
     min_mean = 1
-    cv = cupy.where(means > min_mean, stds / means, 0)
+    cv = xp.where(means > min_mean, stds / means, 0)
     return cv
 
 

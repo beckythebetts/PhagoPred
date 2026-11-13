@@ -371,7 +371,7 @@ def extract_features(
 def main():
     datasets = ['16_10']
     # datasets_dir = Path('~/thor_server').expanduser() / 'MacrophageData'
-    datasets_dir = Path('~/MacrophageData').expanduser()
+    datasets_dir = Path(r'T:\\') / 'MacrophageData'
 
     for dataset in datasets:
         dataset = datasets_dir / dataset
