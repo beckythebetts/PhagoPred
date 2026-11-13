@@ -75,17 +75,18 @@ def alive_and_deaths(h5_file: Path, frames: np.ndarray) -> tuple:
     return alive, deaths
 
 
-def plot_mean_std(ax: plt.axes,
-                  times: np.ndarray,
-                  means: np.ndarray,
-                  stds: np.ndarray,
-                  label: str,
-                  bar: bool,
-                  idx: int = 0,
-                  n_groups: int = 1,
-                  color=None,
-                  linestyle: str = '-',
-                  hatch: str = '') -> None:
+def plot_val_range(ax: plt.axes,
+                   times: np.ndarray,
+                   vals: np.ndarray,
+                   mins: np.ndarray,
+                   maxs: np.ndarray,
+                   label: str,
+                   bar: bool,
+                   idx: int = 0,
+                   n_groups: int = 1,
+                   color=None,
+                   linestyle: str = '-',
+                   hatch: str = '') -> None:
     """One group's mean +- std over wells, as a line and band, or as bars
     side by side with the other groups.
     """
@@ -95,9 +96,9 @@ def plot_mean_std(ax: plt.axes,
         width = 0.8 * spacing / n_groups
         offset = (idx - (n_groups - 1) / 2) * width
         ax.bar(times + offset,
-               means,
+               vals,
                width=width,
-               yerr=stds,
+               yerr=(vals - min, maxs - vals),
                capsize=3,
                label=label,
                color=color,
@@ -106,11 +107,11 @@ def plot_mean_std(ax: plt.axes,
                hatch=hatch)
 
     else:
-        ax.plot(times, means, label=label, color=color)
+        ax.plot(times, vals, label=label, color=color)
         ax.fill_between(
             times,
-            means - stds,
-            means + stds,
+            mins,
+            maxs,
             alpha=0.5,
             color=color,
             edgecolor='none',
@@ -129,6 +130,7 @@ def plot_by_label(
     colours: dict | None = None,
     start_at: int = 0,
     log_y: bool = False,
+    percentile: float | None = None,
 ) -> None:
     """Mean +- standard error over each group's wells, one line (or set of
     bars) per group.
@@ -167,14 +169,22 @@ def plot_by_label(
         keys = list(wells[0])
         for k, key in enumerate(keys):
             values = np.array([w[key] for w in wells], dtype=float)
-            means = np.nanmean(values, axis=0)
-            sems = np.nanstd(values, axis=0) / np.sqrt(len(values))
-            plot_mean_std(
+            if percentile is None:
+                vals = np.nanmean(values, axis=0)
+                sems = np.nanstd(values, axis=0) / np.sqrt(len(values))
+                mins, maxs = vals - sems, vals + sems
+            else:
+                vals = np.nanmedian(values, axis=0)
+                mins = np.nanpercentile(values, percentile, axis=0)
+                maxs = np.nanpercentile(values, 1.0 - percentile, axis=0)
+            _label = '(mean ± 1 standard error)' if percentile is None else f'(median ({percentile}th-{percentile}th percentile))'
+            plot_val_range(
                 ax,
                 times[start_at:],
-                means[start_at:],
-                sems[start_at:],
-                f'{label_prefix}{label}{label_suffix} {key}'.rstrip(),
+                vals[start_at:],
+                mins[start_at:],
+                maxs[start_at:],
+                f'{label_prefix}{label}{label_suffix} {key} {_label}'.rstrip(),
                 bar,
                 idx,
                 len(labels),

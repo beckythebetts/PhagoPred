@@ -6,13 +6,15 @@ from .fluorescence import plot_tot_fluor
 from .fluor_survival import plot_hazard_vs_burden, plot_hazard_by_infection
 from ._common import label_to_files_mapping, generate_files_mapping
 
+# BASEDIR = Path('~/thor_server').expanduser()
+BASEDIR = Path(r'T:\\')
+
 
 def main():
-    duration_path = Path(
-        '~/thor_server').expanduser() / 'MacrophageData' / '16_10'
-    moi_path = Path('~/thor_server').expanduser() / 'MacrophageData' / '02_10'
-    control_path = Path(
-        '~/thor_server').expanduser() / 'MacrophageData' / '06_11'
+    duration_path = BASEDIR / 'MacrophageData' / '16_10'
+    # duration_path = Path('T:')
+    moi_path = BASEDIR / 'MacrophageData' / '02_10'
+    control_path = BASEDIR / 'MacrophageData' / '06_11'
     mois_json = moi_path / 'mois.json'
 
     duration_dict = generate_files_mapping(
@@ -38,12 +40,12 @@ def main():
     #                          infected_thresh=500
     #                          # label_suffix=' hours',
     #                          )
-    # plot_tot_fluor(
-    #     moi_dict,
-    #     colours={0: 'k'},
-    #     # label_prefix='Infection duration: ',
-    #     # label_suffix=' hours',
-    # )
+    plot_tot_fluor(
+        duration_dict,
+        colours={0: 'k'},
+        # label_prefix='Infection duration: ',
+        # label_suffix=' hours',
+    )
     # plot_num_alive_cells(
     #     duration_dict,
     #     every=40,
@@ -54,7 +56,7 @@ def main():
     #     label_suffix=' hours',
     #     # colours={0: 'k'},
     # )
-    plot_censoring_vs_death(duration_dict, num_bins=12)
+    # plot_censoring_vs_death(duration_dict, num_bins=12)
 
 
 if __name__ == '__main__':

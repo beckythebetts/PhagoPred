@@ -53,4 +53,5 @@ def plot_tot_fluor(
                   label_suffix=label_suffix,
                   colours=colours,
                   log_y=True,
+                  percentile=0.05,
                   **kwargs)

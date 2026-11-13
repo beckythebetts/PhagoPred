@@ -370,13 +370,15 @@ def extract_features(
 
 def main():
     datasets = ['16_10']
-    datasets_dir = Path('~/thor_server').expanduser() / 'MacrophageData'
+    # datasets_dir = Path('~/thor_server').expanduser() / 'MacrophageData'
+    datasets_dir = Path('MacrophageData')
+
     for dataset in datasets:
         dataset = datasets_dir / dataset
         for h5_file in dataset.glob('*.h5'):
             print(f'Extracting features for file {h5_file.name}')
             log.info(f'Extracting features for file at {h5_file}')
-            extract_features(h5_file, features.Clearance())
+            extract_features(h5_file, features.RegionProps())
 
 
 if __name__ == '__main__':

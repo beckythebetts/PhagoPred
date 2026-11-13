@@ -10,7 +10,7 @@ import numpy as np
 from tqdm import tqdm
 
 from PhagoPred.utils.h5_file import H5File
-from ._common import (group_colours, plot_mean_std, plot_by_label, frame_time,
+from ._common import (group_colours, plot_val_range, plot_by_label, frame_time,
                       alive_and_deaths)
 
 
@@ -149,8 +149,8 @@ def _plot_manual_alive_count(ax: plt.axes,
     frames = np.array(sorted(values))
     means = np.array([np.mean(values[f]) for f in frames])
     stds = np.array([np.std(values[f]) for f in frames])
-    plot_mean_std(ax, frames * frame_time, means, stds, f'MOI {label}', bar,
-                  idx, n_groups)
+    plot_val_range(ax, frames * frame_time, means, stds, f'MOI {label}', bar,
+                   idx, n_groups)
 
 
 def _well_alive(h5_file: Path,
@@ -195,8 +195,8 @@ def _reacquired(h5: H5File,
     reacquired = np.zeros_like(lost)
     for c in np.flatnonzero(lost):
         lost_at = int(last[c])
-        new = starts_alive & (first > lost_at - 5) & (first <= lost_at +
-                                                       max_gap)
+        new = starts_alive & (first > lost_at - 5) & (first
+                                                      <= lost_at + max_gap)
         new[c] = False
         dists = np.hypot(*(start_xy[new] - [X[lost_at, c], Y[lost_at, c]]).T)
         reacquired[c] = (dists < max_dist).any()
@@ -218,8 +218,8 @@ def _censoring_vs_death(
     at_end = censored & (last == h5.num_frames - 1)
     lost = censored & ~at_end
     never_found = lost & ~_reacquired(h5, lost)
-    return (np.histogram(death[dies], edges)[0],
-            np.histogram(last[lost], edges)[0],
+    return (np.histogram(death[dies],
+                         edges)[0], np.histogram(last[lost], edges)[0],
             np.histogram(last[never_found], edges)[0], at_end.sum())
 
 
@@ -244,8 +244,7 @@ def plot_censoring_vs_death(
     for ax, (label, files) in zip(axs[:, 0], label_to_files.items()):
         hours_per_frame = frame_time(files[0])
         edges = np.linspace(0, H5File(files[0]).num_frames, num_bins + 1)
-        deaths, censored, never_found = (np.zeros(num_bins)
-                                         for _ in range(3))
+        deaths, censored, never_found = (np.zeros(num_bins) for _ in range(3))
         at_end = 0
         for h5_file in tqdm(files, desc=f'Censoring vs death for {label}'):
             d, c, n, e = _censoring_vs_death(h5_file, edges)
