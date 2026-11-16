@@ -996,16 +996,16 @@ class Circularity(BaseFeature):
 
 class Clearance(BaseFeature):
     derived_feature: bool = True
-    cleared_threshold: float = 0.21  # Mean Fluor value below which a cell is considered cleared.
+    cleared_threshold: float = 300  # Tot Fluor value below which a cell is considered cleared.
 
     smooth_window_size: int = 3
 
     def compute(self, phase_xr: xr.Dataset, epi_xr: xr.Dataset) -> np.ndarray:
-        mean_fluor = phase_xr['Fluor Mean'].transpose('Frame', 'Cell Index')
-        tracked = mean_fluor.notnull().to_numpy()
-        smoothed = mean_fluor.rolling(Frame=self.smooth_window_size,
-                                      center=True,
-                                      min_periods=1).mean().to_numpy()
+        tot_fluor = phase_xr['Fluor Total'].transpose('Frame', 'Cell Index')
+        tracked = tot_fluor.notnull().to_numpy()
+        smoothed = tot_fluor.rolling(Frame=self.smooth_window_size,
+                                     center=True,
+                                     min_periods=1).mean().to_numpy()
 
         before_track = np.cumsum(tracked, axis=0) == 0
         below = np.where(tracked, smoothed < self.cleared_threshold,

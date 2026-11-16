@@ -2,12 +2,12 @@ from pathlib import Path
 from collections import defaultdict
 
 from .survival import plot_num_alive_cells, plot_event_time_distributions, plot_censoring_vs_death
-from .fluorescence import plot_tot_fluor
+from .fluorescence import plot_tot_fluor, plot_fluor_hist
 from .fluor_survival import plot_hazard_vs_burden, plot_hazard_by_infection
 from ._common import label_to_files_mapping, generate_files_mapping
 
-# BASEDIR = Path('~/thor_server').expanduser()
-BASEDIR = Path(r'T:\\')
+BASEDIR = Path('~/thor_server').expanduser()
+# BASEDIR = Path(r'T:\\')
 
 
 def main():
@@ -17,14 +17,12 @@ def main():
     control_path = BASEDIR / 'MacrophageData' / '06_11'
     mois_json = moi_path / 'mois.json'
 
-    duration_dict = generate_files_mapping(
-        {
-            0: 'A',
-            # 5: 'B',
-            # 3: 'C',
-            # 1: 'D'
-        },
-        duration_path)
+    duration_dict = generate_files_mapping({
+        0: 'A',
+        5: 'B',
+        3: 'C',
+        1: 'D'
+    }, duration_path)
     well_position_dict = generate_files_mapping(
         {
             0: ['C3', 'C4'],
@@ -40,12 +38,13 @@ def main():
     #                          infected_thresh=500
     #                          # label_suffix=' hours',
     #                          )
-    plot_tot_fluor(
-        duration_dict,
-        colours={0: 'k'},
-        # label_prefix='Infection duration: ',
-        # label_suffix=' hours',
-    )
+    # plot_tot_fluor(
+    #     duration_dict,
+    #     colours={0: 'k'},
+    #     # label_prefix='Infection duration: ',
+    #     # label_suffix=' hours',
+    # )
+    plot_fluor_hist(duration_dict)
     # plot_num_alive_cells(
     #     duration_dict,
     #     every=40,

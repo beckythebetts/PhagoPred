@@ -98,7 +98,7 @@ def plot_val_range(ax: plt.axes,
         ax.bar(times + offset,
                vals,
                width=width,
-               yerr=(vals - min, maxs - vals),
+               yerr=(vals - mins, maxs - vals),
                capsize=3,
                label=label,
                color=color,
@@ -112,7 +112,7 @@ def plot_val_range(ax: plt.axes,
             times,
             mins,
             maxs,
-            alpha=0.5,
+            alpha=0.2,
             color=color,
             edgecolor='none',
             linestyle=linestyle,
@@ -131,6 +131,7 @@ def plot_by_label(
     start_at: int = 0,
     log_y: bool = False,
     percentile: float | None = None,
+    pool_cells: bool = False,
 ) -> None:
     """Mean +- standard error over each group's wells, one line (or set of
     bars) per group.
@@ -168,7 +169,11 @@ def plot_by_label(
         wells = [v if isinstance(v, dict) else {"": v} for _, v in wells]
         keys = list(wells[0])
         for k, key in enumerate(keys):
-            values = np.array([w[key] for w in wells], dtype=float)
+            if pool_cells:
+                values = np.concatenate(
+                    [np.asarray(w[key], float) for w in wells], axis=1).T
+            else:
+                values = np.array([w[key] for w in wells], dtype=float)
             if percentile is None:
                 vals = np.nanmean(values, axis=0)
                 sems = np.nanstd(values, axis=0) / np.sqrt(len(values))
@@ -176,8 +181,8 @@ def plot_by_label(
             else:
                 vals = np.nanmedian(values, axis=0)
                 mins = np.nanpercentile(values, percentile, axis=0)
-                maxs = np.nanpercentile(values, 1.0 - percentile, axis=0)
-            _label = '(mean ± 1 standard error)' if percentile is None else f'(median ({percentile}th-{percentile}th percentile))'
+                maxs = np.nanpercentile(values, 100 - percentile, axis=0)
+            _label = '(mean ± 1 standard error)' if percentile is None else f'(median ({percentile}th-{100-percentile}th percentile))'
             plot_val_range(
                 ax,
                 times[start_at:],
