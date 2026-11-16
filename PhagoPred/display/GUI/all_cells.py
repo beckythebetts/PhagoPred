@@ -1,5 +1,5 @@
 from __future__ import annotations
-from functools import partial
+from functools import lru_cache, partial
 
 from pathlib import Path
 from typing import Callable
@@ -14,11 +14,36 @@ from tqdm import tqdm
 from PhagoPred.display.GUI.one_cell import CellViewer
 from PhagoPred.utils.h5_file import H5File
 
+# Recently shown frames kept in memory, so scrubbing back over them doesn't
+# re-read the (remote) file
+FRAME_CACHE_SIZE = 32
+
+
+def _alive_seg_reader(h5: H5File) -> Callable[[int], np.ndarray]:
+    """get_frame(i) for segmentations with bad tracks and dead cells hidden
+    (as get_segs(filter_bad=True, alive_only=True)), reading the per-cell
+    tables once up front instead of on every frame."""
+    # Own instance: h5 itself has its bad-track filter turned off
+    filtered = H5File(h5.path)
+    good = filtered.good_cells
+    death = filtered.death_frames
+    # (cells + 1,): last entry is background (-1), which is never hidden
+    num_cells = len(good)
+
+    def get_frame(i: int) -> np.ndarray:
+        segs = h5.get_segs(i)
+        hide = np.zeros(num_cells + 1, dtype=bool)
+        hide[:-1] = ~good | (death <= i)  # NaN death compares False
+        return np.where(hide[segs], -1, segs).astype(segs.dtype)
+
+    return get_frame
+
 
 def _lazy_stack(get_frame: Callable[[int], np.ndarray], shape: tuple,
                 dtype: np.dtype) -> da.Array:
     """(T, H, W) dask array reading each frame with get_frame only when
     napari displays it, so no file is held open."""
+    get_frame = lru_cache(maxsize=FRAME_CACHE_SIZE)(get_frame)
     frames = [
         da.from_delayed(dask.delayed(get_frame)(i),
                         shape=shape[1:],
@@ -150,10 +175,7 @@ class AllCellsViewer:
 
         seg_info = self.h5.ims_info(H5File.SEGS)
         if seg_info is not None:
-            self.seg_data = _lazy_stack(
-                partial(H5File(self.h5.path).get_segs,
-                        filter_bad=True,
-                        alive_only=True), *seg_info)
+            self.seg_data = _lazy_stack(_alive_seg_reader(self.h5), *seg_info)
 
         self.cell_info = {}
         for name, feature in [('Death', 'Death Frame'),

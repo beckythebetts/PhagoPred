@@ -3,7 +3,7 @@ import os
 
 from pathlib import Path
 from functools import cached_property
-from typing import Iterable
+from typing import Callable, Iterable
 
 import numpy as np
 import h5py
@@ -316,6 +316,40 @@ class H5File:
                   frames: int | list[int] | np.ndarray | slice | None = None,
                   region: tuple[slice, slice] | None = None) -> np.ndarray:
         return self._get_ims(self.PHASE, frames, region)
+
+    def get_crops(
+        self,
+        frames: range,
+        regions: list[tuple[slice, slice]],
+        progress: Callable[[int], None] | None = None,
+        threshold_epi: bool = True,
+    ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray]:
+        """Per-frame crops of Phase, Epi (None if absent) and Segmentations.
+
+        Opens the file once for everything, which matters a lot on a remote
+        mount where each open costs several round trips. regions[i] is the
+        (rows, cols) crop for frames[i]; crops must all be the same shape.
+        """
+        n = len(frames)
+        with self._open() as f:
+            shape = (n, ) + tuple(s.stop - s.start
+                                  for s in regions[0]) if n else (0, )
+            phase_ds, segs_ds = f[self.PHASE], f[self.SEGS]
+            epi_ds = f[self.FLUOR] if self.FLUOR in f else None
+            phase = np.empty(shape, dtype=phase_ds.dtype)
+            segs = np.empty(shape, dtype=segs_ds.dtype)
+            epi = None if epi_ds is None else np.empty(shape,
+                                                       dtype=epi_ds.dtype)
+            for i, (frame, (rows, cols)) in enumerate(zip(frames, regions)):
+                phase[i] = phase_ds[frame, rows, cols]
+                segs[i] = segs_ds[frame, rows, cols]
+                if epi is not None:
+                    epi[i] = epi_ds[frame, rows, cols]
+                if progress is not None:
+                    progress(i)
+        if threshold_epi:
+            epi[epi < self.EPI_THRESHOLD] = 0
+        return phase, epi, segs
 
     # === UTILS ===
 

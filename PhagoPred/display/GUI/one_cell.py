@@ -174,14 +174,6 @@ class CellLoaderThread(QThread):
             self.start_signal.emit(self.n_frames)
 
             im_shape = self.h5.im_dims
-            crop_shape = (self.n_frames, self.frame_size, self.frame_size)
-            # Crops keep each stack's dtype (e.g. uint16 Epi)
-            phase_data = np.empty(crop_shape,
-                                  dtype=self.h5.ims_info(H5File.PHASE)[1])
-            epi_info = self.h5.ims_info(H5File.FLUOR)
-            epi_data = (None if epi_info is None else np.empty(
-                crop_shape, dtype=epi_info[1]))
-            mask = np.empty(crop_shape, dtype=np.int32)
 
             frames = slice(self.first_frame, self.last_frame)
             x_centres = tools.fill_nans(
@@ -189,19 +181,19 @@ class CellLoaderThread(QThread):
             y_centres = tools.fill_nans(
                 self.h5.get_features('Y', self.cell_idx, frames))
 
+            regions = []
             for idx in range(self.n_frames):
-                frame_idx = self.first_frame + idx
                 # 'X' is the row centroid and 'Y' the column, so the centre
                 # must be passed as (row, col) to match im_shape = (H, W)
                 rmin, rmax, cmin, cmax = mask_funcs.get_crop_indices(
                     (x_centres[idx], y_centres[idx]), self.frame_size,
                     im_shape)
-                region = (slice(rmin, rmax), slice(cmin, cmax))
-                phase_data[idx] = self.h5.get_phase(frame_idx, region)
-                if epi_data is not None:
-                    epi_data[idx] = self.h5.get_epi(frame_idx, region)
-                mask[idx] = self.h5.get_segs(frame_idx, region)
-                self.progress.emit(idx)
+                regions.append((slice(rmin, rmax), slice(cmin, cmax)))
+
+            # One file open for all three stacks (opens are slow remotely)
+            phase_data, epi_data, mask = self.h5.get_crops(
+                range(self.first_frame, self.last_frame), regions,
+                self.progress.emit)
 
             cell_mask = (mask == self.cell_idx)
 
