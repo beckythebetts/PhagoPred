@@ -17,7 +17,8 @@ from PhagoPred.survival_v2.interpret.plots import (
     feature_panel,
     dataset_average,
     sample_indices,
-    spread_segments,
+    per_frame,
+    observed_length,
 )
 from .experiment_record_dataclass import ExperimentRecord
 
@@ -91,11 +92,12 @@ def _nanstd(stack: np.ndarray) -> np.ndarray:
 
 
 def _pad(arr: np.ndarray, length: int) -> np.ndarray:
-    """NaN-pad the last axis out to ``length`` (no-op if already long enough)."""
+    """NaN-pad the last axis on the left out to ``length`` (no-op if already
+    long enough), keeping arrays right-aligned on the landmark."""
     pad_width = length - arr.shape[-1]
     if pad_width <= 0:
         return arr
-    widths = [(0, 0)] * (arr.ndim - 1) + [(0, pad_width)]
+    widths = [(0, 0)] * (arr.ndim - 1) + [(pad_width, 0)]
     return np.pad(arr, widths, constant_values=np.nan)
 
 
@@ -173,8 +175,6 @@ def _sample_data(
     """Signed, per-key heatmap/temporal/feature arrays for one sample (no
     averaging) — the row-comparison counterpart of
     ``interpret.plots.plot_sample_on_axes``."""
-    lf = sample.landmark_frame
-
     def _norm(values):
         values = np.asarray(values, dtype=float)
         total = np.nansum(np.abs(values))
@@ -189,19 +189,11 @@ def _sample_data(
             heatmaps[key] = temporal[key] = feature[key] = None
             continue
 
-        if result.temporal_feature is not None:
-            tf = result.temporal_feature
-            if result.segment_boundaries is not None and tf.shape[-1] != lf:
-                tf = spread_segments(tf, result.segment_boundaries)
-            heatmaps[key] = tf
-        else:
-            heatmaps[key] = None
-
+        heatmaps[key] = per_frame(result.temporal_feature,
+                                  result.segment_boundaries)
         if result.temporal is not None:
-            values = result.temporal
-            if result.segment_boundaries is not None and len(values) != lf:
-                values = spread_segments(values, result.segment_boundaries)
-            temporal[key] = _norm(values)
+            temporal[key] = _norm(
+                per_frame(result.temporal, result.segment_boundaries))
         else:
             temporal[key] = None
 
@@ -249,7 +241,7 @@ def plot_shap_average_across_models(
                  _model_label(record, varying_params),
                  avg.heatmaps,
                  avg.feature_names,
-                 avg.max_lf,
+                 avg.n_frames,
                  lambda key, unit=unit: f"{key.replace('_', ' ').capitalize()}  {unit}",
                  temporal_series,
                  feature_series,
@@ -307,7 +299,7 @@ def plot_shap_fold_average_across_models(
                     ax.set_axis_off()
                 continue
 
-            max_lf = max(a.max_lf for a in averages)
+            n_frames = max(a.n_frames for a in averages)
             feature_names = averages[0].feature_names
 
             heat_mean: dict[str, np.ndarray | None] = {}
@@ -317,13 +309,13 @@ def plot_shap_fold_average_across_models(
             feature_err: dict[str, tuple] = {}
             for k in _KEYS:
                 heat_arrs = [
-                    _pad(a.heatmaps[k], max_lf) for a in averages
+                    _pad(a.heatmaps[k], n_frames) for a in averages
                     if a.heatmaps.get(k) is not None
                 ]
                 heat_mean[k] = _nanmean(np.stack(heat_arrs)) if heat_arrs else None
 
                 temp_arrs = [
-                    _pad(a.temporal[k], max_lf) for a in averages
+                    _pad(a.temporal[k], n_frames) for a in averages
                     if a.temporal.get(k) is not None
                 ]
                 if temp_arrs:
@@ -342,7 +334,7 @@ def plot_shap_fold_average_across_models(
                     feature_err[k] = (feature_names, _nanstd(feat_stack))
 
             support = np.nansum(np.stack(
-                [_pad(a.support, max_lf) for a in averages]),
+                [_pad(a.support, n_frames) for a in averages]),
                                 axis=0)
 
             _row(
@@ -350,7 +342,7 @@ def plot_shap_fold_average_across_models(
                 label,
                 heat_mean,
                 feature_names,
-                max_lf,
+                n_frames,
                 lambda key, unit=unit, n=len(averages): (
                     f"{key.replace('_', ' ').capitalize()}  fold mean "
                     f"({n} folds)  {unit}"),
@@ -417,7 +409,7 @@ def plot_shap_samples_across_models(
                      _model_label(record, varying_params),
                      heatmaps,
                      sample.feature_names,
-                     lf,
+                     observed_length(sample),
                      lambda key: f"{key.replace('_', ' ').capitalize()} SHAP",
                      temporal_series,
                      feature_series,

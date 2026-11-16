@@ -1,3 +1,4 @@
+from __future__ import annotations
 from pathlib import Path
 from typing import Literal, Optional, Union
 import logging
@@ -36,8 +37,8 @@ def _restore_calibration(model, cfg: ExperimentCfg) -> None:
 
 def load_model(
     experiment_dir: Union[str, Path],
-    device: str = "cpu",
-) -> tuple[Union[SurvivalModel, ClassicalSurvivalModel], ExperimentCfg, dict]:
+    device: str | None = None,
+) -> tuple[Union[SurvivalModel, ClassicalSurvivalModel], ExperimentCfg]:
     """
     Load a trained model from an experiment directory.
 
@@ -56,6 +57,8 @@ def load_model(
                     'normalisation_means' and 'normalisation_stds').
                     For classical models, an empty dict.
     """
+    if device is None:
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
     log.info(f'Loading model from {experiment_dir} to {device}')
     experiment_dir = Path(experiment_dir)
     config_path = experiment_dir / "config.json"
@@ -75,9 +78,8 @@ def load_model(
         log.info('Building Random Forest Model')
         model = ClassicalSurvivalModel.load(str(model_path))
         _restore_calibration(model, cfg)
-        return model, cfg, {}
+        return model, cfg
 
-    # Deep model: reconstruct architecture then load weights
     log.info(f'Building model {cfg.model.model_type}')
     model = build_model(
         cfg.model,
@@ -90,10 +92,14 @@ def load_model(
 
     checkpoint = torch.load(model_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
+    if cfg.dataset.normalisation_means is None:
+        cfg.dataset.normalisation_means = list(
+            checkpoint['normalisation_means'])
+        cfg.dataset.normalisation_stds = list(checkpoint['normalisation_stds'])
     model.eval()
     _restore_calibration(model, cfg)
 
-    return model, cfg, checkpoint
+    return model, cfg
 
 
 def load_dataset(
@@ -181,19 +187,3 @@ def load_dataset(
         dataset.apply_normalisation()
 
     return dataset
-
-
-def get_normalisation_stats(
-    checkpoint: dict, ) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Extract normalisation means and stds from a deep model checkpoint.
-
-    Args:
-        checkpoint: The dict returned as the third element of load_model.
-
-    Returns:
-        (means, stds) as numpy arrays, or (None, None) for classical models.
-    """
-    means = checkpoint.get("normalisation_means")
-    stds = checkpoint.get("normalisation_stds")
-    return means, stds

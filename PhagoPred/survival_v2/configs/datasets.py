@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Union, Type
+from typing import Union, Literal
 from collections import defaultdict
 import numpy as np
 import h5py
@@ -9,6 +9,14 @@ import h5py
 from PhagoPred.utils.logger import get_logger
 
 log = get_logger()
+
+
+@dataclass
+class PredictionTarget:
+    dataset_type: Literal['survival', 'binary']
+    min_length: int
+    horizon: int | None = None
+    bins: tuple[int, ...] | None = None
 
 
 @dataclass
@@ -28,6 +36,8 @@ class DatasetCfg:
     calibrate_paths: list[Union[Path, str]] = field(default=list,
                                                     compare=False)
 
+    shap_paths: list[Union[Path, str]] = field(default=list, compare=False)
+
     num_cells: int | None = None
 
     normalisation_means: list[float] = field(default=None,
@@ -37,6 +47,10 @@ class DatasetCfg:
                                             compare=False,
                                             repr=False)
 
+    @property
+    def prediction_target(self) -> PredictionTarget:
+        raise NotImplementedError
+
 
 @dataclass
 class SurvivalDatasetCfg(DatasetCfg):
@@ -45,6 +59,12 @@ class SurvivalDatasetCfg(DatasetCfg):
     max_time_to_death: int = 0
     name: str = ''
     bins: list[int] | None = field(default=None, compare=False)
+
+    @property
+    def prediction_target(self):
+        return PredictionTarget('survival',
+                                self.min_length,
+                                bins=tuple(self.bins) if self.bins else None)
 
 
 @dataclass
@@ -56,7 +76,12 @@ class BinaryDatasetCfg(DatasetCfg):
     name: str = ''
     class_names: list[str] = field(
         default_factory=lambda: ['No Event', 'Event'])
-    #
+
+    @property
+    def prediction_target(self):
+        return PredictionTarget('binary',
+                                self.min_length,
+                                horizon=self.prediction_horizon)
 
 
 @dataclass
@@ -165,7 +190,9 @@ def get_kfold_dataset() -> list:
         return []
 
 
-def _graph_binary(scenario: str, name: str) -> BinaryDatasetCfg:
+def _graph_binary(scenario: str,
+                  name: str,
+                  min_length: int = 50) -> BinaryDatasetCfg:
     """Binary config for a graph-synthetic scenario, whose train/val/cal
     files are named after the scenario's ``filename``."""
     root = 'PhagoPred/Datasets/graph_synthetic'
@@ -173,7 +200,7 @@ def _graph_binary(scenario: str, name: str) -> BinaryDatasetCfg:
         train_paths=[f'{root}/{scenario}_train.h5'],
         val_paths=[f'{root}/{scenario}_val.h5'],
         calibrate_paths=[f'{root}/{scenario}_cal.h5'],
-        min_length=50,
+        min_length=min_length,
         prediction_horizon=25,
         name=name,
     )
@@ -319,6 +346,24 @@ DATASETS = {
     _graph_binary('multiplicative_hazard', 'Graph Multiplicative Hazard'),
     'Binary Graph Threshold Hazard':
     _graph_binary('threshold_hazard', 'Graph Threshold Hazard'),
+    # Fully predictable variants (scenarios.FP_CFGS): min_length skips the
+    # hazard's ~150-frame start-up ramp.
+    'Binary Graph Linear FP':
+    _graph_binary('linear_fp', 'Graph Linear FP', min_length=150),
+    'Binary Graph Linear Chain FP':
+    _graph_binary('linear_chain_fp', 'Graph Linear Chain FP', min_length=150),
+    'Binary Graph Nonlinear Chain FP':
+    _graph_binary('nonlinear_chain_fp',
+                  'Graph Nonlinear Chain FP',
+                  min_length=150),
+    'Binary Graph Multiplicative Hazard FP':
+    _graph_binary('multiplicative_hazard_fp',
+                  'Graph Multiplicative Hazard FP',
+                  min_length=150),
+    'Binary Graph Threshold Hazard FP':
+    _graph_binary('threshold_hazard_fp',
+                  'Graph Threshold Hazard FP',
+                  min_length=150),
 }
 FEATURE_COMBOS = {
     'All': [

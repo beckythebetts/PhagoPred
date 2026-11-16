@@ -110,7 +110,7 @@ def _plot_experiment_losses_on_ax(
 
         plot_med_range_on_ax(
             ax,
-            np.arange(len(val_losses[0])),
+            np.arange(max(len(v) for v in val_losses)),
             val_losses,
             cmap(i),
             percentile_range,

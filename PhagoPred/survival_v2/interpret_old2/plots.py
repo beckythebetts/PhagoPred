@@ -36,6 +36,10 @@ SHAP_PANELS = {
     'ground_truth_observational', 'kernel_observational'
 }
 DEFAULT_PANELS = {name: True for name in PANEL_ORDER}
+# Time axes are aligned on the landmark (0 = landmark, negative = before it),
+# not the start of the observed window: samples start at different frames, and
+# what matters for a prediction is how recently something happened.
+LANDMARK_XLABEL = 'frames relative to landmark'
 # MODEL_ONLY_PANELS = {
 #     'signals': True,
 #     'interventional': False,
@@ -63,13 +67,16 @@ def heatmap_panel(
     row_normalise: bool = False,
     diverging: bool = True,
 ) -> None:
-    """(feature x frame) heatmap on a shared [0, n_frames) axis.
+    """(feature x frame) heatmap on a frames-to-landmark axis [-n_frames, 0).
+
+    The matrix's columns are taken to be the ``n_frames`` frames immediately
+    before the landmark, so the right-hand edge is always the landmark itself.
     """
     m = np.asarray(matrix, dtype=float)
     if row_normalise:
         scale = np.nanmax(np.abs(m), axis=1, keepdims=True)
         m = m / np.where(scale == 0.0, 1.0, scale)
-    extent = [0, n_frames, -0.5, m.shape[0] - 0.5]
+    extent = [-n_frames, 0, -0.5, m.shape[0] - 0.5]
 
     vmax = max(float(np.nanmax(np.abs(m))), 1e-9)
     vmin = -vmax if diverging else 0.0
@@ -84,7 +91,7 @@ def heatmap_panel(
                    interpolation='nearest')
     ax.set_yticks(range(len(row_labels)))
     ax.set_yticklabels(row_labels, fontsize=8)
-    ax.set_xlabel('frame', fontsize=8)
+    ax.set_xlabel(LANDMARK_XLABEL, fontsize=8)
     ax.set_title(title, fontsize=8)
     ax.figure.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
 
@@ -110,6 +117,26 @@ def spread_segments(values: np.ndarray, boundaries: np.ndarray) -> np.ndarray:
     return np.repeat(density, seg_len, axis=-1)
 
 
+def per_frame(values: np.ndarray | None,
+              boundaries: np.ndarray | None) -> np.ndarray | None:
+    """``values`` on a per-frame last axis, spreading per-segment values if
+    that's what they are (one value per segment in ``boundaries``)."""
+    if values is None or boundaries is None:
+        return values
+    if values.shape[-1] == len(boundaries) - 1:
+        return spread_segments(values, boundaries)
+    return values
+
+
+def observed_length(sample: SampleWithSHAP) -> int:
+    """Frames the model saw before the landmark.
+
+    Real-data samples store ``[start_frame, lf)`` (shorter than ``lf`` when
+    the window doesn't start at 0); ground-truth ones store ``[0, lf+horizon)``.
+    """
+    return min(sample.landmark_frame, sample.feature_vals.shape[1])
+
+
 def temporal_panel(
     ax: plt.Axes,
     series: dict[str, np.ndarray],
@@ -126,18 +153,18 @@ def temporal_panel(
     long-``lf`` samples and are correspondingly noisy. ``err`` (fold averages
     only) shades mean +/- err as a band per series, e.g. the std across
     kfold/repeat runs being averaged together.
+
+    Every array is right-aligned on the landmark: its last value is the frame
+    just before it (x = -1).
     """
     for name, values in series.items():
         if values is None:
             continue
         color = SERIES_STYLE.get(name, {}).get('color')
-        ax.plot(np.arange(len(values)),
-                values,
-                label=name,
-                **SERIES_STYLE.get(name, {}))
+        x = np.arange(-len(values), 0)
+        ax.plot(x, values, label=name, **SERIES_STYLE.get(name, {}))
         spread = None if err is None else err.get(name)
         if spread is not None:
-            x = np.arange(len(values))
             ax.fill_between(x,
                             values - spread,
                             values + spread,
@@ -146,7 +173,7 @@ def temporal_panel(
                             linewidth=0)
     if support is not None:
         twin = ax.twinx()
-        twin.fill_between(np.arange(len(support)),
+        twin.fill_between(np.arange(-len(support), 0),
                           support,
                           color='grey',
                           alpha=0.12,
@@ -156,9 +183,9 @@ def temporal_panel(
         twin.set_zorder(ax.get_zorder() - 1)
         ax.patch.set_visible(False)
     if n_frames is not None:
-        ax.set_xlim(0, n_frames)
+        ax.set_xlim(-n_frames, 0)
     ax.axhline(0.0, color='black', lw=0.5, alpha=0.4)
-    ax.set_xlabel('frame', fontsize=8)
+    ax.set_xlabel(LANDMARK_XLABEL, fontsize=8)
     ax.set_ylabel('importance', fontsize=8)
     ax.set_title(title, fontsize=8)
     ax.legend(fontsize=6)
@@ -342,6 +369,7 @@ def plot_sample_on_axes(
 
     sample = SampleWithSHAP.read_h5(h5_path, sample_idx)
     lf = sample.landmark_frame
+    n_obs = observed_length(sample)
     death_str = 'censored' if sample.death_frame is None else f'{sample.death_frame:.0f}'
     axes = list(axes)
 
@@ -383,11 +411,13 @@ def plot_sample_on_axes(
         if sample.feature_vals is None:
             _missing(ax, 'signals')
         else:
+            # Ground-truth samples also store frames past the landmark; crop
+            # so this panel shares the SHAP panels' x range.
             heatmap_panel(
                 ax,
-                sample.feature_vals,
+                sample.feature_vals[:, :n_obs],
                 sample.feature_names,
-                lf,
+                n_obs,
                 f'Signals (row-normalised)  lf={lf}  death={death_str}',
                 row_normalise=True)
 
@@ -401,7 +431,7 @@ def plot_sample_on_axes(
             _missing(ax, f'{key} shap_vals')
         else:
             heatmap_panel(ax, shap_results.temporal_feature,
-                          sample.feature_names, lf,
+                          sample.feature_names, n_obs,
                           f"{key.replace('_', ' ').capitalize()} SHAP")
 
     # PLOT TEMPORAL SHAP
@@ -409,17 +439,14 @@ def plot_sample_on_axes(
 
     def _temporal_series(key: str) -> np.ndarray | None:
         result = _get_shap_results(key)
-        if result is None or result.temporal is None:
+        if result is None:
             return None
-        values = result.temporal
-        if result.segment_boundaries is not None and len(values) != lf:
-            values = spread_segments(values, result.segment_boundaries)
-        return values
+        return per_frame(result.temporal, result.segment_boundaries)
 
     if panels['temporal']:
         ax = _next()
         series = {k: _temporal_series(k) for k in SHAP_PANELS}
-        temporal_panel(ax, series, 'Temporal', n_frames=lf)
+        temporal_panel(ax, series, 'Temporal', n_frames=n_obs)
 
     if panels['feature']:
         ax = _next()
@@ -522,18 +549,20 @@ def plot_samples(
 @dataclass
 class DatasetAverage:
     """Per-SHAP-key mean |SHAP| over every sample in a stored file, on a shared
-    absolute frame axis. Pure data, kept separate from ``plot_dataset_average``
-    so cross-experiment comparisons (see
+    landmark-aligned frame axis: the last column of every per-frame array is
+    the frame just before the landmark, column ``-k`` is ``k`` frames before
+    it. Pure data, kept separate from ``plot_dataset_average`` so
+    cross-experiment comparisons (see
     ``experiments/plots/plot_shap_importance.py``) can lay several of these
     out as rows without recomputing or duplicating the averaging logic.
     """
     feature_names: list[str]
-    max_lf: int
+    n_frames: int  # longest observed history before the landmark
     num_samples: int
-    heatmaps: dict[str, np.ndarray | None]  # key -> (n_features, max_lf)
-    temporal: dict[str, np.ndarray | None]  # key -> (max_lf,)
+    heatmaps: dict[str, np.ndarray | None]  # key -> (n_features, n_frames)
+    temporal: dict[str, np.ndarray | None]  # key -> (n_frames,)
     feature: dict[str, np.ndarray | None]  # key -> (n_features,)
-    support: np.ndarray  # (max_lf,) samples reaching each frame
+    support: np.ndarray  # (n_frames,) samples reaching back to each frame
 
 
 def dataset_average(h5_path: Path | str,
@@ -547,10 +576,11 @@ def dataset_average(h5_path: Path | str,
     ``plot_sample_on_axes`` keep the sign instead, since there it's what makes
     a single explanation readable).
 
-    Samples have different landmark frames, so maps/curves are stacked on a
-    shared absolute frame axis and NaN-padded before averaging; ``support`` is
-    how many samples reach each frame — the right-hand columns average over
-    just the handful of long-``lf`` samples and are correspondingly noisy.
+    Samples have different history lengths, so maps/curves are right-aligned
+    on the landmark and NaN-padded on the left before averaging; ``support``
+    is how many samples reach back to each frame — the left-hand columns
+    average over just the handful of long-history samples and are
+    correspondingly noisy.
 
     ``normalise`` (default) rescales each series to sum to 1 after averaging,
     so estimators are compared on *relative* importance — the baseline choice
@@ -563,7 +593,7 @@ def dataset_average(h5_path: Path | str,
     samples = [SampleWithSHAP.read_h5(h5_path, i) for i in indices]
 
     keys = [k for k in PANEL_ORDER if k in SHAP_PANELS]
-    max_lf = max(s.landmark_frame for s in samples)
+    n_frames = max(observed_length(s) for s in samples)
     feature_names = samples[0].feature_names
 
     def _get(sample: SampleWithSHAP, key: str) -> SHAPResult | None:
@@ -577,30 +607,28 @@ def dataset_average(h5_path: Path | str,
         total = np.nansum(np.abs(values))
         return values / total if (normalise and total > 0) else values
 
-    support = np.zeros(max_lf)
+    support = np.zeros(n_frames)
     for sample in samples:
-        support[:sample.landmark_frame] += 1
+        support[n_frames - observed_length(sample):] += 1
 
     heatmaps: dict[str, np.ndarray | None] = {}
     temporal: dict[str, np.ndarray | None] = {}
     feature: dict[str, np.ndarray | None] = {}
 
     for key in keys:
-        heat_stack = np.full((len(samples), len(feature_names), max_lf),
+        heat_stack = np.full((len(samples), len(feature_names), n_frames),
                              np.nan)
-        temp_stack = np.full((len(samples), max_lf), np.nan)
+        temp_stack = np.full((len(samples), n_frames), np.nan)
         feat_rows = []
         for i, sample in enumerate(samples):
             result = _get(sample, key)
             if result is None:
                 continue
-            lf = sample.landmark_frame
+            n_obs = observed_length(sample)
 
             if result.temporal_feature is not None:
-                tf = result.temporal_feature
-                if result.segment_boundaries is not None and tf.shape[
-                        -1] != lf:
-                    tf = spread_segments(tf, result.segment_boundaries)
+                tf = per_frame(result.temporal_feature,
+                               result.segment_boundaries)[:, :n_obs]
                 # Kernel SHAP's rows only cover the model's own input
                 # features (e.g. no Hazard), a subset/reorder of
                 # sample.feature_names — align by name rather than assuming
@@ -609,14 +637,12 @@ def dataset_average(h5_path: Path | str,
                 for r, name in enumerate(feature_names):
                     row = row_lookup.get(name)
                     if row is not None:
-                        heat_stack[i, r, :lf] = np.abs(row[:lf])
+                        heat_stack[i, r, n_frames - len(row):] = np.abs(row)
 
             if result.temporal is not None:
-                values = result.temporal
-                if result.segment_boundaries is not None and len(
-                        values) != lf:
-                    values = spread_segments(values, result.segment_boundaries)
-                temp_stack[i, :lf] = np.abs(values[:lf])
+                values = per_frame(result.temporal,
+                                   result.segment_boundaries)[:n_obs]
+                temp_stack[i, n_frames - len(values):] = np.abs(values)
 
             if result.feature is not None:
                 lookup = dict(zip(sample.feature_names, np.abs(
@@ -630,7 +656,7 @@ def dataset_average(h5_path: Path | str,
         feature[key] = (None if not feat_rows else _norm(
             np.nanmean(np.asarray(feat_rows), axis=0)))
 
-    return DatasetAverage(feature_names, max_lf, len(samples), heatmaps,
+    return DatasetAverage(feature_names, n_frames, len(samples), heatmaps,
                           temporal, feature, support)
 
 
@@ -668,7 +694,7 @@ def plot_dataset_average(
         if avg.heatmaps[key] is None:
             _missing(ax, f'{key} shap_vals')
             continue
-        heatmap_panel(ax, avg.heatmaps[key], avg.feature_names, avg.max_lf,
+        heatmap_panel(ax, avg.heatmaps[key], avg.feature_names, avg.n_frames,
                       f"{key.replace('_', ' ').capitalize()}  {unit}",
                       diverging=False)
 
@@ -679,7 +705,7 @@ def plot_dataset_average(
         temporal_panel(ax,
                        avg.temporal,
                        f'Temporal importance  {unit}',
-                       n_frames=avg.max_lf,
+                       n_frames=avg.n_frames,
                        support=avg.support)
 
     ax = axes.pop(0)

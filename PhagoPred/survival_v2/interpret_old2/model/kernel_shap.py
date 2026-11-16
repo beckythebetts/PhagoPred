@@ -11,7 +11,8 @@ import shap
 from PhagoPred.survival_v2.models import SurvivalModel
 from PhagoPred.survival_v2.interpret import (SampleWithSHAP, SHAPResult,
                                              ExplainerEnum, BackgroundEnum)
-from .var_precision import VARFit, VARPrecision, build_precision, sample_conditional
+from .var_precision import (VARFit, VARPrecision, build_precision,
+                            default_burn_in, sample_conditional)
 from .utils import align_sample_features
 
 
@@ -74,19 +75,28 @@ class ObservationalBackground(BackgroundStrategy):
     sample-length ``T`` on first use (cached thereafter) since different real
     samples generally have different observed lengths — only the expensive
     global coefficient fit is meant to happen once.
+
+    ``burn_in``: free context frames before each window, so its start isn't
+    pinned near the mean (see ``build_precision``). None picks it from the
+    fit's persistence (``default_burn_in``); 0 disables it.
     """
 
     background = BackgroundEnum.OBSERVATIONAL
 
-    def __init__(self, var_fit: VARFit, num_cond_samples: int = 8):
+    def __init__(self,
+                 var_fit: VARFit,
+                 num_cond_samples: int = 8,
+                 burn_in: int | None = None):
         self.var_fit = var_fit
         self.num_cond_samples = num_cond_samples
+        self.burn_in = (default_burn_in(var_fit)
+                        if burn_in is None else burn_in)
         self._cache: dict[int, VARPrecision] = {}
         self._xi: np.ndarray | None = None
 
     def _precision_for(self, T: int) -> VARPrecision:
         if T not in self._cache:
-            self._cache[T] = build_precision(self.var_fit, T)
+            self._cache[T] = build_precision(self.var_fit, T, self.burn_in)
         return self._cache[T]
 
     def new_explanation(self, T: int) -> None:

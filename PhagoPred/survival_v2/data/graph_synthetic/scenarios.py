@@ -1,453 +1,186 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Literal
+import json
 
 import numpy as np
 
-from . import base_funcs, noise_funcs
-import h5py
-
-from .generate_datasets import generate_dataset, calibrate_hazard, load_hazard_func, estimate_variances
-# from .predictability import compute_h_var  # unused; compute_h_var is currently commented out in predictability.py
+from PhagoPred.utils.logger import get_logger
+from .noise_funcs import Noise
+from .hazard import HazardFunc, calibrate_hazard
 from .graph import Feature, CausalGraph
-from .rules import (Rule, ReLU, Threshold, Sigmoid, Var, AutoCorrelationRule,
-                    MeanReversionRule, Sin
-                    # expand_to_noise,
-                    )
+from .rules import Rule
+from .rule_sets import RULE_SETS
+from .dataset_file import read_scenario_dict
+
+log = get_logger()
 
 
 @dataclass
-class VarianceResult:
-    total: np.ndarray
-    unobserved: np.ndarray
+class Missingness:
+    """Parameters for missing time steps.
 
-
-@dataclass
-class ScenarioVariances:
-    cdf: VarianceResult | None = None
-    hazard: dict[str, VarianceResult] = field(default_factory=dict)
-    # hazard keys: 'default' for no bins, '0_50_100' etc. for binned
-
-
-@dataclass
-class NoiseCfg:
-    """Paramaters for adding noise to datasets"""
-    pre_noise: noise_funcs.Noise = noise_funcs.GaussianNoise(sigma=1.0)
-    post_noise: noise_funcs.Noise = noise_funcs.GaussianNoise(sigma=1.0)
-
-
-@dataclass
-class MissingnessCfg:
-    """Paramaters for missing time steps"""
-    prob_missing: float = 0.0
-    late_entry_prob: float = 0.5
+    ``max_*_frac`` are fractions of the window: a late-entering cell starts in
+    [0, max_late_entry_frac * num_frames), an early-exiting one ends in the
+    last max_early_exit_frac of it."""
+    prob_missing: float = 0.0  # per-frame probability a frame is masked
+    late_entry_prob: float = 0.0
     max_late_entry_frac: float = 0.49
-    early_exit_prob: float = 0.5
+    early_exit_prob: float = 0.0
     max_early_exit_frac: float = 0.49
+
+    @classmethod
+    def none(cls) -> Missingness:
+        return cls()
+
+    @classmethod
+    def low(cls) -> Missingness:
+        return cls(late_entry_prob=0.2, early_exit_prob=0.2)
+
+    @property
+    def label(self) -> str:
+        for preset in ('none', 'low'):
+            if self == getattr(Missingness, preset)():
+                return preset
+        return 'custom'
+
+    def sample_observed_ranges(
+            self, num_frames: int,
+            num_cells: int) -> tuple[np.ndarray, np.ndarray]:
+        """First and last observed frame (inclusive) of each cell.
+
+        Without late entry, cells start in the first 10 frames; late entrants
+        start uniformly in [0, max_late_entry_frac * num_frames). Likewise for
+        the end of the window and early exit."""
+        if self.late_entry_prob > 0.0:
+            start = np.zeros(num_cells, dtype=int)
+            late = np.random.rand(num_cells) < self.late_entry_prob
+            start[late] = np.random.randint(
+                0,
+                max(1, int(self.max_late_entry_frac * num_frames)),
+                size=int(late.sum()))
+        else:
+            start = np.random.randint(0, 10, size=num_cells)
+
+        if self.early_exit_prob > 0.0:
+            end = np.full(num_cells, num_frames - 1, dtype=int)
+            early = np.random.rand(num_cells) < self.early_exit_prob
+            end[early] = np.random.randint(
+                int(num_frames - self.max_early_exit_frac * num_frames),
+                num_frames,
+                size=int(early.sum()))
+        else:
+            end = np.random.randint(num_frames - 10,
+                                    num_frames,
+                                    size=num_cells)
+        return start, end
+
+    def sample_frame_mask(self, num_frames: int, num_cells: int) -> np.ndarray:
+        """(num_frames, num_cells) True where a frame is randomly missing."""
+        return np.random.rand(num_frames, num_cells) < self.prob_missing
 
 
 @dataclass
 class ScenarioCfg:
-    """Full paramaters fro creating a dataset"""
+    """Everything needed to generate a synthetic dataset, as plain values.
+
+    Saved as JSON in each generated file (see ``to_dict`` / ``load_scenario``),
+    so a dataset can always be rebuilt with the exact settings that made it.
+    The calibrated hazard function is generated, not configured: it is fitted
+    by ``calibrate_hazard`` and saved separately with the dataset."""
     filename: str
+    rules: list[Rule]
 
-    observed_features: list[str] = field(
-        default_factory=lambda: ['A', 'B', 'C', 'D', 'Hazard'])
-    hidden_features: list[str] = field(default_factory=lambda: [])
-
-    rules: list[Rule] = field(default_factory=lambda: [])
-
-    noise_cfg: NoiseCfg = NoiseCfg()
-    missingness_cfg: MissingnessCfg = MissingnessCfg()
+    pre_noise: Noise = field(default_factory=lambda: Noise.gaussian(0.5))
+    post_noise: Noise = field(default_factory=Noise.none)
+    hazard_pre_noise: Noise = field(default_factory=Noise.none)
+    missingness: Missingness = field(default_factory=Missingness)
 
     target_death_fraction: float = 0.5
-    train_num_cells: int = 5000
-    val_num_cells: int = 1000
-    cal_num_cells: int = 1000
-    num_frames: int = 500
-    # Frames simulated before frame 0 and discarded; the last death_burn_in of
-    # them run the death process, and cells dying there are rejected (only
-    # cells alive when observation starts are kept). 0 disables either.
+    num_files: int = 10
+    cells_per_file: int = 500
+    num_frames: int = 300
     burn_in: int = 0
     death_burn_in: int = 0
-    # Standard deviation of the Hazard signal after calibration's scaling,
-    # which sets how predictable deaths are (None: no rescaling).
     hazard_spread: float | None = 3.0
+    hazard_spread_start: int = 0
+    hazard_from_frame_0: bool = False
 
-    hazard_calibration_func: callable | None = None
-    variances: ScenarioVariances | None = field(default=None, init=False)
+    hazard_func: HazardFunc | None = field(default=None, compare=False)
 
     def __post_init__(self):
-        self.graph = CausalGraph(self._generate_features(),
+        self.graph = CausalGraph(self._features,
                                  self.rules,
-                                 self.num_frames,
                                  burn_in=self.burn_in,
-                                 death_burn_in=self.death_burn_in)
+                                 death_burn_in=self.death_burn_in,
+                                 hazard_from_frame_0=self.hazard_from_frame_0)
 
-    def _generate_features(self) -> list[Feature]:
-        assert not bool(
-            set(self.observed_features) & set(self.hidden_features))
-        features = []
-        for feature_name in self.observed_features:
-            if feature_name == 'Hazard':
-                features.append(
-                    Feature(feature_name, pre_noise=_hazard_noise.pre_noise))
-            else:
-                features.append(
-                    Feature(
-                        feature_name,
-                        pre_noise=self.noise_cfg.pre_noise,
-                        post_noise=self.noise_cfg.post_noise,
-                        hidden=False,
-                    ))
-        for feature_name in self.hidden_features:
-            features.append(
-                Feature(
-                    feature_name,
-                    pre_noise=self.noise_cfg.pre_noise,
-                    post_noise=self.noise_cfg.post_noise,
-                    hidden=True,
-                ))
-        return features
+    @property
+    def _features(self) -> list[Feature]:
+        names = sorted({n for r in self.rules for n in (r.target, *r.inputs)})
+        return [
+            Feature(n, pre_noise=self.hazard_pre_noise) if n == 'Hazard' else
+            Feature(n, pre_noise=self.pre_noise, post_noise=self.post_noise)
+            for n in names
+        ]
 
-    def calibrate_hazard(self,
-                         target_death_fraction: float = 0.5,
-                         num_samples: int = 200) -> None:
-        calib_starts = np.zeros(num_samples)
-        calib_ends = np.full(num_samples, self.num_frames)
-        self.hazard_calibration_func = calibrate_hazard(
+    def to_dict(self) -> dict:
+        """Plain-value dict of the scenario, including the fitted hazard
+        function if it has been calibrated."""
+        d = {
+            f.name: asdict(v) if is_dataclass(v) else v
+            for f in fields(self) if f.name != 'rules'
+            for v in [getattr(self, f.name)]
+        }
+
+        d['rules'] = [r.to_dict() for r in self.rules]
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict) -> ScenarioCfg:
+        d = dict(d)
+        d['rules'] = [Rule.from_dict(r) for r in d['rules']]
+        for key in ('pre_noise', 'post_noise', 'hazard_pre_noise'):
+            d[key] = Noise(**d[key])
+        d['missingness'] = Missingness(**d['missingness'])
+        if d.get('hazard_func') is not None:
+            d['hazard_func'] = HazardFunc(**d['hazard_func'])
+        return cls(**d)
+
+    def calibrate_hazard(self, num_samples: int = 200) -> None:
+        self.hazard_func = calibrate_hazard(
             self.graph,
             self.num_frames,
-            calib_starts,
-            calib_ends,
-            target_death_fraction,
+            np.zeros(num_samples),
+            np.full(num_samples, self.num_frames),
+            self.target_death_fraction,
             hazard_spread=self.hazard_spread,
+            spread_start=self.hazard_spread_start,
         )
 
-    def load(self, save_dir: Path) -> None:
-        """Load calibration and saved variances from a previously generated dataset."""
-        h5_path = Path(save_dir) / f'{self.filename}_train.h5'
-        with h5py.File(h5_path, 'r') as f:
-            self.hazard_calibration_func = load_hazard_func(
-                f['Cells']['Phase']['HazardRates'].attrs)
-            self.variances = ScenarioVariances()
-            if 'Cells/Phase/Variances' not in f:
-                return
-            vg = f['Cells/Phase/Variances']
-            if 'CDF' in vg:
-                ds = vg['CDF']
-                self.variances.cdf = VarianceResult(ds[0][:], ds[1][:])
-            for ds_name in vg:
-                if ds_name == 'CDF':
-                    continue
-                ds = vg[ds_name]
-                key = 'default' if ds_name == 'hazard' else ds_name[
-                    len('hazard_'):]
-                self.variances.hazard[key] = VarianceResult(ds[0][:], ds[1][:])
 
-    def generate(self, save_dir: Path) -> None:
-        """Generate and save train/val/cal datasets to save_dir/<filename>_{train,val,cal}.h5."""
-        save_dir = Path(save_dir)
-        generate_dataset(
-            train_filename=save_dir / f'{self.filename}_train.h5',
-            val_filename=save_dir / f'{self.filename}_val.h5',
-            cal_filename=save_dir /
-            f'{self.filename}_cal.h5' if self.cal_num_cells > 0 else None,
-            graph=self.graph,
-            train_num_cells=self.train_num_cells,
-            val_num_cells=self.val_num_cells,
-            cal_num_cells=self.cal_num_cells,
-            num_frames=self.num_frames,
-            late_entry_prob=self.missingness_cfg.late_entry_prob,
-            late_entry_range=(0, self.missingness_cfg.max_late_entry_frac *
-                              self.num_frames),
-            early_exit_prob=self.missingness_cfg.early_exit_prob,
-            early_exit_range=(
-                self.num_frames -
-                self.missingness_cfg.max_early_exit_frac * self.num_frames,
-                self.num_frames),
-            feature_mask_prob=self.missingness_cfg.prob_missing,
-            hazard_calibration_func=self.hazard_calibration_func,
-        )
-
-    # def get_variances(self,
-    #                   save_dir: Path,
-    #                   max_horizon: int,
-    #                   base_sample_size: int,
-    #                   branch_sample_size: int,
-    #                   hazard_bins: np.ndarray | None = None) -> None:
-    #     save_variances(
-    #         [
-    #             save_dir / f'{self.filename}_train.h5',
-    #             save_dir / f'{self.filename}_val.h5'
-    #         ],
-    #         self.graph,
-    #         self.hazard_calibration_func,
-    #         max_horizon,
-    #         self.num_frames,
-    #         base_sample_size,
-    #         branch_sample_size,
-    #         hazard_bins=hazard_bins,
-    #     )
-
-    def save_variances(self,
-                       save_dir: Path,
-                       max_horizon: int,
-                       base_sample_size: int = 200,
-                       branch_sample_size: int = 1000,
-                       warm_up_steps: int = 0,
-                       hazard_bins: np.ndarray | None = None,
-                       force: bool = False,
-                       landmark_distribution: np.ndarray | None = None):
-        variances = estimate_variances(
-            self.graph,
-            self.hazard_calibration_func,
-            max_horizon,
-            self.num_frames - max_horizon,
-            base_sample_size,
-            branch_sample_size,
-            warm_up_steps,
-            hazard_bins,
-            landmark_distribution,
-        )
-        hazard_ds = 'hazard' if hazard_bins is None else 'hazard_' + '_'.join(
-            str(int(n)) for n in hazard_bins)
-        name_map = {'cdf': 'CDF', 'hazard': hazard_ds}
-
-        for split in ('train', 'val'):
-            file = save_dir / f'{self.filename}_{split}.h5'
-            with h5py.File(file, 'r+') as f:
-                variances_group = f.require_group('Cells/Phase/Variances')
-                for var_key, ds_name in name_map.items():
-                    if ds_name in variances_group:
-                        if not force and var_key == 'cdf':
-                            continue
-                        del variances_group[ds_name]
-                    ds = variances_group.create_dataset(
-                        ds_name,
-                        data=np.stack([
-                            variances[var_key]['Total'],
-                            variances[var_key]['Unobserved'],
-                        ]),
-                        dtype=float,
-                    )
-                    ds.attrs['rows'] = ['Total', 'Unobserved']
+def load_scenario(h5_path: Path | str) -> ScenarioCfg | None:
+    """The scenario that generated this dataset file, with its calibrated
+    hazard function; None if the file is not a synthetic dataset."""
+    h5_path = Path(h5_path)
+    scenario = read_scenario_dict(h5_path)
+    if scenario is not None:
+        scenario = ScenarioCfg.from_dict(scenario)
+    return scenario
 
 
-# === NOISE CFGS ===
-# pre_noise drives the causal dynamics (same across noise levels for fair comparison).
-# post_noise is observation/measurement noise — varied to control SNR.
-_pre_noise_sigma = 0.5
-_hazard_noise = NoiseCfg(pre_noise=noise_funcs.NoNoise(),
-                         post_noise=noise_funcs.NoNoise())
-_no_noise = NoiseCfg(pre_noise=noise_funcs.GaussianNoise(_pre_noise_sigma),
-                     post_noise=noise_funcs.NoNoise())
-_low_noise = NoiseCfg(pre_noise=noise_funcs.GaussianNoise(_pre_noise_sigma),
-                      post_noise=noise_funcs.GaussianNoise(0.1))
-_high_noise = NoiseCfg(pre_noise=noise_funcs.GaussianNoise(_pre_noise_sigma),
-                       post_noise=noise_funcs.GaussianNoise(1.0))
+# === PRESETS ===
 
-# === MISSINGNESS CFGS ===
-_none_missing = MissingnessCfg(prob_missing=0.0,
-                               late_entry_prob=0.0,
-                               early_exit_prob=0.0)
-_low_missingness = MissingnessCfg(prob_missing=0.0,
-                                  late_entry_prob=0.2,
-                                  early_exit_prob=0.2)
-
-_high_ar_coeff = 1 - 1e-5
-_med_ar_coeff = 0.5
-_low_ar_coeff = 0
-
-_hazard_ar_coeff = 1 - 1e-5
-
-_default_ar_coeff = 0.99
-
-_default_k = 2
-
-
-# === RULES ===
-def auto_correlate(feature_coeffs: dict[str, float] = None,
-                   ar_coeff: float = _default_ar_coeff) -> list[Rule]:
-    if feature_coeffs is None:
-        feature_coeffs = {
-            feat_name: ar_coeff
-            for feat_name in ('A', 'B', 'C', 'D')
-        }
-        feature_coeffs['Hazard'] = ar_coeff
-        # feature_coeffs['Hazard'] = 0.8
-    rules = []
-    for key, val in feature_coeffs.items():
-        rules.append(AutoCorrelationRule(key, val))
-
-    return rules
-
-
-# def mean_reversion(feature_params: dict[str, tuple] = None) -> list[Rule]:
-#     if feature_params is None:
-#         feature_params = {
-#             feat_name: (0.0, 0.01)
-#             for feat_name in ('A', 'B', 'C', 'D', 'Hazard')
-#         }
-#     rules = []
-#     for key, val in feature_params.items():
-#         rules.append(MeanReversionRule(key, *val))
-
-#     return rules
-
-
-def _linear(ar_coeff: float) -> list[Rule]:
-    return [
-        Rule(target='Hazard',
-             expr=_default_k * (1 - ar_coeff) *
-             (Var('A', 50) + Var('B', 100) + Var('C', 150)))
-    ] + auto_correlate(ar_coeff=ar_coeff)
-
-
-def _linear_chain(ar_coeff: float) -> list[Rule]:
-    return [
-        Rule(target='B', expr=_default_k * (1 - ar_coeff) * Var('A', 50)),
-        Rule(target='C', expr=_default_k * (1 - ar_coeff) * Var('B', 50)),
-        Rule(target='Hazard', expr=_default_k * (1 - ar_coeff) * Var('C', 50))
-    ] + auto_correlate(ar_coeff=ar_coeff)
-
-
-def _nonlinear_chain(ar_coeff: float) -> list[Rule]:
-    return [
-        Rule(target='B', expr=_default_k *
-             (1 - ar_coeff) * ReLU(Var('A', 50))),
-        Rule(target='C', expr=_default_k *
-             (1 - ar_coeff) * ReLU(Var('B', 50))),
-        Rule(target='Hazard',
-             expr=_default_k * (1 - ar_coeff) * ReLU(Var('C', 50))),
-    ] + auto_correlate(ar_coeff=ar_coeff)
-
-
-def _multiplicative_hazard(ar_coeff: float) -> list[Rule]:
-    return [
-        Rule(target='Hazard',
-             expr=_default_k * (1 - ar_coeff) * (Var('A', 50)) * Var('B', 150))
-    ] + auto_correlate(ar_coeff=ar_coeff)
-
-
-def _threshold_hazard(ar_coeff: float) -> list[Rule]:
-    return [
-        Rule(target='Hazard',
-             expr=_default_k * (1 - ar_coeff) * Threshold(
-                 (Var('A', 50) + Var('B', 100) + Var('C', 150)), thresh=6.0))
-    ] + auto_correlate(ar_coeff=ar_coeff)
-
-
-# _multiplicative = [
-#     Rule(target='Hazard', expr=ReLU(Var('A', 50) * Var('B', 100), thresh=0.0))
-# ] + auto_correlate()
-
-# _ratio = [Rule(target='Hazard', expr=Sigmoid(Var('A', 50) / Var('B', 100)))
-#           ] + auto_correlate()
-_SCENARIO_BUILDERS = (('linear', _linear), ('linear_chain', _linear_chain),
-                      ('nonlinear_chain', _nonlinear_chain),
-                      ('multiplicative_hazard', _multiplicative_hazard),
-                      ('threshold_hazard', _threshold_hazard))
-_AR_VARIANTS = (
-    (_low_ar_coeff, 'low_ar'),
-    (_med_ar_coeff, 'med_ar'),
-    (_high_ar_coeff, 'high_ar'),
-)
-
-# ALL_CFGS: list[ScenarioCfg] = [
-#     ScenarioCfg(f'{name}_{ar_name}',
-#                 rules=build(ar),
-#                 noise_cfg=_low_noise,
-#                 missingness_cfg=_none_missing) for ar, ar_name in _AR_VARIANTS
-#     for name, build in _SCENARIO_BUILDERS
-# ]
-
-ALL_CFGS: list[ScenarioCfg] = [
+BASE_CFGS: list[ScenarioCfg] = [
     ScenarioCfg(
         name,
-        rules=build(_default_ar_coeff),
-        noise_cfg=_low_noise,
-        missingness_cfg=_none_missing,
+        rules=rules_func(),
+        pre_noise=Noise.gaussian(0.5),
+        post_noise=Noise.gaussian(0.1),
+        missingness=Missingness.none(),
         burn_in=1000,
         death_burn_in=200,
-    ) for name, build in _SCENARIO_BUILDERS
+    ) for name, rules_func in RULE_SETS.items()
 ]
 
-
-def plot_variances(
-    save_path: Path = None,
-    quantity: Literal['hazard', 'cdf'] = 'hazard',
-    hazard_key: str = 'default',
-) -> None:
-    import matplotlib.pyplot as plt
-    plt.rcParams["font.family"] = 'serif'
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    cmap = plt.get_cmap('Set1')
-    for i, cfg in enumerate(ALL_CFGS):
-        if cfg.variances is None:
-            continue
-        result = cfg.variances.cdf if quantity == 'cdf' else cfg.variances.hazard.get(
-            hazard_key)
-        if result is None:
-            continue
-        label = cfg.filename.replace('_', ' ').capitalize()
-        colour = cmap(i)
-        horizons = np.arange(len(result.total))
-        ax.plot(horizons,
-                result.total,
-                marker='.',
-                markersize=3,
-                linestyle='dotted',
-                label=f'{label} Total',
-                color=colour)
-        ax.plot(horizons,
-                result.unobserved,
-                marker='.',
-                markersize=3,
-                label=f'{label} Unobserved',
-                color=colour)
-
-    ax.set_xlabel('Horizon (H)')
-    ax.set_ylabel(f'Variance ({quantity})')
-    ax.set_title(
-        f'Variance contribution from unobserved timesteps by scenario ({quantity})'
-    )
-    ax.legend()
-    fig.tight_layout()
-
-    if save_path:
-        fig.savefig(save_path, dpi=150)
-        print(f"Saved to {save_path}")
-    else:
-        plt.show()
-
-
-if __name__ == '__main__':
-    save_dir = Path('PhagoPred') / 'Datasets' / 'graph_synthetic'
-
-    for cfg in ALL_CFGS:
-        cfg: ScenarioCfg
-        print(f"Generating '{cfg.filename}' ...")
-        cfg.calibrate_hazard()
-        cfg.generate(save_dir)
-        # c
-        # cfg.load(save_dir)
-        # max_horizon = 100
-        # cfg.save_variances(save_dir,
-        #                    max_horizon,
-        #                    base_sample_size=500,
-        #                    warm_up_steps=50,
-        #                    force=True)
-        # cfg.load(save_dir)
-    print('Done.')
-
-    # plot_variances(save_path=Path('temp') / 'variances_hazards.png',
-    #                quantity='hazard')
-    # plot_variances(save_path=Path('temp') / 'variances_cdf.png',
-    #                quantity='cdf')
-    # plot_variances(save_dir,
-    #                save_path=Path('temp') / 'variances_pmf.png',
-    #                quantity='pmf')
-    # print(expand_to_noise(_linear, 'Hazard', 10, 10))
+ALL_CFGS: list[ScenarioCfg] = BASE_CFGS

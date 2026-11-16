@@ -8,6 +8,7 @@ from .losses import LOSSES, LossCfg
 from .datasets import DATASETS, FEATURE_COMBOS, get_kfold_dataset, DatasetCfg
 from .training import TRAINING, TrainingCfg
 from .calibration import CALIBRATION, CalibrationCfg
+from .interpret import INTERPRETS, InterpretCfg
 
 
 @dataclass
@@ -27,6 +28,7 @@ class ExperimentCfg:
     dataset: list[DatasetCfg] | DatasetCfg
     training: list[TrainingCfg] | TrainingCfg
     feature_combo: list[list[str]] | list[str]
+    interpret: list[InterpretCfg | None] | InterpretCfg = None
     calibration: list[CalibrationCfg | None] | CalibrationCfg | None = None
 
 
@@ -215,14 +217,14 @@ EXPERIMENT_SUITES = {
             MODELS['CNN Medium'],
             MODELS['LSTM Medium'],
         ],
-                      attention=ATTENTION['Mean Pooling'],
-                      loss=LOSSES['Weighted BCE'],
+                      attention=ATTENTION['Last'],
+                      loss=LOSSES['BCE'],
                       dataset=[
                           DATASETS['Binary Graph Linear'],
                           DATASETS['Binary Graph Linear Chain'],
                           DATASETS['Binary Graph Nonlinear Chain'],
                       ],
-                      training=TRAINING['Standard'],
+                      training=TRAINING['Dense'],
                       feature_combo=['A', 'B', 'C', 'D'],
                       calibration=CALIBRATION['Platt Scaling'])),
     # Graph-synthetic hazard function: additive vs multiplicative vs
@@ -233,14 +235,34 @@ EXPERIMENT_SUITES = {
             MODELS['CNN Medium'],
             MODELS['LSTM Medium'],
         ],
-                      attention=ATTENTION['Mean Pooling'],
-                      loss=LOSSES['Weighted BCE'],
+                      attention=ATTENTION['Last'],
+                      loss=LOSSES['BCE'],
                       dataset=[
                           DATASETS['Binary Graph Linear'],
                           DATASETS['Binary Graph Multiplicative Hazard'],
                           DATASETS['Binary Graph Threshold Hazard'],
                       ],
-                      training=TRAINING['Standard'],
+                      training=TRAINING['Dense'],
+                      feature_combo=['A', 'B', 'C', 'D'],
+                      calibration=CALIBRATION['Platt Scaling'])),
+    # Fully predictable variants of all five graph scenarios (hazard starts at
+    # frame 0, lags 30/40/50, no observation noise): unobserved variance is 0.
+    'Graph FP Binary':
+    generate_experiment_grid(
+        ExperimentCfg(model=[
+            MODELS['CNN Medium'],
+            MODELS['LSTM Medium'],
+        ],
+                      attention=ATTENTION['Last'],
+                      loss=LOSSES['BCE'],
+                      dataset=[
+                          DATASETS['Binary Graph Linear FP'],
+                          DATASETS['Binary Graph Linear Chain FP'],
+                          DATASETS['Binary Graph Nonlinear Chain FP'],
+                          DATASETS['Binary Graph Multiplicative Hazard FP'],
+                          DATASETS['Binary Graph Threshold Hazard FP'],
+                      ],
+                      training=TRAINING['Dense'],
                       feature_combo=['A', 'B', 'C', 'D'],
                       calibration=CALIBRATION['Platt Scaling'])),
 }

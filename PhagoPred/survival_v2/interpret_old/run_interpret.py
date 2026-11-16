@@ -72,7 +72,7 @@ def interpret(
     dataset = load_dataset(experiment_dir, 'val')
     hazard_bins = None
     if hasattr(dataset, 'event_time_bins'):
-        hazard_bins = dataset.event_time_bins
+        hazard_bins = dataset.bins
 
     model_feat_names: list[str] = cfg.feature_combo
     means, stds = np.array(checkpoint.get('normalalisation_means'),

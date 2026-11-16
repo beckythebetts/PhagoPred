@@ -14,6 +14,11 @@ from PhagoPred.survival_v2.interpret import (SampleWithSHAP, SHAPResult,
 from PhagoPred.survival_v2.interpret.precision import (ObservedPrecision,
                                                        condition_and_sample)
 
+# Free (unpinned) context frames kept before the window by default when the
+# hazard starts at frame 0; the pinned boundary's pull on the window decays
+# as the features' 0.99 memory, i.e. to ~5% after 300 frames.
+FREE_CONTEXT_FRAMES = 300
+
 
 @dataclass
 class outputs:
@@ -77,11 +82,13 @@ def _pre_scale(noise) -> float:
 def _apply_hazard_rules(graph: CausalGraph,
                         signals: dict[str, np.ndarray],
                         time_steps: int,
-                        start: int = 0) -> dict:
+                        start: int = 0,
+                        frame_0: int = 0) -> dict:
+    """Step the Hazard rules over [start, time_steps). ``frame_0`` is the
+    index of observation frame 0 (after any context frames)."""
     hazard_rules = [r for r in graph.rules if r.target == 'Hazard']
     for t in range(start, time_steps):
-        for rule in hazard_rules:
-            rule.apply_step(signals, t)
+        graph.apply_rules(signals, t, frame_0=frame_0, rules=hazard_rules)
     return (signals)
 
 
@@ -326,7 +333,8 @@ def _propagate_and_target(graph,
                           hazard_bins,
                           output_type,
                           B,
-                          survival_start: int | None = None):
+                          survival_start: int | None = None,
+                          frame_0: int = 0):
     """Fill observed past with ``past`` samples, propagate the horizon, read target.
 
     Returns ``(target, log_survival)``: ``log_survival`` (B,) is each draw's
@@ -337,7 +345,8 @@ def _propagate_and_target(graph,
     All arrays are in extended coordinates: burn-in context, then the window.
     ``past`` (feature-name-keyed, required by ``rule.apply_step``) covers
     frames [0, n_past) = context + window up to the landmark; ``base_signals``
-    and ``base_noise`` are the sample-level arrays.
+    and ``base_noise`` are the sample-level arrays. ``frame_0`` is the index
+    of window frame 0 (= number of context frames).
 
     Hazard is not a player, so it has no entry in ``past``; its history is
     rebuilt from the boundary state through the sampled observed past (as in
@@ -355,7 +364,7 @@ def _propagate_and_target(graph,
             s = _hazard_history(base_signals[f_idx], base_noise[f_idx],
                                 seq_len, n_boundary, B)
         sig[f.name] = s
-    _apply_hazard_rules(graph, sig, n_past, start=n_boundary)
+    _apply_hazard_rules(graph, sig, n_past, start=n_boundary, frame_0=frame_0)
     log_survival = np.zeros(B)
     if survival_start is not None and survival_start < n_past:
         past_rates = np.clip(
@@ -363,8 +372,7 @@ def _propagate_and_target(graph,
             0.0, 1.0 - 1e-12)
         log_survival = np.log1p(-past_rates).sum(axis=0)
     for t in range(n_past, seq_len):
-        for rule in graph.rules:
-            rule.apply_step(sig, t)
+        graph.apply_rules(sig, t, frame_0=frame_0)
     hazard = hazard_calibration_func(sig['Hazard'][n_past:seq_len])
     target = _outputs_from_hazard(hazard, hazard_bins).get_target(
         output_type, hazard_bins)  # (B,)
@@ -400,7 +408,8 @@ def _coalition_value(prec: _GroundTruthPrecision, pinned_mask: np.ndarray,
                      basevec: np.ndarray, xi: np.ndarray, graph, base_signals,
                      base_noise, seq_len, n_boundary, hazard_calibration_func,
                      hazard_bins, output_type, B,
-                     survival_start: int | None = None) -> float:
+                     survival_start: int | None = None,
+                     frame_0: int = 0) -> float:
     """v(S) = E[target | observed pinned = base, alive at landmark] via
     joint-conditional samples.
 
@@ -436,7 +445,7 @@ def _coalition_value(prec: _GroundTruthPrecision, pinned_mask: np.ndarray,
                                               base_noise, lf, n_boundary,
                                               seq_len, hazard_calibration_func,
                                               hazard_bins, output_type, B,
-                                              survival_start)
+                                              survival_start, frame_0)
     logw = logw + log_survival
     ww = np.exp(logw - logw.max())
     return float((ww * tgt).sum() / ww.sum())
@@ -575,7 +584,8 @@ def _interventional_value(pinned_mask: np.ndarray, base_sig_lf: np.ndarray,
     perturbed = _apply_hazard_rules(graph,
                                     perturbed,
                                     seq_len,
-                                    start=n_boundary)
+                                    start=n_boundary,
+                                    frame_0=ctx)
     hazard = hazard_calibration_func(perturbed['Hazard'][n_past:seq_len])
     target = _outputs_from_hazard(hazard, hazard_bins).get_target(
         output_type, hazard_bins)
@@ -626,7 +636,7 @@ def _make_obs_value_factory(prec,
                                     base_signals, base_noise, seq_len,
                                     n_boundary, hazard_calibration_func,
                                     hazard_bins, output_type, num_samples,
-                                    survival_start)
+                                    survival_start, frame_0=ctx)
 
         return value_fn
 
@@ -672,7 +682,8 @@ def generate_sample_with_importances(
     Python overhead left to amortise.
 
     If the graph has a burn-in, the last ``context_frames`` of it (default:
-    all of it, which is exact) are kept before the window. Only window frames
+    all of it, which is exact; with ``graph.hazard_from_frame_0``,
+    ``max_lag + FREE_CONTEXT_FRAMES``) are kept before the window. Only window frames
     are players. The first ``graph.max_lag`` context frames are held at their
     base values as the recursions' starting state; the rest are free in the
     observational game (an observer cannot see them) and at base in the
@@ -686,8 +697,14 @@ def generate_sample_with_importances(
     death-active burn-in (or frame 0 without one). The interventional game
     is a do-operation and is never conditioned.
     """
-    ctx = graph.burn_in if context_frames is None else min(
-        context_frames, graph.burn_in)
+    if context_frames is None:
+        # With hazard_from_frame_0 the context only sets the observed
+        # features' starting distribution (the target never reads it), so
+        # FREE_CONTEXT_FRAMES of free context beyond the pinned boundary is
+        # plenty; otherwise keep all of the burn-in, which is exact.
+        context_frames = (graph.max_lag + FREE_CONTEXT_FRAMES
+                          if graph.hazard_from_frame_0 else graph.burn_in)
+    ctx = min(context_frames, graph.burn_in)
     n_boundary = graph.max_lag if ctx > 0 else 0
     if 0 < ctx <= n_boundary:
         raise ValueError(

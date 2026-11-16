@@ -8,7 +8,7 @@ import torch.nn as nn
 from PhagoPred.utils.logger import get_logger
 from PhagoPred.survival_v2.configs.attention import AttentionCfg
 from .base import SurvivalModel, build_fc_layers
-from ..attention.mechanisms import get_attention_mechanism
+from ..attention.mechanisms import get_attention_mechanism, LastPooling
 
 log = get_logger()
 
@@ -113,24 +113,12 @@ class LSTMSurvival(SurvivalModel):
         """
         batch_size, seq_len, num_features = x.shape
 
-        # Optional: concat mask as additional features
-        if self.use_mask_embedding and mask is not None:
-            x = torch.cat([x, mask.float()], dim=-1)
-
         # Padding mask for attention
         padding_mask = torch.arange(seq_len,
                                     device=lengths.device).unsqueeze(0)
         padding_mask = padding_mask < lengths.unsqueeze(1)
 
-        # LSTM encoding with packed sequences
-        x_packed = nn.utils.rnn.pack_padded_sequence(x,
-                                                     lengths.cpu(),
-                                                     batch_first=True,
-                                                     enforce_sorted=False)
-        lstm_out, (h_n, c_n) = self.lstm(x_packed)
-        lstm_out, _ = nn.utils.rnn.pad_packed_sequence(lstm_out,
-                                                       batch_first=True,
-                                                       total_length=seq_len)
+        lstm_out, h_n = self._encode(x, lengths, mask)
 
         # Optional: predict next timestep features
         y_pred = None
@@ -153,3 +141,41 @@ class LSTMSurvival(SurvivalModel):
                 return outputs, y_pred
             else:
                 return outputs
+
+    def _encode(self, x: torch.Tensor, lengths: torch.Tensor,
+                mask: torch.Tensor = None) -> tuple:
+        """LSTM encoding with packed sequences.
+
+        Returns:
+            lstm_out: (batch, seq_len, hidden) - top-layer output per timestep
+            h_n: (num_layers, batch, hidden) - final hidden states
+        """
+        seq_len = x.shape[1]
+
+        # Optional: concat mask as additional features
+        if self.use_mask_embedding and mask is not None:
+            x = torch.cat([x, mask.float()], dim=-1)
+
+        x_packed = nn.utils.rnn.pack_padded_sequence(x,
+                                                     lengths.cpu(),
+                                                     batch_first=True,
+                                                     enforce_sorted=False)
+        lstm_out, (h_n, _) = self.lstm(x_packed)
+        lstm_out, _ = nn.utils.rnn.pad_packed_sequence(lstm_out,
+                                                       batch_first=True,
+                                                       total_length=seq_len)
+        return lstm_out, h_n
+
+    def forward_dense(self,
+                      x: torch.Tensor,
+                      lengths: torch.Tensor,
+                      mask: torch.Tensor = None) -> torch.Tensor:
+        """Per-timestep logits (batch, seq_len, num_bins); see SurvivalModel."""
+        if not isinstance(self.attention, LastPooling):
+            raise ValueError(
+                'Dense supervision needs last_pool attention for the LSTM')
+        lstm_out, _ = self._encode(x, lengths, mask)
+        # Under last_pool, forward() feeds concat(context, h_n[-1]) where both
+        # are the top-layer output at the last valid step; at timestep t that
+        # is lstm_out[:, t] twice.
+        return self.fc(torch.cat([lstm_out, lstm_out], dim=-1))

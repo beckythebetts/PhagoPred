@@ -7,14 +7,21 @@ from pathlib import Path, PurePath
 import numpy as np
 
 from PhagoPred.utils.logger import get_logger
-
+from ..interpret.data_models import BackgroundEnum
 from .models import LSTMCfg, CNNCfg, RSFCfg, ModelCfg
 from .attention import AttentionCfg
 from .losses import SurvivalLossCfg, BinaryLossCfg
 from .datasets import (DATASET_TYPES, DatasetCfg, BinaryDatasetCfg,
-                       SurvivalDatasetCfg)
+                       SurvivalDatasetCfg, PredictionTarget)
 from .training import TrainingCfg
 from .calibration import CalibrationCfg, CALIBRATION_TYPES
+from .interpret import (
+    InterpretCfg,
+    ShapCfg,
+    GroundTruthCfg,
+    SampleSelectionCfg,
+    BackgroundCfg,
+)
 
 from .experiments import ExperimentCfg
 
@@ -44,9 +51,7 @@ def _load_dataset(d: dict) -> DatasetCfg:
     if dataset_type in DATASET_TYPES:
         cls = DATASET_TYPES[dataset_type]
     else:
-        # Configs saved before dataset_type existed: fall back to the old
-        # num_bins heuristic. Those predate BinaryClassDatasetCfg (whose Path
-        # train_paths could not be json-dumped), so binary/survival covers them.
+
         cls = BinaryDatasetCfg if d['num_bins'] == 1 else SurvivalDatasetCfg
         if dataset_type:
             log.warning(f'Unknown dataset_type {dataset_type!r}; '
@@ -71,6 +76,26 @@ def _load_calibration(d: dict | None) -> CalibrationCfg | None:
     #     cal_type =
     cls = CALIBRATION_TYPES[cal_type]
     return _load_dataclass(cls, d)
+
+
+def load_interpret_cfg(d: dict) -> InterpretCfg:
+    shap = dict(d['shap'])
+    shap['backgrounds'] = [BackgroundEnum(b) for b in shap['backgrounds']]
+    gt = d.get('ground_truth')
+    return InterpretCfg(
+        selection=_load_dataclass(SampleSelectionCfg, d['selection']),
+        background=_load_dataclass(BackgroundCfg, d['background']),
+        shap=_load_dataclass(ShapCfg, shap),
+        ground_truth=None if gt is None else _load_dataclass(
+            GroundTruthCfg, gt),
+    )
+
+
+def load_prediction_target(d: dict) -> PredictionTarget:
+    d = dict(d)
+    if d.get('bins') is not None:
+        d['bins'] = tuple(d['bins'])  # JSON gives a list; tuples needed for ==
+    return _load_dataclass(PredictionTarget, d)
 
 
 def load_experiment_cfg(path: str | Path) -> ExperimentCfg:

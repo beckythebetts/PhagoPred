@@ -38,6 +38,7 @@ from PhagoPred.survival_v2.data import (
     SurvivalCellDataset,
     BinaryCellDataset,
     BinaryClassDataset,
+    DenseCellDataset,
     binary_collate_fn,
     survival_collate_fn,
     binary_class_collate_fn,
@@ -256,16 +257,28 @@ def run_single_experiment(
         is_classical=experiment_config.model.is_classical,
         cache_dir=output_dir)
 
+    # Datasets used for training (and training-time validation loss). With
+    # dense supervision these are per-cell views; evaluation and calibration
+    # still use the per-landmark val/cal datasets.
+    train_fit_dataset, val_fit_dataset = train_dataset, val_dataset
+    if experiment_config.training.dense:
+        if not isinstance(train_dataset,
+                          (BinaryCellDataset, SurvivalCellDataset)):
+            raise ValueError('Dense supervision is only implemented for '
+                             'binary and survival datasets')
+        train_fit_dataset = DenseCellDataset(train_dataset)
+        val_fit_dataset = DenseCellDataset(val_dataset)
+
     if isinstance(train_dataset, BinaryCellDataset):
 
-        pos_weight = train_dataset.get_pos_weight()
+        pos_weight = train_fit_dataset.get_pos_weight()
         setattr(experiment_config.loss, 'pos_weight', pos_weight)
         log.info(f"Computed pos_weight: {pos_weight:.2f}")
 
     elif isinstance(train_dataset, SurvivalCellDataset):
         train_dataset: SurvivalCellDataset
 
-        bins = train_dataset.event_time_bins
+        bins = train_dataset.bins
         log.info(f"Event time bins: {bins}")
 
         bin_weights = train_dataset.get_bin_weights()
@@ -292,8 +305,8 @@ def run_single_experiment(
         f'Training Model:\n\t{asdict(experiment_config.training)}\n\t{asdict(experiment_config.loss)}'
     )
     history = train(model,
-                    train_dataset,
-                    val_dataset,
+                    train_fit_dataset,
+                    val_fit_dataset,
                     exp_dir,
                     experiment_config.training,
                     experiment_config.loss,
@@ -667,10 +680,3 @@ def evaluate_suite(experiment_dir: Path,
         log.info(f'Evaluation complete for {exp_dir.name}')
 
     plot_experiment_results(experiment_dir, ignore_params=['feature_combo'])
-
-
-def test_variances(exp_dir: Path):
-    config_path = exp_dir / 'config.json'
-    cfg = load_experiment_cfg(config_path)
-    val_dataset = _build_val_dataset(cfg)
-    print(val_dataset.get_total_variances(), val_dataset._compute_variance())

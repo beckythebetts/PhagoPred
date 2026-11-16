@@ -56,6 +56,10 @@ class SurvivalModel(nn.Module, ABC):
         self.num_bins = num_bins
         self.calibration: TemperatureScalingResult | VectorScalingResult | PlattScalingResult | IsotonicScalingResult | None = None
 
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
     def set_calibration(
         self,
         result: TemperatureScalingResult | VectorScalingResult
@@ -105,6 +109,22 @@ class SurvivalModel(nn.Module, ABC):
             or (outputs, auxiliary) if model has auxiliary outputs
         """
         pass
+
+    def forward_dense(self,
+                      x: torch.Tensor,
+                      lengths: torch.Tensor,
+                      mask: torch.Tensor = None) -> torch.Tensor:
+        """
+        Per-timestep forward pass for dense supervision.
+
+        Output at timestep t must equal forward() on the sequence cropped to
+        t + 1, so only causal models with last-timestep pooling support it.
+
+        Returns:
+            outputs: raw logits (batch, seq_len, num_bins)
+        """
+        raise NotImplementedError(
+            f'{type(self).__name__} does not support dense supervision')
 
     def predict_pmf(self, outputs: torch.Tensor) -> torch.Tensor:
         """Compute hazard for each time bin, then cacluate pmf from hazards"""

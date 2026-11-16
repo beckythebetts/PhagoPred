@@ -17,6 +17,17 @@ from .survival_dataset import (
     SurvivalCell,
     survival_collate_fn,
 )
+from .dense_dataset import (
+    DenseCell,
+    DenseCellDataset,
+    DenseBinaryCell,
+    DenseBinaryCellSample,
+    DenseBinaryCellBatch,
+    DenseSurvivalCell,
+    DenseSurvivalCellSample,
+    DenseSurvivalCellBatch,
+    dense_collate_fn,
+)
 
 from .binary_class_dataset import (
     BinaryClassSample,
@@ -46,4 +57,13 @@ __all__ = [
     'BinaryCellDataset',
     'BinaryCell',
     'SurvivalCell',
+    'DenseCell',
+    'DenseCellDataset',
+    'DenseBinaryCell',
+    'DenseBinaryCellSample',
+    'DenseBinaryCellBatch',
+    'DenseSurvivalCell',
+    'DenseSurvivalCellSample',
+    'DenseSurvivalCellBatch',
+    'dense_collate_fn',
 ]

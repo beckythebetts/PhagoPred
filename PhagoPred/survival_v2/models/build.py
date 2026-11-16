@@ -40,6 +40,7 @@ def build_model(
             dilations=model_config.dilations,
             fc_layers=model_config.fc_layers,
             attention_config=attention_config,
+            causal=model_config.causal,
         )
         return model.to(device)
 

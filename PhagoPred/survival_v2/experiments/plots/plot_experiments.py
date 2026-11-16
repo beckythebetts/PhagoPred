@@ -19,6 +19,7 @@ from .roc_plots import plot_rocs
 from .plot_brier_scores import plot_brier_scores
 from .plot_c_idxs import plot_c_idxs_scores
 from .plot_variance_mse import plot_variance_mse
+from .plot_mse_by_length import plot_cdf_mse_by_length
 from .plot_shap_importance import (plot_shap_average_across_models,
                                    plot_shap_fold_average_across_models,
                                    plot_shap_samples_across_models)
@@ -120,6 +121,10 @@ def plot_experiment_results(experiments_dir: Path,
 
     _plot_and_save(plot_variance_mse, all_experiemnts, varying_params,
                    experiments_dir / 'variance_mse.png')
+    if is_binary:
+        _plot_and_save(plot_cdf_mse_by_length, all_experiemnts,
+                       varying_params,
+                       experiments_dir / 'cdf_mse_by_length.png')
 
     # SHAP comparisons need compare_importance to have run first; the plot
     # functions return None (and log) when no shap_samples.h5 is present.

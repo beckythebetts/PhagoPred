@@ -89,7 +89,32 @@ def fit_var(pool: np.ndarray,
     return best[1]
 
 
-def build_precision(var_fit: VARFit, lf: int, ridge: float = 1e-8,
+def default_burn_in(var_fit: VARFit,
+                    tol: float = 0.05,
+                    max_burn_in: int = 1000) -> int:
+    """Burn-in frames needed for the VAR's marginal variance to get within
+    ``tol`` of stationary, starting from a single innovation's worth.
+
+    The variance gap decays like ``rho**(2t)``, ``rho`` the spectral radius of
+    the VAR's companion matrix. Near a unit root (several scenarios use AR
+    coefficients ~0.99) that takes hundreds of frames; at or beyond one the
+    fitted process has no stationary distribution at all, so this is capped
+    at ``max_burn_in``.
+    """
+    K, p = len(var_fit.feature_names), var_fit.p
+    companion = np.zeros((K * p, K * p))
+    companion[:K] = np.concatenate(list(var_fit.A), axis=1)
+    companion[K:, :-K] = np.eye(K * (p - 1))
+    rho = float(np.max(np.abs(np.linalg.eigvals(companion))))
+    if rho >= 1.0:
+        return max_burn_in
+    return min(max_burn_in, int(np.ceil(np.log(tol) / (2 * np.log(rho)))))
+
+
+def build_precision(var_fit: VARFit,
+                    lf: int,
+                    burn_in: int = 0,
+                    ridge: float = 1e-8,
                     tol: float = 1e-12) -> 'VARPrecision':
     """Precision over (feature, frame) nodes for a window of length ``lf``,
     from a fitted VAR. Mirrors ``_build_observed_precision``'s per-node
@@ -98,18 +123,31 @@ def build_precision(var_fit: VARFit, lf: int, ridge: float = 1e-8,
     weighted by the full residual covariance ``Sigma_eps`` (features' shocks
     at the same frame are generally correlated for real data) instead of an
     independent per-feature scalar variance.
+
+    The first ``p`` frames have no lags to regress on, so their equation is
+    just ``x - mean = eps``: a prior of one innovation's covariance around
+    the mean, far tighter than the data's real spread for a persistent
+    process. Masked frames at the window start then get filled near the mean,
+    and revealing them earns spurious importance. ``burn_in`` prepends that
+    many free (never pinned) context frames so the window starts from
+    (near-)stationary variance instead — mirroring ground truth's free
+    context; see ``default_burn_in``. The fit is global, so this only lengthens
+    the sparse banded precision.
     """
     K, p = len(var_fit.feature_names), var_fit.p
     feat_idx = {f: i for i, f in enumerate(var_fit.feature_names)}
-    # Node columns feature-major (matches SampleWithSHAP's (K, lf) layout);
-    # equation rows time-major (makes the residual-covariance weighting a
-    # plain block-diagonal matrix, one Sigma_eps block per frame).
-    col = {(f, t): fi * lf + t for f, fi in feat_idx.items() for t in range(lf)}
-    n_obs = K * lf
+    n_frames = burn_in + lf
+    # Node columns feature-major (matches SampleWithSHAP's (K, lf) layout,
+    # with the burn-in frames first); equation rows time-major (makes the
+    # residual-covariance weighting a plain block-diagonal matrix, one
+    # Sigma_eps block per frame).
+    col = {(f, t): fi * n_frames + t
+           for f, fi in feat_idx.items() for t in range(n_frames)}
+    n_obs = K * n_frames
 
     rows, cols, vals = [], [], []
     eq = 0
-    for t in range(lf):
+    for t in range(n_frames):
         for f, fi in feat_idx.items():
             rows.append(eq)
             cols.append(col[(f, t)])
@@ -127,18 +165,18 @@ def build_precision(var_fit: VARFit, lf: int, ridge: float = 1e-8,
 
     sigma_inv = np.linalg.inv(var_fit.sigma_eps)
     L_prec = np.linalg.cholesky(sigma_inv)  # L_prec @ L_prec.T = sigma_inv
-    D_block = _sparse.block_diag([sigma_inv] * lf).tocsc()
-    D_sqrt_block = _sparse.block_diag([L_prec] * lf).tocsc()
+    D_block = _sparse.block_diag([sigma_inv] * n_frames).tocsc()
+    D_sqrt_block = _sparse.block_diag([L_prec] * n_frames).tocsc()
 
     Q = (incidence.T @ D_block @ incidence + ridge * _sparse.eye(n_obs)).tocsc()
 
     mean_vec = np.empty(n_obs)
     for f, fi in feat_idx.items():
-        for t in range(lf):
+        for t in range(n_frames):
             mean_vec[col[(f, t)]] = var_fit.stationary_mean[fi]
 
     prec = ObservedPrecision(n_obs, incidence, D_sqrt_block, Q, mean_vec)
-    return VARPrecision(var_fit.feature_names, lf, prec)
+    return VARPrecision(var_fit.feature_names, lf, prec, burn_in)
 
 
 @dataclass
@@ -146,10 +184,13 @@ class VARPrecision:
     """A shared ``ObservedPrecision`` plus the (feature, frame) shape metadata
     needed to reshape flat node vectors back to ``(K, lf)`` — metadata the
     shared type doesn't carry since ground truth's own indexing works the same
-    way but isn't tied to a fixed ``lf`` the way a VAR window is."""
+    way but isn't tied to a fixed ``lf`` the way a VAR window is. Nodes cover
+    ``burn_in + lf`` frames per feature; only the last ``lf`` are the
+    window."""
     feature_names: list[str]
     lf: int
     prec: ObservedPrecision
+    burn_in: int = 0
 
 
 def sample_conditional(var_prec: VARPrecision, pinned_mask: np.ndarray,
@@ -178,6 +219,15 @@ def sample_conditional(var_prec: VARPrecision, pinned_mask: np.ndarray,
     prec = var_prec.prec
     if xi is None:
         xi = np.random.normal(size=(prec.incidence.shape[0], num_samples))
+    K, lf, C = len(var_prec.feature_names), var_prec.lf, var_prec.burn_in
+    if C:
+        # Burn-in frames are always free; their basevec entries are never
+        # read (only pinned entries are), so the mean is just a placeholder.
+        ctx_mean = prec.mean_vec.reshape(K, C + lf)[:, :C]
+        pinned_mask = np.concatenate(
+            [np.zeros((K, C), dtype=bool),
+             pinned_mask.reshape(K, lf)], axis=1).reshape(-1)
+        basevec = np.concatenate([ctx_mean, basevec.reshape(K, lf)],
+                                 axis=1).reshape(-1)
     result = condition_and_sample(prec, pinned_mask, basevec, xi)
-    K = len(var_prec.feature_names)
-    return result.values.reshape(K, var_prec.lf, num_samples)
+    return result.values.reshape(K, C + lf, num_samples)[:, C:]

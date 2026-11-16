@@ -146,8 +146,9 @@ class FirstLastFrame(BaseFeature):
         # Use areas dataset to find nan frames
         areas = phase_xr['Area']
 
+        # First and last frame with an Area, both 0-based and inclusive.
         not_nan_mask = ~np.isnan(areas)
-        start = not_nan_mask.argmax(axis=0) + 1
+        start = not_nan_mask.argmax(axis=0)
         reversed_mask = not_nan_mask[::-1, :]
         last = areas.shape[0] - 1 - reversed_mask.argmax(axis=0)
 

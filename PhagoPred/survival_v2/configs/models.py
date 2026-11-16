@@ -29,6 +29,9 @@ class CNNCfg(ModelCfg):
     kernel_sizes: list
     dilations: list
     fc_layers: list
+    # Left-pad convolutions so output at t only sees inputs <= t. Defaults to
+    # False so configs saved before this field existed rebuild unchanged.
+    causal: bool = False
     model_type: Literal['CNN', 'LSTM', 'RSF'] = field(default='CNN',
                                                       init=False)
     name: str = ''
@@ -49,7 +52,7 @@ class RSFCfg(ModelCfg):
 MODELS = {
     'LSTM Medium':
     LSTMCfg(
-        hidden_size=64,
+        hidden_size=32,
         num_layers=2,
         dropout=0.2,
         fc_layers=[32],
@@ -57,10 +60,11 @@ MODELS = {
         name='LSTM Medium',
     ),
     'CNN Medium':
-    CNNCfg(num_channels=[64] * 9,
+    CNNCfg(num_channels=[32] * 9,
            kernel_sizes=[3] * 9,
            dilations=[2**n for n in range(9)],
            fc_layers=[64, 32],
+           causal=True,
            name='CNN Medium'),
     'Random Forest':
     RSFCfg(

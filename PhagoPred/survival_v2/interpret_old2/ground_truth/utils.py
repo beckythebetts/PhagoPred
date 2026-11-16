@@ -15,6 +15,16 @@ from .generate_samples import generate_sample_with_importances
 
 log = get_logger()
 
+# Ground-truth landmarks are drawn after at least this many frames, or the
+# dataset's min_length if larger (so samples lie in the range models train on).
+DEFAULT_MIN_SEQUENCE_LENGTH = 100
+
+
+def _gt_min_sequence_length(min_sequence_length: int | None) -> int:
+    if min_sequence_length is None:
+        return DEFAULT_MIN_SEQUENCE_LENGTH
+    return max(DEFAULT_MIN_SEQUENCE_LENGTH, int(min_sequence_length))
+
 
 def infer_scenario(experiment_dir: Path) -> ScenarioCfg | None:
     """Match the experiment's dataset paths to a known ScenarioCfg by filename stem."""
@@ -40,7 +50,9 @@ def _params_match(f: h5py.File, output_type: str, horizon: int,
                   hazard_bins: None | np.ndarray, num_permutations: int,
                   min_horizon_cif: float, num_background_samples: int,
                   seg_attr: int, burn_in: int = 0,
-                  death_burn_in: int = 0) -> bool:
+                  death_burn_in: int = 0,
+                  min_sequence_length: int = DEFAULT_MIN_SEQUENCE_LENGTH,
+                  hazard_from_frame_0: bool = False) -> bool:
     """Whether a cached file was generated with the same (everything but
     ``num_samples``) parameters — a mismatch on any of these makes its
     samples wrong for this request, unlike ``num_samples`` (see
@@ -56,7 +68,12 @@ def _params_match(f: h5py.File, output_type: str, horizon: int,
             # files from before the burn-in existed were generated without one
             and f.attrs.get('Burn In', 0) == burn_in
             and f.attrs.get('Death Burn In', 0) == death_burn_in
-            and bool(f.attrs.get('Survival Conditioned', False)))
+            and bool(f.attrs.get('Survival Conditioned', False))
+            # files from before these attrs existed used the defaults
+            and f.attrs.get('Min Sequence Length',
+                            DEFAULT_MIN_SEQUENCE_LENGTH) == min_sequence_length
+            and bool(f.attrs.get('Hazard From Frame 0',
+                                 False)) == hazard_from_frame_0)
 
 
 def get_samples(
@@ -70,8 +87,12 @@ def get_samples(
     output_type: str,
     num_background_samples: int,
     num_segments: int | None = None,
+    min_sequence_length: int | None = None,
 ) -> Path:
+    """``min_sequence_length``: the dataset's min_length; ground-truth
+    landmarks start at max(it, DEFAULT_MIN_SEQUENCE_LENGTH)."""
     seg_attr = -1 if num_segments is None else int(num_segments)
+    min_len = _gt_min_sequence_length(min_sequence_length)
     file_name = None
     # Smallest matching cache with >= num_samples: cheap to subset (each
     # ground-truth sample is a full permutation-Shapley run over the causal
@@ -91,7 +112,8 @@ def get_samples(
                                      num_permutations, min_horizon_cif,
                                      num_background_samples, seg_attr,
                                      scenario.graph.burn_in,
-                                     scenario.graph.death_burn_in):
+                                     scenario.graph.death_burn_in, min_len,
+                                     scenario.graph.hazard_from_frame_0):
                     continue
                 n = int(f.attrs['Num Samples'])
                 if n == num_samples:
@@ -122,6 +144,7 @@ def get_samples(
                 output_type,
                 num_background_samples,
                 num_segments,
+                min_sequence_length=min_len,
             )
     return file_name
 
@@ -150,6 +173,7 @@ def _generate_samples(
     num_background_samples: int,
     num_segments: int | None = None,
     num_workers: int | None = None,
+    min_sequence_length: int = DEFAULT_MIN_SEQUENCE_LENGTH,
 ) -> None:
 
     with h5py.File(h5_path, 'w') as f:
@@ -167,6 +191,8 @@ def _generate_samples(
         f.attrs['Burn In'] = scenario.graph.burn_in
         f.attrs['Death Burn In'] = scenario.graph.death_burn_in
         f.attrs['Survival Conditioned'] = True
+        f.attrs['Min Sequence Length'] = min_sequence_length
+        f.attrs['Hazard From Frame 0'] = scenario.graph.hazard_from_frame_0
 
     attempt_budget = num_samples * 200
     attempts = 0
@@ -177,7 +203,7 @@ def _generate_samples(
         scenario.hazard_calibration_func,
         horizon,
         scenario.num_frames,
-        100,
+        min_sequence_length,
         num_permutations,
         hazard_bins,
         output_type,

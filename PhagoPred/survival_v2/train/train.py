@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 import torch
 from PhagoPred.survival_v2.configs import TrainingCfg, LossCfg
 from PhagoPred.survival_v2.models import SurvivalModel, ClassicalSurvivalModel
-from PhagoPred.survival_v2.data import CellDataset, binary_collate_fn, survival_collate_fn, binary_class_collate_fn, BinaryCellDataset, SurvivalCellDataset, BinaryClassDataset
+from PhagoPred.survival_v2.data import CellDataset, binary_collate_fn, survival_collate_fn, binary_class_collate_fn, BinaryCellDataset, SurvivalCellDataset, BinaryClassDataset, DenseCellDataset, dense_collate_fn
 from PhagoPred.survival_v2.utils.plots import plot_losses
 from PhagoPred.utils.tools import to_json_safe
 from .train_classical import train_classical
@@ -24,7 +24,9 @@ def train(
 ) -> dict:
     """Train either a survival/binary deep/classical model."""
     if isinstance(model, SurvivalModel):
-        if isinstance(train_dataset, BinaryCellDataset):
+        if isinstance(train_dataset, DenseCellDataset):
+            collate_fn = dense_collate_fn
+        elif isinstance(train_dataset, BinaryCellDataset):
             collate_fn = binary_collate_fn
         elif isinstance(train_dataset, SurvivalCellDataset):
             collate_fn = survival_collate_fn
@@ -41,7 +43,9 @@ def train(
             collate_fn=lambda batch: collate_fn(batch, device=device),
             sampler=val_dataset.make_sampler())
 
-        optimiser = torch.optim.Adam(model.parameters(), lr=train_config.lr)
+        optimiser = torch.optim.AdamW(model.parameters(),
+                                      lr=train_config.lr,
+                                      weight_decay=1e-3)
         scheduler_type = train_config.scheduler
         if scheduler_type == 'step':
             scheduler = torch.optim.lr_scheduler.StepLR(
@@ -61,6 +65,7 @@ def train(
             loss_cfg,
             train_config.num_epochs,
             device=device,
+            patience=train_config.patience,
         )
 
         torch.save(

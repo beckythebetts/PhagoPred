@@ -1,13 +1,43 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from collections import defaultdict
+from dataclasses import dataclass, fields
 from math import log
 
 import numpy as np
-import sympy as sp
+
+_EXPRS: dict[str, type[Expr]] = {}
 
 
 class Expr(ABC):
+
+    def __init_subclass__(cls, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)
+        _EXPRS[cls.__name__] = cls
+
+    def children(self) -> list[Expr]:
+        out = []
+        for f in fields(self):
+            v = getattr(self, f.name)
+            if isinstance(v, Expr):
+                out.append(v)
+            elif isinstance(v, list):
+                out.extend(x for x in v if isinstance(x, Expr))
+        return out
+
+    def to_dict(self) -> dict:
+        return {
+            'op': type(self).__name__,
+            **{
+                f.name: _encode(getattr(self, f.name))
+                for f in fields(self)
+            }
+        }
+
+    @staticmethod
+    def from_dict(d: dict) -> Expr:
+        d = dict(d)
+        cls = _EXPRS[d.pop('op')]
+        return cls(**{k: _decode(v) for k, v in d.items()})
 
     @abstractmethod
     def __call__(self, parent_values: dict[str, float]) -> float:
@@ -51,11 +81,33 @@ class Expr(ABC):
         return Pow(self._wrap(other), self)
 
 
-class Var(Expr):
+def _encode(v):
+    if isinstance(v, Expr):
+        return v.to_dict()
+    if isinstance(v, (list, tuple)):
+        return [_encode(x) for x in v]
+    if isinstance(v, np.generic):
+        return v.item()
+    return v
 
-    def __init__(self, name: str, lag: int = 1):
-        self.name = name
-        self.lag = lag
+
+def _decode(v):
+    if isinstance(v, dict) and 'op' in v:
+        return Expr.from_dict(v)
+    if isinstance(v, list):
+        return [_decode(x) for x in v]
+    return v
+
+
+def _as_expr(source: str | Expr) -> Expr:
+    """A feature name is shorthand for its lag-1 Var."""
+    return Var(source) if isinstance(source, str) else source
+
+
+@dataclass
+class Var(Expr):
+    name: str
+    lag: int = 1
 
     def __call__(self, context):
         return context[(self.name, self.lag)]
@@ -64,10 +116,9 @@ class Var(Expr):
         return 1.0 if (self.name == var_name and self.lag == lag) else 0.0
 
 
+@dataclass
 class Const(Expr):
-
-    def __init__(self, val):
-        self.val = val
+    val: float
 
     def __call__(self, pv):
         return self.val
@@ -76,10 +127,10 @@ class Const(Expr):
         return 0.0
 
 
+@dataclass
 class BinaryOp(Expr, ABC):
-
-    def __init__(self, left, right):
-        self.left, self.right = left, right
+    left: Expr
+    right: Expr
 
 
 class Add(BinaryOp):
@@ -140,10 +191,12 @@ class Pow(BinaryOp):
         return result
 
 
+@dataclass
 class Min(Expr):
+    sources: list[Expr]
 
-    def __init__(self, *sources: str | Expr):
-        self.sources = [Var(s) if isinstance(s, str) else s for s in sources]
+    def __post_init__(self):
+        self.sources = [_as_expr(s) for s in self.sources]
 
     def __call__(self, context):
         return np.minimum.reduce([s(context) for s in self.sources])
@@ -154,10 +207,12 @@ class Min(Expr):
         return self.sources[active].partial(var_name, lag, context)
 
 
+@dataclass
 class Max(Expr):
+    sources: list[Expr]
 
-    def __init__(self, *sources: str | Expr):
-        self.sources = [Var(s) if isinstance(s, str) else s for s in sources]
+    def __post_init__(self):
+        self.sources = [_as_expr(s) for s in self.sources]
 
     def __call__(self, context):
         return np.maximum.reduce([s(context) for s in self.sources])
@@ -168,10 +223,12 @@ class Max(Expr):
         return self.sources[active].partial(var_name, lag, context)
 
 
+@dataclass
 class Sin(Expr):
+    source: Expr
 
-    def __init__(self, source: str | Expr):
-        self.source = Var(source) if isinstance(source, str) else source
+    def __post_init__(self):
+        self.source = _as_expr(self.source)
 
     def __call__(self, context):
         return np.sin(self.source(context))
@@ -182,32 +239,13 @@ class Sin(Expr):
             var_name, lag, context)
 
 
-class Apply(Expr):
-
-    def __init__(self, func, source: str | Expr, *args, **kwargs):
-        self.func = func
-        self.source = Var(source) if isinstance(source, str) else source
-        self.args = args
-        self.kwargs = kwargs
-
-    def __call__(self, context):
-        return self.func(self.source(context), *self.args, **self.kwargs)
-
-    def partial(self, var_name, lag, context):
-        inner_deriv = self.source.partial(var_name, lag, context)
-        x = self.source(context)
-        eps = 1e-7
-        func_deriv = (self.func(x + eps, *self.args, **self.kwargs) -
-                      self.func(x - eps, *self.args, **self.kwargs)) / (2 *
-                                                                        eps)
-        return func_deriv * inner_deriv
-
-
+@dataclass
 class ReLU(Expr):
+    source: Expr
+    thresh: float = 0.0
 
-    def __init__(self, source: str | Expr, thresh: float = 0.0):
-        self.source = Var(source) if isinstance(source, str) else source
-        self.thresh = thresh
+    def __post_init__(self):
+        self.source = _as_expr(self.source)
 
     def __call__(self, context):
         val = self.source(context)
@@ -219,11 +257,13 @@ class ReLU(Expr):
         return 0.0
 
 
+@dataclass
 class Threshold(Expr):
+    source: Expr
+    thresh: float = 0.0
 
-    def __init__(self, source: str | Expr, thresh: float = 0.0):
-        self.source = Var(source) if isinstance(source, str) else source
-        self.thresh = thresh
+    def __post_init__(self):
+        self.source = _as_expr(self.source)
 
     def __call__(self, context):
         return np.where(self.source(context) > self.thresh, 1.0, 0.0)
@@ -232,15 +272,14 @@ class Threshold(Expr):
         return 0.0
 
 
+@dataclass
 class Sigmoid(Expr):
+    source: Expr
+    k: float = 10.0
+    thresh: float = 0.0
 
-    def __init__(self,
-                 source: str | Expr,
-                 k: float = 10.0,
-                 thresh: float = 0.0):
-        self.source = Var(source) if isinstance(source, str) else source
-        self.k = k
-        self.thresh = thresh
+    def __post_init__(self):
+        self.source = _as_expr(self.source)
 
     def __call__(self, context):
         val = self.source(context)
@@ -252,12 +291,14 @@ class Sigmoid(Expr):
             var_name, lag, context)
 
 
+@dataclass
 class Hill(Expr):
+    source: Expr
+    n: float = 2.0
+    K: float = 1.0
 
-    def __init__(self, source: str | Expr, n: float = 2.0, K: float = 1.0):
-        self.source = Var(source) if isinstance(source, str) else source
-        self.n = n
-        self.K = K
+    def __post_init__(self):
+        self.source = _as_expr(self.source)
 
     def __call__(self, context):
         val = np.maximum(self.source(context), 0.0)
@@ -272,10 +313,12 @@ class Hill(Expr):
         return func_deriv * self.source.partial(var_name, lag, context)
 
 
+@dataclass
 class Abs(Expr):
+    source: Expr
 
-    def __init__(self, source: str | Expr):
-        self.source = Var(source) if isinstance(source, str) else source
+    def __post_init__(self):
+        self.source = _as_expr(self.source)
 
     def __call__(self, context):
         return abs(self.source(context))
@@ -298,14 +341,41 @@ class Rule:
         self.inputs = self.get_inputs()
         self.max_lag = max(max(lags) for lags in self.inputs.values())
 
-    def apply_step(self, signals: dict[str, np.ndarray], t: int) -> dict:
+    def to_dict(self) -> dict:
+        return {'target': self.target, 'expr': self.expr.to_dict()}
+
+    @staticmethod
+    def from_dict(d: dict) -> Rule:
+        return Rule(d['target'], Expr.from_dict(d['expr']))
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, Rule):
+            return NotImplemented
+        return self.target == other.target and self.expr == other.expr
+
+    def __repr__(self) -> str:
+        return f'Rule({self.target!r} += {self.expr!r})'
+
+    def apply_step(self,
+                   signals: dict[str, np.ndarray],
+                   t: int,
+                   start: int | None = None) -> dict:
+        """Add this rule's contribution at step ``t``.
+
+        If ``start`` is given the rule only acts from ``t >= start``, and
+        inputs from before ``start`` contribute zero (the rule has no memory
+        of anything before it starts)."""
         if t < self.max_lag:
             return signals
-        context = {
-            (name, lag): signals[name][t - lag]
-            for name, lags in self.inputs.items()
-            for lag in lags
-        }
+        if start is not None and t < start:
+            return signals
+        context = {}
+        for name, lags in self.inputs.items():
+            for lag in lags:
+                value = signals[name][t - lag]
+                if start is not None and t - lag < start:
+                    value = 0.0 * value
+                context[(name, lag)] = value
         signals[self.target][t] += self.expr(context)
         return signals
 
@@ -318,26 +388,11 @@ class Rule:
             result[v.name].append(v.lag)
         return result
 
-    def get_map(self) -> dict[str, list[tuple[str, int, Rule]]]:
-        """Get direct children (name and lags) of all input features"""
-        result = {}
-        for v in _vars(self.expr):
-            if v.name not in result:
-                result[v.name] = []
-            result[v.name].append((self.target, v.lag, self))
-        return result
-
 
 def _vars(expr: Expr) -> list[Var]:
     if isinstance(expr, Var):
         return [expr]
-    if isinstance(expr, BinaryOp):
-        return _vars(expr.left) + _vars(expr.right)
-    if hasattr(expr, 'source'):
-        return _vars(expr.source)
-    if hasattr(expr, 'sources'):
-        return [v for s in expr.sources for v in _vars(s)]
-    return []
+    return [v for child in expr.children() for v in _vars(child)]
 
 
 class AutoCorrelationRule(Rule):
@@ -347,56 +402,3 @@ class AutoCorrelationRule(Rule):
         expr = coeff * Var(feature, lag)
 
         super().__init__(target, expr)
-
-
-class MeanReversionRule(Rule):
-
-    def __init__(self, feature: str, mean: float, theta: float):
-        target = feature
-        expr = theta * (mean - Var(feature))
-
-        super().__init__(target, expr)
-
-
-# def expand_to_noise(rules: list[Rule],
-#                     target: str,
-#                     t: int,
-#                     max_depth: int = 10):
-#     rules_by_target = defaultdict(list)
-#     for rule in rules:
-#         rules_by_target[rule.target].append(rule)
-
-#     def expand_var(name, time, depth):
-#         noise_term = sp.Symbol(f'noise_{name}_{time}')
-#         if depth <= 0 or name not in rules_by_target:
-#             return noise_term
-#         return noise_term + sum(
-#             expand_expr(rule.expr, time, depth - 1)
-#             for rule in rules_by_target[name])
-
-#     def expand_expr(expr, time, depth):
-#         if isinstance(expr, Const):
-#             return sp.Float(expr.val)
-#         elif isinstance(expr, Var):
-#             return expand_var(expr.name, time - expr.lag, depth)
-#         elif isinstance(expr, Add):
-#             return (expand_expr(expr.left, time, depth) +
-#                     expand_expr(expr.right, time, depth))
-#         elif isinstance(expr, Sub):
-#             return (expand_expr(expr.left, time, depth) -
-#                     expand_expr(expr.right, time, depth))
-#         elif isinstance(expr, Mul):
-#             return (expand_expr(expr.left, time, depth) *
-#                     expand_expr(expr.right, time, depth))
-#         elif isinstance(expr, Div):
-#             return (expand_expr(expr.left, time, depth) /
-#                     expand_expr(expr.right, time, depth))
-#         elif isinstance(expr, Apply):
-#             inner = expand_expr(expr.source, time, depth)
-#             return sp.Function(expr.func.__name__)(inner)
-#         elif hasattr(expr, 'source'):
-#             inner = expand_expr(expr.source, time, depth)
-#             return sp.Function(type(expr).__name__)(inner)
-#         return sp.Symbol(f'unknown_{time}')
-
-#     return sp.expand(expand_var(target, t, max_depth))

@@ -4,7 +4,7 @@ Experiment configuration templates.
 from .models import MODELS, ModelCfg
 from .attention import ATTENTION
 from .losses import LOSSES, LossCfg
-from .datasets import DATASETS, FEATURE_COMBOS
+from .datasets import DATASETS, FEATURE_COMBOS, DatasetCfg, PredictionTarget
 from .training import TRAINING, TrainingCfg
 from .calibration import (
     CALIBRATION,
@@ -13,6 +13,7 @@ from .calibration import (
     VectorScalingCfg,
     PlattScalingCfg,
 )
+from .interpret import InterpretCfg, INTERPRETS
 from .experiments import generate_experiment_grid, collapse_experiment_grid, EXPERIMENT_SUITES, ExperimentCfg
 
 __all__ = [

@@ -4,12 +4,15 @@ import threading
 from dataclasses import dataclass, field, fields
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar, Literal
+from functools import cached_property
 
 import torch
 import h5py
 import numpy as np
 
 from PhagoPred.utils.logger import get_logger
+from .graph_synthetic.scenarios import load_scenario
+from .graph_synthetic.variances import estimate_unobserved_variance, Variances
 
 log = get_logger()
 
@@ -57,8 +60,7 @@ class CellDatasetMetadata:
                 continue
             if f.name == 'landmark_frames' and not self.landmarks_populated:
                 continue
-            setattr(cell, f.name,
-                    np.array(getattr(self, f.name), dtype=object)[idx])
+            setattr(cell, f.name, getattr(self, f.name))[idx]
         return cell
 
     def apply_mask(self, mask: np.ndarray) -> None:
@@ -152,10 +154,11 @@ class CellDataset(torch.utils.data.Dataset, ABC):
             self.full_len_frames = max(self.full_len_frames,
                                        features_cache.shape[1])
 
-            if 'PMFs' in self._get_file(i)['Cells']['Phase']:
-                pmfs_cache = self._get_features_np(i, features=['PMFs'])[0]
-                self._pmfs_cache[
-                    i] = pmfs_cache  # list[(num_frames, num_cells)]
+            # Synthetic files only: true PMFs live on Cells, not Cells/Phase.
+            cells = self._get_file(i)['Cells']
+            if 'PMFs' in cells:
+                self._pmfs_cache[i] = cells['PMFs'][:, :self.num_cells]
+                # list[(num_frames, num_cells)]
 
     def _get_features_np(self,
                          file_idx: int,
@@ -172,10 +175,8 @@ class CellDataset(torch.utils.data.Dataset, ABC):
             f = self._get_file(file_idx)
             arr = f['Cells']['Phase'][
                 feature][:]  # shape: (num_frame, num_cells)
-            num_cells = arr.shape[1]
-            if self.num_cells is not None:
-                if num_cells < self.num_cells:
-                    arr = arr[:, :num_cells]
+            if self.num_cells is not None and self.num_cells < arr.shape[1]:
+                arr = arr[:, :self.num_cells]
             feature_arrays.append(arr)
 
         features_np = np.stack(feature_arrays, axis=0)
@@ -203,39 +204,35 @@ class CellDataset(torch.utils.data.Dataset, ABC):
     def _load_cell_metadata(self) -> None:
         """Load metadata about each cell."""
         for path_idx, _ in enumerate(self.hdf5_paths):
-
-            test_feature_data = self._get_features_np(
+            phase = self._get_file(path_idx)['Cells']['Phase']
+            first_feature = self._get_features_np(
                 path_idx, features=self.feature_names[0:1])[0]
-            num_frames, num_cells = test_feature_data.shape
+            num_cells = first_feature.shape[1]  # already capped at num_cells
 
-            try:
-                cell_deaths = self._get_features_np(
-                    path_idx,
-                    features=['CellDeath'])[0][0]  # shape = (num_cells)
-            except KeyError:
+            # Per-cell values are stored (1, num_cells).
+            if 'CellDeath' in phase:
+                cell_deaths = self._get_features_np(path_idx,
+                                                    features=['CellDeath'
+                                                              ])[0][0]
+            elif 'scenario' in self._get_file(path_idx)['Cells'].attrs:
+                raise KeyError(f'{self.hdf5_paths[path_idx]}: synthetic file '
+                               'has no Cells/Phase/CellDeath')
+            else:  # real data without death labels: all censored
                 cell_deaths = np.full(num_cells, np.nan)
 
-            if self.num_cells is not None:
-                if self.num_cells < num_cells:
-                    num_cells = self.num_cells
-            cell_deaths = cell_deaths[:num_cells]
-            local_cell_idxs = np.arange(num_cells).astype(int)
+            if 'First Frame' in phase and 'Last Frame' in phase:
+                start, last = self._get_features_np(
+                    path_idx, features=['First Frame', 'Last Frame'])[:, 0]
+                start, last = start.astype(int), last.astype(int)
+            else:  # not stored: first/last non-NaN frame of the first feature
+                observed = ~np.isnan(
+                    first_feature.T)  # (num_cells, num_frames)
+                start = observed.argmax(axis=1)
+                last = observed.shape[1] - 1 - observed[:, ::-1].argmax(axis=1)
 
             self.cell_metadata.file_idxs += [path_idx] * num_cells
-            self.cell_metadata.local_cell_idxs += list(local_cell_idxs)
+            self.cell_metadata.local_cell_idxs += list(range(num_cells))
             self.cell_metadata.death_frames += list(cell_deaths)
-
-            # Use first feature in list to determine start/end frames
-            test_feature_data = self._get_features_np(
-                path_idx, features=self.feature_names[0:1])
-            test_feature_data = test_feature_data[0]
-            area_data = test_feature_data.T  # shape: (num_cells, num_frames)
-
-            not_nan_mask = ~np.isnan(area_data)
-            start = not_nan_mask.argmax(axis=1)
-            reversed_mask = not_nan_mask[:, ::-1]
-            last = area_data.shape[1] - 1 - reversed_mask.argmax(axis=1)
-
             self.cell_metadata.start_frames += list(start)
             self.cell_metadata.end_frames += list(last)
 
@@ -277,9 +274,54 @@ class CellDataset(torch.utils.data.Dataset, ABC):
         valid_mask = [len(lf) > 0 for lf in self.cell_metadata.landmark_frames]
         self.cell_metadata.apply_mask(valid_mask)
 
+    def _get_valid_landmarks(self, idx: int) -> np.ndarray:
+        cell_metadata = self.cell_metadata.get_cell(idx)
+        return self.landmarks_rule(
+            cell_metadata.start_frames,
+            cell_metadata.end_frames,
+            cell_metadata.death_frames,
+            self.min_length,
+            self.horizon,
+        )
+
+    @property
     @abstractmethod
-    def _get_valid_landmarks(self, idx: int) -> list:
-        """Get valid lanndmark frames for the given cell index."""
+    def horizon(self) -> int | None:
+        ...
+
+    @staticmethod
+    @abstractmethod
+    def landmarks_rule(start_frame: int, last_frame: int, death_frame: float,
+                       min_len: int, horizon: int) -> np.ndarray:
+        ...
+
+    def cell_history(self, idx: int) -> tuple[np.ndarray, np.ndarray]:
+        """Whole stored history of cell ``idx``: features (num_frames,
+        num_features) with NaN replaced by 0, and the observed mask
+        (num_frames,), False where any feature is NaN."""
+        meta = self.cell_metadata
+        features = self._features_cache[meta.file_idxs[idx]][
+            ..., meta.local_cell_idxs[idx]].T
+        nan = np.isnan(features)
+        return np.where(nan, 0.0, features), ~nan.any(axis=1)
+
+    def valid_landmarks(self, idx: int) -> np.ndarray:
+        """Valid landmark frames of cell ``idx`` (the task's rule)."""
+        return np.asarray(self.cell_metadata.landmark_frames[idx], dtype=int)
+
+    def landmark_labels(self, idx: int,
+                        landmarks: np.ndarray) -> dict[str, np.ndarray | None]:
+        """Labels for cell ``idx`` at each of ``landmarks``: a dict of arrays
+        with landmarks on axis 0 (None where unavailable, e.g. true values
+        on real data). Implemented per task."""
+        raise NotImplementedError(
+            f'{type(self).__name__} does not define landmark labels')
+
+    def _cell_pmf(self, idx: int) -> np.ndarray | None:
+        """True per-frame event PMF of cell ``idx`` (synthetic data only)."""
+        meta = self.cell_metadata
+        pmfs = self._pmfs_cache[meta.file_idxs[idx]]
+        return None if pmfs is None else pmfs[:, meta.local_cell_idxs[idx]]
 
     def __getitem__(self, idx: int):
         """Get a single sample from the dataset."""
@@ -296,51 +338,32 @@ class CellDataset(torch.utils.data.Dataset, ABC):
 
         return features, landmark_frame, event_indicator, cell_metadata
 
-    def _sample_landmark_distribution(self,
-                                      n_samples: int = 5000) -> np.ndarray:
-        """Return landmark frame positions sampled from this dataset's valid landmarks.
-
-        Gives an empirical distribution matching how this dataset samples landmarks,
-        used to align variance estimation with the test-set landmark distribution.
-        """
-        all_landmarks = []
-        idxs = self.sample_indices(n_samples)
-        for cell_idx in idxs:
-            # cell_idx = np.random.randint(0, len(self.cell_metadata))
-            landmarks = self._get_valid_landmarks(cell_idx)
-            all_landmarks.append(np.random.choice(landmarks))
-        return all_landmarks
-
-        # all_landmarks = []
-        # for i in range(len(self.cell_metadata)):
-        #     all_landmarks.extend(self._get_valid_landmarks(i))
-        # if not all_landmarks:
-        #     return np.array([self.min_length])
-        # all_landmarks = np.array(all_landmarks)
-        # if len(all_landmarks) > n_samples:
-        #     all_landmarks = np.random.choice(all_landmarks,
-        #                                      size=n_samples,
-        #                                      replace=False)
-        # return all_landmarks
-
     def _load_true_variances(self) -> None:
         return
 
-    # @abstractmethod
-    # def _compute_total_variances(self) -> None:
-    #     return
+    @cached_property
+    @abstractmethod
+    def unobserved_variance(self) -> float | list[float] | None:
+        ...
 
-    # @abstract
+    def _get_unobserved_variances(self) -> Variances:
+        file_path = self.hdf5_paths[0]
+        scenario = load_scenario(file_path)
+        if scenario is None:
+            return None
+        v = estimate_unobserved_variance(
+            scenario,
+            self.horizon,
+            self.min_length,
+            self.landmarks_rule,
+            hazard_bins=self.bins,
+        )
+        return v
 
-    def get_total_variances(self) -> float | list[float]:
-        if self.total_variances is None:
-            self._load_true_variances()
-        return self.total_variances
-
-    def get_unobserved_variances(self) -> float | list[float]:
-        if self.unobserved_variances is None:
-            self._load_true_variances()
-        return self.unobserved_variances
+    @cached_property
+    @abstractmethod
+    def bins(self) -> np.ndarray | None:
+        ...
 
 
 def collate_fn(batch: list[CellSample],
@@ -359,10 +382,13 @@ def collate_fn(batch: list[CellSample],
             batch_dict[f.name] = _crop_and_pad(values, batch, pad_at,
                                                max_seq_len,
                                                device).to(torch.float32)
-        elif f.name == 'mask':
+        elif f.name in ('mask', 'dense_mask'):
             batch_dict[f.name] = _crop_and_pad(values, batch, pad_at,
                                                max_seq_len,
                                                device).to(torch.int8)
+        elif f.name.startswith('dense_'):  # per-frame dense labels
+            batch_dict[f.name] = None if values[0] is None else _crop_and_pad(
+                values, batch, pad_at, max_seq_len, device).to(torch.float32)
         elif f.name in [
                 'time_to_event_bin',
                 'event',
@@ -398,14 +424,7 @@ def _crop_and_pad(values: list[np.ndarray], samples_list: list[CellSample],
                                     device=device)
     else:
         values_padded = torch.zeros(len(values), max_seq_len, device=device)
-        # values = values[
-        #     np.newaxis:,
-        # ]
-        # num_features = 1
-    # if has_features_dim:
 
-    # else:
-    #     values_padded = torch.zeros(len(values), max_seq_len, device=device)
     for idx, (sample_values, sample) in enumerate(zip(values, samples_list)):
         sample_values = sample_values[sample.start_frame:sample.landmark_frame]
         sample_len = sample_values.shape[0]
@@ -415,6 +434,5 @@ def _crop_and_pad(values: list[np.ndarray], samples_list: list[CellSample],
         elif pad_at == 'end':
             values_padded[idx, :sample_len] = torch.tensor(sample_values,
                                                            device=device)
-    # if not has_features_dim:
-    #     values_padded = values_padded[0]
+
     return values_padded

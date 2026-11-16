@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Literal
 
@@ -504,6 +506,44 @@ def plot_roc_curve(fpr, tpr, auc_score, save_path=None) -> None:
     ax.set_xlim(-0.02, 1.02)
     ax.set_ylim(-0.02, 1.02)
     ax.set_aspect('equal')
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+
+
+def plot_cdf_mse_by_length(cdf_mse_by_length: dict,
+                           total_variance: float | None = None,
+                           unobserved_variance: float | None = None,
+                           save_path=None) -> None:
+    """Plot cdf_mse against history length at the landmark, with the total and
+    unobserved variance as horizontal reference lines."""
+    width = cdf_mse_by_length['bin_width']
+    pts = [(start + width / 2, mse) for start, mse in zip(
+        cdf_mse_by_length['bin_starts'], cdf_mse_by_length['cdf_mse'])
+           if mse is not None]
+    fig, ax = plt.subplots(figsize=(8, 5))
+    if pts:
+        xs, ys = zip(*pts)
+        ax.plot(xs, ys, color='tab:blue', linewidth=2, label='cdf_mse')
+    if total_variance is not None:
+        ax.axhline(total_variance,
+                   color='dimgray',
+                   linestyle='--',
+                   linewidth=1.5,
+                   label=f'Total variance ({total_variance:.4f})')
+    if unobserved_variance is not None:
+        ax.axhline(unobserved_variance,
+                   color='black',
+                   linestyle=':',
+                   linewidth=2,
+                   label=f'Unobserved variance ({unobserved_variance:.2g})')
+    ax.set_xlabel('Sequence length at landmark (frames)', fontsize=12)
+    ax.set_ylabel('cdf_mse', fontsize=12)
+    ax.set_title('Prediction error vs sequence length', fontsize=14)
+    ax.set_ylim(bottom=0)
+    ax.legend()
+    ax.grid(True, axis='y', alpha=0.3)
     plt.tight_layout()
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')

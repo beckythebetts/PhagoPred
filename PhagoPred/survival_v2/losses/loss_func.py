@@ -8,6 +8,8 @@ from PhagoPred.survival_v2.data import (
     BinaryCellBatch,
     SurvivalCellBatch,
     BinaryClassCell,
+    DenseBinaryCell,
+    DenseSurvivalCell,
 )
 from PhagoPred.survival_v2.configs.losses import LossCfg, SurvivalLossCfg, BinaryLossCfg
 from PhagoPred.utils.logger import get_logger
@@ -33,27 +35,31 @@ def compute_binary_loss(
     predicted_event_prob: torch.Tensor,
     true_event: torch.Tensor,
     loss_config: BinaryLossCfg,
+    mask: torch.Tensor = None,
 ) -> dict:
-    """Compute binary classification loss for event prediction."""
+    """Compute binary classification loss for event prediction.
+    If mask is given, the loss is averaged over masked-in elements only."""
     if loss_config is None:
         raise ValueError("loss_config must be provided")
     if loss_config.loss_type == 'bce':  # default: 'bce'
         # log.info(
         #     f'Caculating BCE\n{predicted_event_prob}\n{torch.unique(true_event)}'
         # )
-        loss = binary_cross_entropy_loss(predicted_event_prob, true_event)
+        loss = binary_cross_entropy_loss(predicted_event_prob, true_event,
+                                         mask)
         # log.info(f'Calculated loss \n{loss}')
         return {'total': loss, 'BCE': loss}
     if loss_config.loss_type == 'weighted_bce':
         pos_weight = loss_config.pos_weight
         loss = weighted_binary_cross_entropy_loss(predicted_event_prob,
-                                                  true_event, pos_weight)
+                                                  true_event, pos_weight,
+                                                  mask)
         return {'total': loss, 'Weighted BCE': loss}
     if loss_config.loss_type == 'binary_focal':
         alpha = loss_config.focal_alpha
         gamma = loss_config.focal_gamma
         loss = binary_focal_loss(predicted_event_prob, true_event, alpha,
-                                 gamma)
+                                 gamma, mask)
         return {'total': loss, 'Focal': loss}
     else:
         raise ValueError(f'Unknown binary loss type {loss_config.loss_type}')
@@ -148,7 +154,31 @@ def compute_loss(outputs: torch.Tensor,
                  loss_cfg: LossCfg,
                  y_pred: torch.Tensor = None) -> dict:
     """Return either binary or survival loss depeniding on batch type."""
-    if isinstance(batch, BinaryCell):
+    if isinstance(batch, DenseBinaryCell):
+        # outputs: (batch, seq_len, 1) per-timestep logits
+        loss_dict = compute_binary_loss(
+            outputs[..., 0],
+            batch.dense_event,
+            loss_cfg,
+            mask=batch.dense_mask,
+        )
+
+    elif isinstance(batch, DenseSurvivalCell):
+        # outputs: (batch, seq_len, num_bins) per-timestep logits; each valid
+        # landmark is an ordinary survival sample.
+        if loss_cfg.ranking > 0.0:
+            raise ValueError(
+                'Ranking losses are not supported with dense supervision: '
+                'they would compare landmarks of the same cell')
+        valid = batch.dense_mask.bool()
+        loss_dict = compute_survival_loss(
+            outputs[valid],
+            batch.dense_time_to_event_bin[valid].long(),
+            batch.dense_event_indicator[valid].long(),
+            loss_cfg,
+        )
+
+    elif isinstance(batch, BinaryCell):
         loss_dict = compute_binary_loss(
             outputs[:, 0],
             batch.event,

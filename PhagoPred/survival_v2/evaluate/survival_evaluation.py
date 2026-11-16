@@ -127,10 +127,9 @@ def evaluate_survival_model(model,
             "Model must be an instance of SurvivalModel or ClassicalSurvivalModel."
         )
 
-    c_indexs = concordance_index(predictions, times, events,
-                                 dataset.event_time_bins)
+    c_indexs = concordance_index(predictions, times, events, dataset.bins)
     ibs, brier_times, brier_scores = integrated_brier_score(
-        predictions, times, events, dataset.event_time_bins)
+        predictions, times, events, dataset.bins)
 
     hazard_mean_squared_error = hazard_mse(predictions, true_binned_pmfs)
     pmf_mean_squared_error = pmf_mse(predictions, true_binned_pmfs)
@@ -241,7 +240,7 @@ def _get_deep_predictions(
         collate_fn=lambda batch: survival_collate_fn(batch, device=device),
         sampler=dataset.make_sampler())
 
-    bin_edges = dataset.event_time_bins
+    bin_edges = dataset.bins
     all_pmfs = []
     all_true_bins = []
     all_true_times = []
@@ -321,7 +320,7 @@ def _get_classical_predictions(model: ClassicalSurvivalModel,
             visualise_survival_prediction(
                 single_sample,
                 pmf,
-                bin_edges=dataset.event_time_bins,
+                bin_edges=dataset.bins,
                 feature_names=feature_names,
                 save_path=save_dir / f"prediction_{visualised}.png",
                 padded='none',

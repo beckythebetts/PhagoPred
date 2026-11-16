@@ -11,6 +11,7 @@ from PhagoPred.survival_v2.models import SurvivalModel
 from PhagoPred.survival_v2.losses import compute_loss
 from PhagoPred.survival_v2.data.dataset import CellSample
 from PhagoPred.survival_v2.data.survival_dataset import SurvivalCellBatch
+from PhagoPred.survival_v2.data.dense_dataset import DenseCell
 from PhagoPred.survival_v2.configs.losses import LossCfg
 from PhagoPred.utils.logger import get_logger
 
@@ -53,7 +54,13 @@ def epoch(
         batch: CellSample
         optimiser.zero_grad()
 
-        model_output = model(batch.features, batch.length, mask=batch.mask)
+        dense = isinstance(batch, DenseCell)
+        if dense:
+            model_output = model.forward_dense(batch.features,
+                                               batch.length,
+                                               mask=batch.mask)
+        else:
+            model_output = model(batch.features, batch.length, mask=batch.mask)
 
         # Handle different return types (LSTM returns y_pred, CNN doesn't)
         if isinstance(model_output, tuple):
@@ -71,14 +78,25 @@ def epoch(
                                            max_norm=max_grad_norm)
             optimiser.step()
 
-        batch_size = batch.features.size(0)
+        # Dense batches count (cell, landmark) pairs, so losses and event
+        # fractions are averaged over landmarks rather than cells.
+        if dense:
+            batch_size = int(batch.dense_mask.sum().item())
+        else:
+            batch_size = batch.features.size(0)
         num_samples += batch_size
 
         # Track event/censoring balance (event=1, censored=0). Survival batches
         # expose `event_indicator`; binary batches expose `event`.
-        ev = getattr(batch, 'event_indicator', None)
-        if ev is None:
-            ev = getattr(batch, 'event', None)
+        if dense:
+            ev = getattr(batch, 'dense_event_indicator', None)
+            if ev is None:
+                ev = batch.dense_event
+            ev = ev[batch.dense_mask.bool()]
+        else:
+            ev = getattr(batch, 'event_indicator', None)
+            if ev is None:
+                ev = getattr(batch, 'event', None)
         if ev is not None:
             batch_events = int((ev == 1).sum().item())
             num_events += batch_events
@@ -110,12 +128,18 @@ def train_deep(
     device: str,
     verbose: bool = True,
     validate_every: int = 1,
+    patience: int | None = None,
 ) -> tuple[dict, dict]:
-    """Train a pytrch binary/survival model"""
+    """Train a pytrch binary/survival model.
+
+    If patience is set, stop once `patience` epochs pass without a new best
+    validation loss.
+    """
     model = model.to(device)
     history = []
 
     best_val = None
+    best_epoch = 0
     best_model = deepcopy(model.state_dict())
 
     progress_bar = tqdm(range(1, num_epochs +
@@ -134,8 +158,10 @@ def train_deep(
             val = validate_losses['total']
             if best_val is None:
                 best_val = val
+                best_epoch = epoch_idx
             if val < best_val:
                 best_val = val
+                best_epoch = epoch_idx
                 best_model = deepcopy(model.state_dict())
 
         log.info(
@@ -162,6 +188,11 @@ def train_deep(
                 'min_ev/batch':
                 int(train_losses.get('min_events_per_batch', 0)),
             })
+
+        if patience is not None and epoch_idx - best_epoch >= patience:
+            log.info(f'Early stopping at epoch {epoch_idx}: no improvement '
+                     f'since epoch {best_epoch} (val {best_val:.4f})')
+            break
 
     # Restore the best-validation weights into the in-place model so the
     # caller's `model` object matches `best_model` (and the saved state dict),
