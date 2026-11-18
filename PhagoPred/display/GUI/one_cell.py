@@ -46,24 +46,35 @@ class CellViewer(QWidget):
         self.phase_data = None
         self.epi_data = None
 
-        self.first_frame = int(self.h5.first_frames[self.cell_idx])
-        self.last_frame = int(
-            min(self.h5.last_frames[self.cell_idx] + 20, self.h5.num_frames))
-        death_frame = self.h5.death_frames[self.cell_idx]
-        # event_frame = self.h5.event_frames[self.cell_idx]
-        self.cell_death = None if np.isnan(death_frame) else int(death_frame)
-        # self.event_frame = None if np.isnan(event_frame) else event_frame
+        # A dataset that has only been segmented has no tracking features:
+        # the frame range and centres then come from the segmentations
+        # (found by the loader thread), and there's no death frame.
+        self.first_frame = self.last_frame = None
+        if (self.h5.has_feature('First Frame')
+                and self.h5.has_feature('Last Frame')):
+            self.first_frame = int(self.h5.first_frames[self.cell_idx])
+            self.last_frame = int(
+                min(self.h5.last_frames[self.cell_idx] + 20,
+                    self.h5.num_frames))
+        self.cell_death = None
+        if self.h5.has_feature('Death Frame'):
+            death_frame = self.h5.death_frames[self.cell_idx]
+            self.cell_death = None if np.isnan(death_frame) else int(
+                death_frame)
 
         self.progress_bar = None
         self.feature_names = [
             n for n in self.h5.feature_names if n not in NOT_PLOTTED
         ]
 
-        # Create plots widget with checkboxes
-        self.plots_widget = FeaturePlotsWidget(self.feature_names)
-        self.plots_dock = self.viewer.window.add_dock_widget(self.plots_widget,
-                                                             area='bottom')
-        self.plots_widget.setMinimumHeight(400)
+        # Create plots widget with checkboxes (nothing to plot without
+        # features)
+        self.plots_widget = self.plots_dock = None
+        if self.feature_names:
+            self.plots_widget = FeaturePlotsWidget(self.feature_names)
+            self.plots_dock = self.viewer.window.add_dock_widget(
+                self.plots_widget, area='bottom')
+            self.plots_widget.setMinimumHeight(400)
 
         # Start loading images in thread
         self.loader_thread = CellLoaderThread(cell_idx=self.cell_idx,
@@ -84,8 +95,10 @@ class CellViewer(QWidget):
         self.loader_thread.finished.connect(self.on_load_finished)
         self.loader_thread.progress.connect(self.progress_bar.update_progress)
 
-    def on_load_finished(self, phase_data, epi_data, mask):
+    def on_load_finished(self, phase_data, epi_data, mask, first_frame,
+                         last_frame):
         self.progress_bar.close()
+        self.first_frame, self.last_frame = first_frame, last_frame
         self.cell_death_signal.emit(self.cell_death)
         # self.cell_event_signal.emit(self.event_frame)
         self.phase_data = phase_data
@@ -118,6 +131,8 @@ class CellViewer(QWidget):
         # Centre the view on the cropped cell
         self.viewer.reset_view()
 
+        if self.plots_widget is None:
+            return
         self.update_feature_plots()
 
         # Add vertical lines to plots
@@ -156,11 +171,14 @@ class CellViewer(QWidget):
 class CellLoaderThread(QThread):
     start_signal = Signal(int)
     progress = Signal(int)
-    # phase_data, epi_data (None if the file has no Epi), cell mask
-    finished = Signal(np.ndarray, object, np.ndarray)
+    # phase_data, epi_data (None if the file has no Epi), cell mask, and the
+    # first/last frame (exclusive) the crops cover
+    finished = Signal(np.ndarray, object, np.ndarray, int, int)
 
-    def __init__(self, cell_idx: int, first_frame: int, last_frame: int,
-                 frame_size: int, h5: H5File):
+    def __init__(self, cell_idx: int, first_frame: int | None,
+                 last_frame: int | None, frame_size: int, h5: H5File):
+        """first_frame/last_frame are None if the file has no tracking, in
+        which case they're found from the segmentations."""
         super().__init__()
         self.cell_idx = cell_idx
         self.first_frame = first_frame
@@ -170,16 +188,31 @@ class CellLoaderThread(QThread):
 
     def run(self):
         try:
-            self.n_frames = self.last_frame - self.first_frame
-            self.start_signal.emit(self.n_frames)
-
             im_shape = self.h5.im_dims
 
-            frames = slice(self.first_frame, self.last_frame)
-            x_centres = tools.fill_nans(
-                self.h5.get_features('X', self.cell_idx, frames))
-            y_centres = tools.fill_nans(
-                self.h5.get_features('Y', self.cell_idx, frames))
+            if self.first_frame is None or not (self.h5.has_feature('X')
+                                                and self.h5.has_feature('Y')):
+                # No tracking: find the cell in the segmentations. Progress
+                # covers that scan, then the crops (so goes up to 2x frames).
+                self.start_signal.emit(2 * self.h5.num_frames)
+                first, last, x_all, y_all = self.h5.track_from_segs(
+                    self.cell_idx, self.progress.emit)
+                if self.first_frame is None:
+                    self.first_frame = first
+                    self.last_frame = min(last + 20, self.h5.num_frames)
+                frames = slice(self.first_frame, self.last_frame)
+                x_centres = tools.fill_nans(x_all[frames])
+                y_centres = tools.fill_nans(y_all[frames])
+                progress_offset = self.h5.num_frames
+            else:
+                frames = slice(self.first_frame, self.last_frame)
+                x_centres = tools.fill_nans(
+                    self.h5.get_features('X', self.cell_idx, frames))
+                y_centres = tools.fill_nans(
+                    self.h5.get_features('Y', self.cell_idx, frames))
+                progress_offset = 0
+                self.start_signal.emit(self.last_frame - self.first_frame)
+            self.n_frames = self.last_frame - self.first_frame
 
             regions = []
             for idx in range(self.n_frames):
@@ -193,11 +226,12 @@ class CellLoaderThread(QThread):
             # One file open for all three stacks (opens are slow remotely)
             phase_data, epi_data, mask = self.h5.get_crops(
                 range(self.first_frame, self.last_frame), regions,
-                self.progress.emit)
+                lambda i: self.progress.emit(progress_offset + i))
 
             cell_mask = (mask == self.cell_idx)
 
-            self.finished.emit(phase_data, epi_data, cell_mask)
+            self.finished.emit(phase_data, epi_data, cell_mask,
+                               self.first_frame, self.last_frame)
 
         except Exception:
             import traceback

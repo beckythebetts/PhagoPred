@@ -102,9 +102,45 @@ class H5File:
         with self._open() as f:
             return f[self.PHASE].shape[0]
 
+    def has_feature(self, name: str) -> bool:
+        """Whether a per-cell/per-frame feature is in the file; a dataset
+        that has only been segmented has none."""
+        with self._open() as f:
+            return self.FEATURES in f and name in f[self.FEATURES]
+
+    def track_from_segs(
+        self,
+        cell_idx: int,
+        progress: Callable[[int], None] | None = None,
+    ) -> tuple[int, int, np.ndarray, np.ndarray]:
+        """Find a cell from the segmentations alone, for files without the
+        First/Last Frame, X and Y features. Reads every segmentation frame.
+
+        Returns:
+            (first_frame, last_frame, x, y): the frames the cell appears in
+            (inclusive), and its per-frame centroid row (x) and column (y),
+            NaN where it isn't segmented.
+        """
+        n = self.num_frames
+        x, y = np.full(n, np.nan), np.full(n, np.nan)
+        with self._open() as f:
+            segs = f[self.SEGS]
+            for i in range(n):
+                rows, cols = np.nonzero(segs[i] == cell_idx)
+                if rows.size:
+                    x[i], y[i] = rows.mean(), cols.mean()
+                if progress is not None:
+                    progress(i)
+        present = np.flatnonzero(~np.isnan(x))
+        if present.size == 0:
+            raise ValueError(f'Cell {cell_idx} is not in any segmentation')
+        return int(present[0]), int(present[-1]), x, y
+
     @cached_property
     def feature_names(self) -> list[str]:
         with self._open() as f:
+            if self.FEATURES not in f:
+                return []
             return [
                 n for n, d in f[self.FEATURES].items()
                 if d.shape[self.FRAME_DIM] > 1

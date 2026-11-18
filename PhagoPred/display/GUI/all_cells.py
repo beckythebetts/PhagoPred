@@ -22,18 +22,28 @@ FRAME_CACHE_SIZE = 32
 def _alive_seg_reader(h5: H5File) -> Callable[[int], np.ndarray]:
     """get_frame(i) for segmentations with bad tracks and dead cells hidden
     (as get_segs(filter_bad=True, alive_only=True)), reading the per-cell
-    tables once up front instead of on every frame."""
+    tables once up front instead of on every frame. Either table may be
+    missing (a freshly segmented dataset has neither): that filter is then
+    skipped, and with neither the frames are shown as they are."""
     # Own instance: h5 itself has its bad-track filter turned off
     filtered = H5File(h5.path)
-    good = filtered.good_cells
-    death = filtered.death_frames
-    # (cells + 1,): last entry is background (-1), which is never hidden
-    num_cells = len(good)
+    good = (filtered.bad_track_prob <= filtered.bad_track_thresh
+            if filtered.has_feature('Bad Track Probability') else None)
+    death = (filtered.death_frames
+             if filtered.has_feature('Death Frame') else None)
+    if good is None and death is None:
+        return h5.get_segs
+
+    num_cells = len(good if good is not None else death)
 
     def get_frame(i: int) -> np.ndarray:
         segs = h5.get_segs(i)
+        # (cells + 1,): last entry is background (-1), never hidden
         hide = np.zeros(num_cells + 1, dtype=bool)
-        hide[:-1] = ~good | (death <= i)  # NaN death compares False
+        if good is not None:
+            hide[:-1] |= ~good
+        if death is not None:
+            hide[:-1] |= death <= i  # NaN death compares False
         return np.where(hide[segs], -1, segs).astype(segs.dtype)
 
     return get_frame
@@ -89,6 +99,10 @@ class AllCellsViewer:
         self.cell_viewer = None
         self.missed_layer = None
         self.missed_points = np.empty((0, 3))  # (frame, y, x)
+        self.removed_layer = None
+        # Segmentations left out of the count: (frame, label) -> (frame, y, x)
+        # of where it was clicked, to mark it. Display/counting only.
+        self.removed = {}
         self.count_label = QtWidgets.QLabel("")
         self.cell_info = None
 
@@ -132,6 +146,22 @@ class AllCellsViewer:
         counter_layout.addWidget(self.reset_frame_button)
         counter_layout.addWidget(self.reset_all_button)
         self.viewer.window.add_dock_widget(counter_widget, area="right")
+
+        count_actions = QtWidgets.QWidget()
+        actions_layout = QtWidgets.QHBoxLayout(count_actions)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        self.remove_button = QtWidgets.QPushButton("Remove segmentation")
+        self.remove_button.setCheckable(True)
+        self.remove_button.setToolTip(
+            "While on, double-click a segmentation to leave it out of the "
+            "count (the data is not changed); double-click again to restore.")
+        self.save_count_button = QtWidgets.QPushButton("Save count")
+        self.save_count_button.setToolTip(
+            "Save this frame's corrected count in the .h5 file's attributes "
+            "as num_cells_<frame>.")
+        actions_layout.addWidget(self.remove_button)
+        actions_layout.addWidget(self.save_count_button)
+        self.viewer.window.add_dock_widget(count_actions, area="right")
         self._update_count()
 
         self._connect_signals()
@@ -146,6 +176,8 @@ class AllCellsViewer:
         self.reset_all_button.clicked.connect(
             partial(self._reset_missed, frame_only=False))
         self.viewer.dims.events.current_step.connect(self._update_count)
+        self.remove_button.toggled.connect(self._on_remove_mode)
+        self.save_count_button.clicked.connect(self._save_count)
 
     def _goto_cell_from_text(self):
         """Open a cell index typed into the text box."""
@@ -210,9 +242,10 @@ class AllCellsViewer:
                 self.labels_layer = self.viewer.add_labels(
                     self.seg_data + 1, name="Segmentations", opacity=0.3)
             self._add_missed_layer()
+            self._add_removed_layer()
         else:
-            for layer_name in ("Phase", "Epi", "Segmentations",
-                               "Missed cells"):
+            for layer_name in ("Phase", "Epi", "Segmentations", "Missed cells",
+                               "Removed segmentations"):
                 if layer_name in self.viewer.layers:
                     self.viewer.layers[layer_name].visible = True
 
@@ -231,26 +264,106 @@ class AllCellsViewer:
         self.missed_points = self.missed_layer.data
         self._update_count()
 
+    def _add_removed_layer(self):
+        """Marks segmentations left out of the count. Read-only: edited by
+        double-clicking segmentations in remove mode."""
+        self.removed_layer = self.viewer.add_points(
+            self._removed_points(),
+            ndim=3,
+            name='Removed segmentations',
+            face_color='transparent',
+            border_color='red',
+            border_width=0.15,
+            symbol='cross',
+            size=25)
+        self.removed_layer.editable = False
+
+    def _removed_points(self) -> np.ndarray:
+        return (np.array(list(self.removed.values()), dtype=float).reshape(
+            -1, 3))
+
+    def _on_remove_mode(self, checked: bool):
+        """In remove mode double-clicks remove segmentations, so stop
+        clicks adding missed cells."""
+        if self.missed_layer is not None:
+            self.missed_layer.mode = 'pan_zoom' if checked else 'add'
+
+    def _toggle_removed(self, position, label_val: int):
+        key = (int(round(position[0])), int(label_val))
+        if key in self.removed:
+            del self.removed[key]
+        else:
+            self.removed[key] = tuple(position[:3])
+        if self.removed_layer in self.viewer.layers:
+            self.removed_layer.data = self._removed_points()
+        self._update_count()
+
+    def _frame_counts(self, frame: int) -> dict | None:
+        """Counts for a frame, or None if it can't be worked out (no
+        segmentations, or not in the overview)."""
+        if (self.labels_layer is None or not self.labels_layer.visible
+                or not 0 <= frame < len(self.labels_layer.data)):
+            return None
+        labels = np.unique(np.asarray(self.labels_layer.data[frame]))
+        labels = labels[labels > 0]
+        removed = sum(1 for f, label in self.removed
+                      if f == frame and label in labels)
+        missed = int(np.sum(np.round(self.missed_points[:, 0]) == frame))
+        segmented = len(labels)
+        return dict(segmented=segmented,
+                    removed=removed,
+                    missed=missed,
+                    total=segmented - removed + missed)
+
     def _update_count(self, event=None):
-        frame = self.viewer.dims.current_step[0]
+        frame = int(self.viewer.dims.current_step[0])
         on_frame = np.round(self.missed_points[:, 0]) == frame
-        self.count_label.setText(f'Missed cells: {on_frame.sum()} this frame, '
-                                 f'{len(self.missed_points)} total')
+        text = (f'Missed cells: {on_frame.sum()} this frame, '
+                f'{len(self.missed_points)} total')
+        counts = self._frame_counts(frame)
+        if counts is not None:
+            text += (f"\nSegmented {counts['segmented']} - removed "
+                     f"{counts['removed']} + missed {counts['missed']} = "
+                     f"{counts['total']}")
+        self.count_label.setText(text)
+
+    def _save_count(self):
+        """Write this frame's corrected count into the file's attributes."""
+        frame = int(self.viewer.dims.current_step[0])
+        counts = self._frame_counts(frame)
+        if counts is None:
+            self.status_label.setText('No segmentations to count')
+            return
+        name = f'num_cells_{frame}'
+        try:
+            self.h5.write_attr(name, counts['total'])
+        except OSError as e:
+            self.status_label.setText(f'Could not save {name}: {e}')
+            return
+        self.status_label.setText(f"Saved {name} = {counts['total']}")
 
     def _reset_missed(self, frame_only: bool):
+        """Clear missed cells and removed segmentations, on this frame or
+        everywhere."""
+        frame = int(self.viewer.dims.current_step[0])
         if frame_only:
-            frame = self.viewer.dims.current_step[0]
             keep = np.round(self.missed_points[:, 0]) != frame
+            self.removed = {k: v for k, v in self.removed.items()
+                            if k[0] != frame}
         else:
             keep = np.zeros(len(self.missed_points), dtype=bool)
+            self.removed = {}
         self.missed_points = self.missed_points[keep]
         if self.missed_layer in self.viewer.layers:
             self.missed_layer.data = self.missed_points
+        if self.removed_layer in self.viewer.layers:
+            self.removed_layer.data = self._removed_points()
         self._update_count()
 
     def _hide_overview_layers(self):
         """Hide the overview (full field) layers."""
-        for layer_name in ("Phase", "Epi", "Segmentations", "Missed cells"):
+        for layer_name in ("Phase", "Epi", "Segmentations", "Missed cells",
+                           "Removed segmentations"):
             if layer_name in self.viewer.layers:
                 self.viewer.layers[layer_name].visible = False
 
@@ -259,7 +372,8 @@ class AllCellsViewer:
         # Remove cell-specific layers
         if self.cell_viewer is not None:
             self.viewer.layers.clear()
-            self.cell_viewer.plots_dock.close()
+            if self.cell_viewer.plots_dock is not None:
+                self.cell_viewer.plots_dock.close()
             self.cell_viewer = None
 
         # Show the overview layers again
@@ -291,6 +405,11 @@ class AllCellsViewer:
 
         def _click_callback(viewer, event):
             if self.labels_layer is None:
+                return True
+            if self.remove_button.isChecked():
+                label_val = self.labels_layer.get_value(event.position)
+                if label_val:
+                    self._toggle_removed(event.position, label_val)
                 return True
             if (viewer.layers.selection.active is self.missed_layer
                     and self.missed_layer.mode == 'add'):
