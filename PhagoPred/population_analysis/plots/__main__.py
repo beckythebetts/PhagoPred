@@ -4,10 +4,11 @@ from collections import defaultdict
 from .survival import plot_num_alive_cells, plot_event_time_distributions, plot_censoring_vs_death
 from .fluorescence import plot_tot_fluor, plot_fluor_hist
 from .fluor_survival import plot_hazard_vs_burden, plot_hazard_by_infection
+from .counts import plot_manual_counts_by_day
 from ._common import label_to_files_mapping, generate_files_mapping
 
-BASEDIR = Path('~/thor_server').expanduser()
-# BASEDIR = Path(r'T:\\')
+# BASEDIR = Path('~/thor_server').expanduser()
+BASEDIR = Path(r'T:\\')
 
 
 def main():
@@ -44,17 +45,30 @@ def main():
     #     # label_prefix='Infection duration: ',
     #     # label_suffix=' hours',
     # )
-    plot_fluor_hist(duration_dict)
-    # plot_num_alive_cells(
-    #     duration_dict,
-    #     every=40,
-    #     bar=True,
-    #     death_rate=True,
-    #     # label_prefix='Distance from centre ',
-    #     label_prefix='Infection duration: ',
-    #     label_suffix=' hours',
-    #     # colours={0: 'k'},
+    # plot_manual_counts_by_day(
+    #     {
+    #         'Day 0': BASEDIR / 'MacrophageData' / 'control_test',
+    #         'Day 3': BASEDIR / 'MacrophageData' / 'control_test_day3'
+    #     },
+    #     {
+    #         'Control': ['A4', 'A5', 'A6', 'B4', 'B5', 'B6'],
+    #         '+ Lysosostaphin': ['A1', 'A2', 'A3', 'B1', 'B2', 'B3'],
+    #         '+ Gentamicin': ['C4', 'C5', 'C6', 'D4', 'D5', 'D6'],
+    #         '+ Gentamicin \n+ Lysostaphin':
+    #         ['C1', 'C2', 'C3', 'D1', 'D2', 'D3'],
+    #     },  # text in file names
     # )
+    # plot_fluor_hist(duration_dict)
+    plot_num_alive_cells(
+        control_dict,
+        # every=40,
+        # bar=True,
+        # death_rate=True,
+        # label_prefix='Distance from centre ',
+        label_prefix='Infection duration: ',
+        label_suffix=' hours',
+        # colours={0: 'k'},
+    )
     # plot_censoring_vs_death(duration_dict, num_bins=12)
 
 
