@@ -49,7 +49,7 @@ class Missingness:
             num_cells: int) -> tuple[np.ndarray, np.ndarray]:
         """First and last observed frame (inclusive) of each cell.
 
-        Without late entry, cells start in the first 10 frames; late entrants
+        Without late entry, cells start at frame 0; late entrants
         start uniformly in [0, max_late_entry_frac * num_frames). Likewise for
         the end of the window and early exit."""
         if self.late_entry_prob > 0.0:
@@ -60,7 +60,10 @@ class Missingness:
                 max(1, int(self.max_late_entry_frac * num_frames)),
                 size=int(late.sum()))
         else:
-            start = np.random.randint(0, 10, size=num_cells)
+            # Frame 0: the ground truth rolls forward from the stored context,
+            # which ends at frame 0 (and the series is stationary after
+            # burn-in, so a random start would add nothing).
+            start = np.zeros(num_cells, dtype=int)
 
         if self.early_exit_prob > 0.0:
             end = np.full(num_cells, num_frames - 1, dtype=int)
@@ -148,6 +151,11 @@ class ScenarioCfg:
         return cls(**d)
 
     def calibrate_hazard(self, num_samples: int = 200) -> None:
+        # Measure the spread where landmarks are: with the hazard starting at
+        # frame 0, its window is only full from max_lag on.
+        spread_start = self.hazard_spread_start
+        if self.hazard_from_frame_0:
+            spread_start = max(spread_start, self.graph.max_lag)
         self.hazard_func = calibrate_hazard(
             self.graph,
             self.num_frames,
@@ -155,7 +163,7 @@ class ScenarioCfg:
             np.full(num_samples, self.num_frames),
             self.target_death_fraction,
             hazard_spread=self.hazard_spread,
-            spread_start=self.hazard_spread_start,
+            spread_start=spread_start,
         )
 
 
@@ -178,8 +186,9 @@ BASE_CFGS: list[ScenarioCfg] = [
         pre_noise=Noise.gaussian(0.5),
         post_noise=Noise.gaussian(0.1),
         missingness=Missingness.none(),
-        burn_in=1000,
-        death_burn_in=200,
+        burn_in=1000,  # features only: Hazard starts at frame 0
+        hazard_from_frame_0=True,  # no death burn-in, so no selection
+        # before frame 0
     ) for name, rules_func in RULE_SETS.items()
 ]
 

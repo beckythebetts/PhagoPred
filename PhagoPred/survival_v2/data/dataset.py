@@ -60,7 +60,7 @@ class CellDatasetMetadata:
                 continue
             if f.name == 'landmark_frames' and not self.landmarks_populated:
                 continue
-            setattr(cell, f.name, getattr(self, f.name))[idx]
+            setattr(cell, f.name, getattr(self, f.name)[idx])
         return cell
 
     def apply_mask(self, mask: np.ndarray) -> None:
@@ -105,6 +105,8 @@ class CellDataset(torch.utils.data.Dataset, ABC):
         self.model_type = model_type
         self.num_cells = num_cells
 
+        self._clean_features_cache = [None] * len(hdf5_paths)
+        self._raw_context_cache = [None] * len(hdf5_paths)
         self._lock = threading.Lock()
         self._files = [None] * len(hdf5_paths)
 
@@ -364,6 +366,66 @@ class CellDataset(torch.utils.data.Dataset, ABC):
     @abstractmethod
     def bins(self) -> np.ndarray | None:
         ...
+
+    @property
+    def context_feature_names(self) -> list[str]:
+        """Column order of ``raw_context``: the features, plus the hazard
+        (needed to roll the graph forward from the context)."""
+        return list(self.feature_names) + ['Hazard']
+
+    @cached_property
+    def has_clean(self) -> bool:
+        """Whether every file holds clean features and pre-frame-0 context
+        (synthetic data only)."""
+        for i in range(len(self.hdf5_paths)):
+            cells = self._get_file(i)['Cells']
+            if 'Clean' not in cells or 'Context' not in cells:
+                return False
+        return True
+
+    def raw_context(self, idx: int) -> np.ndarray:
+        """Clean history before frame 0 of cell ``idx``, (num_context, F + 1),
+        columns ``context_feature_names`` (synthetic data only)."""
+        meta = self.cell_metadata
+        file_idx, cell = meta.file_idxs[idx], meta.local_cell_idxs[idx]
+        if self._raw_context_cache[file_idx] is None:
+            cells = self._get_file(file_idx)['Cells']
+            if 'Context' not in cells:
+                raise ValueError(
+                    f'{self.hdf5_paths[file_idx]} has no context values')
+            arr = np.stack([
+                cells['Context'][n][:] for n in self.context_feature_names
+            ])  # [F + 1, C, num_cells]
+            if self.num_cells is not None:
+                arr = arr[..., :self.num_cells]
+            self._raw_context_cache[file_idx] = arr
+        return self._raw_context_cache[file_idx][..., cell].T
+
+    def raw_features(self, idx: int, clean: bool = False) -> np.ndarray:
+        """Stored history of cell ``idx`` in raw units, (num_frames, F), NaN where
+        unobserved. ``clean``: the noise-free signals (synthetic data only)."""
+        meta = self.cell_metadata
+        file_idx, cell = meta.file_idxs[idx], meta.local_cell_idxs[idx]
+        if clean:
+            cache = self._get_clean_cache(file_idx)
+            return cache[..., cell].T
+        x = self._features_cache[file_idx][..., cell].T
+        if self.means is not None:
+            x = x * self.stds + self.means
+        return x
+
+    def _get_clean_cache(self, file_idx: int) -> np.ndarray:
+        """Clean features of one file, [F, T, C], loaded on first use."""
+        if self._clean_features_cache[file_idx] is None:
+            cells = self._get_file(file_idx)['Cells']
+            if 'Clean' not in cells:
+                raise ValueError(
+                    f'{self.hdf5_paths[file_idx]} has no clean features')
+            arr = np.stack([cells['Clean'][n][:] for n in self.feature_names])
+            if self.num_cells is not None:
+                arr = arr[..., :self.num_cells]
+            self._clean_features_cache[file_idx] = arr
+        return self._clean_features_cache[file_idx]
 
 
 def collate_fn(batch: list[CellSample],

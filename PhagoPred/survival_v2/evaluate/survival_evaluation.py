@@ -63,14 +63,14 @@ def _variance_cache_key(dataset_cfg: DatasetCfg) -> str:
 def _get_or_compute_variances(dataset: SurvivalCellDataset,
                               dataset_cfg: DatasetCfg,
                               cache_dir: Path | None) -> tuple[dict, dict]:
-    """Return (total, unobserved) variance dicts {'hazard','pmf'}, cached per suite.
-
-    Avoids re-running the Monte-Carlo variance estimate for every experiment
-    (and the previous four-calls-per-eval duplication).
+    """Return (total, unobserved) per-bin PMF variances (None on real data),
+    cached per suite so the Monte-Carlo unobserved estimate runs once per
+    dataset config.
     """
     path = Path(
         cache_dir) / 'variances.json' if cache_dir is not None else None
-    key = _variance_cache_key(dataset_cfg)
+    # Versioned: entries from the old estimator held {'hazard', 'pmf'} dicts.
+    key = f'{_variance_cache_key(dataset_cfg)}|v2'
 
     if path is not None and path.exists():
         with path.open('r') as f:
@@ -78,8 +78,8 @@ def _get_or_compute_variances(dataset: SurvivalCellDataset,
         if entry is not None:
             return entry['total'], entry['unobserved']
 
-    total = to_json_safe(dataset.get_total_variances())
-    unobserved = to_json_safe(dataset.get_unobserved_variances())
+    total = to_json_safe(dataset.total_variance)
+    unobserved = to_json_safe(dataset.unobserved_variance)
 
     if path is not None:
         store = {}
@@ -183,12 +183,10 @@ def evaluate_survival_model(model,
 
     # Total (direct multi-pass) and unobserved (graph) variances, computed in
     # the dataset's _load_true_variances and cached per data config.
-    total_variances, unobserved_variances = _get_or_compute_variances(
+    total_pmf_variances, unobserved_pmf_variances = _get_or_compute_variances(
         dataset, dataset_cfg, save_dir.parent)
-    total_hazard_variances = total_variances['hazard']
-    unobserved_hazard_variances = unobserved_variances['hazard']
-    total_pmf_variances = total_variances['pmf']
-    unobserved_pmf_variances = unobserved_variances['pmf']
+    # Hazard variances are no longer estimated (the PMF is the target).
+    total_hazard_variances = unobserved_hazard_variances = None
 
     # hazard_mse_per_bin = _compute_hazard_mse_per_bin(predictions,
     #                                                  true_binned_pmfs)

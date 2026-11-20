@@ -3,6 +3,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ..data_models import SampleWithSHAP
+from ..shapley.games import Game
 from .bg_fill import BGFill
 from .predictor import Predictor
 """
@@ -17,7 +19,10 @@ class ValueFunction:
     bg_fill: BGFill
     predictor: Predictor
     num_groups: int
-    max_batch_elements: int = 2**27  # N * B * T * F floats per chunk (~1 GB float64)
+    # N * B * T * F floats per chunk. GraphPredictor holds several arrays of
+    # this size at once: 2^27 peaked at 8 GB (OOM on a 15 GB machine); 2^22
+    # peaks under 1 GB for every fill, at the same speed (B=512, L~270).
+    max_batch_elements: int = 2**22
 
     def __post_init__(self):
         B = self.bg_fill.num_draws
@@ -54,6 +59,14 @@ class ValueFunction:
                                     fill.log_weights.reshape(N, R, B // R))
             self.min_ess = min(self.min_ess, _ess(fill.log_weights).min())
         return np.concatenate([pooled[:, None], groups], axis=1)
+
+    def set_sample(self, sample: SampleWithSHAP) -> None:
+        self.bg_fill.set_sample(sample)
+        self.predictor.set_sample(sample)
+        self.min_ess = np.inf
+
+    def for_game(self, game: Game) -> callable:
+        return lambda coalitions: self(game.pinned_mask(coalitions))
 
 
 def _normalised_weights(log_w: np.ndarray) -> np.ndarray:

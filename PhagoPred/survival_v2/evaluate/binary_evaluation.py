@@ -141,8 +141,13 @@ def evaluate_binary_model(model,
     log.info(f'Evaluating binary model on {len(labels)} samples '
              f'({evaluation_mode})')
 
-    roc_auc, fpr, tpr, thresholds = reciever_operator_characteristic(
-        predictions, labels)
+    regression = _is_regression(dataset)
+    if regression:
+        # No classes: ROC and confusion matrix don't apply.
+        roc_auc, fpr, tpr, thresholds = float('nan'), [], [], None
+    else:
+        roc_auc, fpr, tpr, thresholds = reciever_operator_characteristic(
+            predictions, labels)
     mse = mean_squared_error(predictions.ravel(), labels)
 
     valid = np.array([e is not None for e in event_probs], dtype=bool)
@@ -157,50 +162,41 @@ def evaluate_binary_model(model,
             cdf_mse_by_length = _bin_by_length(squared_errors,
                                                np.asarray(lengths)[valid])
 
-    optimal_threshold = thresholds[np.argmax(tpr - fpr)]
-    cm = confusion_matrix(labels,
-                          predictions > optimal_threshold,
-                          labels=[0, 1])
-    fpr, tpr = _thin_curve(fpr, tpr, MAX_ROC_POINTS)
+    if regression:
+        cm = np.zeros((2, 2), dtype=int)
+    else:
+        optimal_threshold = thresholds[np.argmax(tpr - fpr)]
+        cm = confusion_matrix(labels,
+                              predictions > optimal_threshold,
+                              labels=[0, 1])
+        fpr, tpr = _thin_curve(fpr, tpr, MAX_ROC_POINTS)
 
+    # Exact total variance of the true event probability and the Monte-Carlo
+    # unobserved variance (None on real data), cached per dataset config for
+    # the suite: the unobserved estimate is a simulation.
     variances_json = save_dir.parent / 'variances.json'
-    cache_key = str(dataset_cfg)
-
+    # Versioned: entries from the old estimator meant something different.
+    cache_key = f'{dataset_cfg}|v2'
     cache = {}
     if variances_json.exists():
         with variances_json.open('r') as f:
             cache = json.load(f)
-
-    # Entries written before 'exact_total' existed stored the graph-simulated
-    # estimate under 'total'; reuse it as graph_total and add the exact value.
-    entry = cache.get(cache_key, {})
-    if 'graph_total' not in entry and 'total' in entry:
-        entry['graph_total'] = entry.pop('total')
-    updated = False
-    if 'exact_total' not in entry:
-        exact_fn = getattr(dataset, 'get_exact_total_variance', None)
-        entry['exact_total'] = exact_fn() if exact_fn is not None else None
-        updated = True
-    if 'graph_total' not in entry or 'unobserved' not in entry:
-        entry['graph_total'] = np.asarray(
-            dataset.get_total_variances()).tolist()
-        entry['unobserved'] = np.asarray(
-            dataset.get_unobserved_variances()).tolist()
-        updated = True
-    if updated:
-        cache[cache_key] = entry
+    if cache_key not in cache:
+        cache[cache_key] = {
+            'total': dataset.total_variance,
+            'unobserved': dataset.unobserved_variance,
+        }
         with variances_json.open('w') as f:
-            json.dump(cache, f, indent=2)
-
-    total_variance = entry['exact_total']
-    graph_total_variance = entry['graph_total']
-    unobserved_variance = entry['unobserved']
+            json.dump(to_json_safe(cache), f, indent=2)
+    total_variance = cache[cache_key]['total']
+    unobserved_variance = cache[cache_key]['unobserved']
+    graph_total_variance = None  # no longer estimated
 
     results = BinaryResults(
         ROC_AUC=roc_auc,
         MSE=mse,
         n_samples=len(labels),
-        n_events=np.sum(labels),
+        n_events=0 if regression else np.sum(labels),
         cm=cm,
         fpr=fpr,
         tpr=tpr,
@@ -212,11 +208,13 @@ def evaluate_binary_model(model,
         cdf_mse_by_length=cdf_mse_by_length,
     )
 
-    plot_roc_curve(fpr,
-                   tpr,
-                   roc_auc,
-                   save_path=save_dir / "plots" / "roc_curve.png")
-    plot_binary_cm(cm, save_path=save_dir / "plots" / "confusion_matrix.png")
+    if not regression:
+        plot_roc_curve(fpr,
+                       tpr,
+                       roc_auc,
+                       save_path=save_dir / "plots" / "roc_curve.png")
+        plot_binary_cm(cm,
+                       save_path=save_dir / "plots" / "confusion_matrix.png")
     if cdf_mse_by_length is not None:
         plot_cdf_mse_by_length(cdf_mse_by_length,
                                total_variance,
@@ -231,6 +229,18 @@ def evaluate_binary_model(model,
         json.dump(results_dict, f)
 
     return results
+
+
+def _is_regression(dataset) -> bool:
+    return getattr(dataset, 'is_regression', False)
+
+
+def _predict(model, outputs: torch.Tensor, dataset) -> torch.Tensor:
+    """The model's prediction: the event probability, or for regression
+    targets the raw output."""
+    if _is_regression(dataset):
+        return outputs
+    return model.predict_binary(outputs)
 
 
 def _get_deep_predictions(
@@ -282,7 +292,7 @@ def _get_deep_predictions(
                 mask = mask.to(device)
 
             outputs = model(features, lengths, mask=mask)
-            binary_preds = model.predict_binary(outputs).cpu().numpy()
+            binary_preds = _predict(model, outputs, dataset).cpu().numpy()
             all_predictions.append(binary_preds)
             all_labels.append(getattr(batch, target_attr).cpu().numpy())
             all_lengths.append(lengths.cpu().numpy())
@@ -346,7 +356,7 @@ def _get_dense_predictions(
                 log.info(f'Dense evaluation unavailable ({e}); sampling '
                          'landmarks instead')
                 return None
-            probs = model.predict_binary(outputs)[..., 0]
+            probs = _predict(model, outputs, dataset)[..., 0]
             landmark_mask = batch.dense_mask.bool()
             # timestep j predicts landmark start + j + 1, i.e. history length j + 1
             timestep = torch.arange(landmark_mask.shape[1],
@@ -361,7 +371,9 @@ def _get_dense_predictions(
                     batch.dense_event_probability[landmark_mask].cpu().numpy())
 
     predictions = np.concatenate(all_predictions)[:, np.newaxis]
-    labels = np.concatenate(all_labels).astype(int)
+    labels = np.concatenate(all_labels)
+    if not _is_regression(dataset):
+        labels = labels.astype(int)
     event_probs = (list(np.concatenate(all_event_probs))
                    if all_event_probs else [None] * len(labels))
     return predictions, labels, event_probs, np.concatenate(all_lengths)

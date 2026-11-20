@@ -195,19 +195,20 @@ def _plot_binary_variance_mse_single(
                   linewidth=1.5) for k, v in enumerate(color_vals)
         ]
     legend_handles += [
-        Line2D([0], [0],
-               marker='_',
-               color='grey',
-               linestyle='None',
-               markersize=14,
-               markeredgewidth=2.5,
-               label='Total variance'),
+        # Match the scatter markers above: red x = total, blue _ = unobserved.
         Line2D([0], [0],
                marker='x',
-               color='grey',
+               color='red',
                linestyle='None',
                markersize=8,
                markeredgewidth=2,
+               label='Total variance'),
+        Line2D([0], [0],
+               marker='_',
+               color='blue',
+               linestyle='None',
+               markersize=14,
+               markeredgewidth=2.5,
                label='Unobserved variance'),
     ]
     ax.legend(handles=legend_handles, fontsize=9, loc='best', frameon=True)

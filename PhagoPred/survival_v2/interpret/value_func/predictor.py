@@ -26,6 +26,9 @@ class Predictor(ABC):
     def __call__(self, fill: FillResult) -> np.ndarray:
         ...  # [N, B]
 
+    def set_sample(self, sample: SampleWithSHAP) -> None:
+        """Default: nothing per-sample (e.g. a deterministic model)."""
+
 
 class GraphPredictor(Predictor):
 
@@ -38,7 +41,8 @@ class GraphPredictor(Predictor):
     ):
         self.scenario = scenario
         self.graph = scenario.graph
-        self.horizon = (target.horizon if target.dataset_type == 'binary' else
+        self.horizon = (target.horizon
+                        if target.dataset_type in ('binary', 'hazard') else
                         int(target.bins[-1]))
         self.target = target
         self.player_features = player_features
@@ -94,6 +98,12 @@ class GraphPredictor(Predictor):
                                 frame_0=c,
                                 return_full=False)
 
+        if self.target.dataset_type == 'hazard':
+            # Mean scale * Hazard over frames L + 1 .. L + H (future index i
+            # is frame L + i), as BinaryCellDataset's 'hazard' label.
+            scale = self.scenario.hazard_func.params.get('scale', 1.0)
+            z = future['Hazard'][1:self.horizon + 1]
+            return (scale * z).mean(axis=0).reshape(N, B)
         h = self.scenario.hazard_func(future['Hazard'])
         h[max(self.scenario.num_frames - self.sample.landmark_frame, 0):] = 0.0
         return self._target(h).reshape(N, B)
@@ -133,16 +143,13 @@ class ModelPredictor(Predictor):
                  cfg: ExperimentCfg,
                  max_batch_size: int = 2048):
         self.model = model
-        self.target = cfg.dataset.prediction_target()
+        self.target = cfg.dataset.prediction_target
         self.player_features = list(cfg.feature_combo)
         self.means = np.asarray(cfg.dataset.normalisation_means,
-                                dtype=np.float32),
+                                dtype=np.float32)
         self.stds = np.asarray(cfg.dataset.normalisation_stds,
                                dtype=np.float32)
         self.max_batch_size = max_batch_size
-
-    def set_sample(self, sample: SampleWithSHAP) -> None:
-        pass
 
     @classmethod
     def from_experiment_dir(cls, experiment_dir: Path):
@@ -164,10 +171,12 @@ class ModelPredictor(Predictor):
                 logits = self.model(chunk, lengths, return_attention=False)
                 if isinstance(logits, tuple):
                     logits = logits[0]
-                out.append(self._target(logits).reshape(-1).numpy())
+                out.append(self._target(logits).reshape(-1))
         return np.concatenate(out).reshape(N, B)
 
     def _target(self, logits) -> np.ndarray:
+        if self.target.dataset_type == 'hazard':
+            return logits.reshape(-1).cpu().numpy()  # regression: raw output
         if self.target.dataset_type == 'binary':
             return self.model.predict_binary(logits).reshape(-1).cpu().numpy()
         if self.target.dataset_type == 'survival':

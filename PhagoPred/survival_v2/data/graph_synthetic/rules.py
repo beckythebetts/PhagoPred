@@ -389,6 +389,22 @@ class Rule:
         return result
 
 
+def shift_lags(expr: Expr, shift: int) -> Expr:
+    """Copy of ``expr`` with every Var's lag increased by ``shift``."""
+
+    def go(v):
+        if isinstance(v, dict):
+            v = {k: go(x) for k, x in v.items()}
+            if v.get('op') == 'Var':
+                v['lag'] += shift
+            return v
+        if isinstance(v, list):
+            return [go(x) for x in v]
+        return v
+
+    return Expr.from_dict(go(expr.to_dict()))
+
+
 def _vars(expr: Expr) -> list[Var]:
     if isinstance(expr, Var):
         return [expr]

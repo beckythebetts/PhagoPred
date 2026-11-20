@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -16,7 +17,11 @@ def get_logger(name: str = "PhagoPred") -> logging.Logger:
     if _logger is not None:
         return logging.getLogger(name)
 
-    _log_file_path = Path('temp') / 'log.log'
+    # PHAGOPRED_LOG gives a process its own file: every process truncates
+    # its log on start, so parallel runs sharing one would clobber it.
+    _log_file_path = Path(os.environ.get('PHAGOPRED_LOG',
+                                         Path('temp') / 'log.log'))
+    _log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
     handler = logging.FileHandler(_log_file_path, mode='w')
     handler.setFormatter(

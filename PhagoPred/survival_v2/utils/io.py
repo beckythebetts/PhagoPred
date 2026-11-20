@@ -159,7 +159,7 @@ def load_dataset(
 
     if isinstance(dcfg, BinaryDatasetCfg):
         dataset: CellDataset = BinaryCellDataset(
-            prediction_horizon=dcfg.prediction_horizon,
+            **dcfg.dataset_kwargs(),
             **common,
         )
     elif isinstance(dcfg, BinaryClassDatasetCfg):

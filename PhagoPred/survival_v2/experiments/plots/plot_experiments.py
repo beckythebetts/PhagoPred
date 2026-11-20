@@ -101,15 +101,22 @@ def plot_experiment_results(experiments_dir: Path,
                    experiments_dir / 'results.png')
     _plot_and_save(plot_experiment_losses, all_experiemnts, varying_params,
                    experiments_dir / 'losses.png')
-    _plot_and_save(partial(plot_confusion_matrices, cm_type='cm_expected'),
-                   all_experiemnts, varying_params,
-                   experiments_dir / 'confusion_matrices_expected.png')
-    _plot_and_save(partial(plot_confusion_matrices, cm_type='cm_argmax'),
-                   all_experiemnts, varying_params,
-                   experiments_dir / 'confusion_matrices_argmax.png')
+    # Regression targets (e.g. the hazard node): no classes, so no confusion
+    # matrices or ROC curves.
+    regression = any(
+        getattr(r.experiemnt_cfg.dataset, 'target', 'event') != 'event'
+        for r in all_experiemnts)
+    if not regression:
+        _plot_and_save(partial(plot_confusion_matrices, cm_type='cm_expected'),
+                       all_experiemnts, varying_params,
+                       experiments_dir / 'confusion_matrices_expected.png')
+        _plot_and_save(partial(plot_confusion_matrices, cm_type='cm_argmax'),
+                       all_experiemnts, varying_params,
+                       experiments_dir / 'confusion_matrices_argmax.png')
     if is_binary:
-        _plot_and_save(plot_rocs, all_experiemnts, varying_params,
-                       experiments_dir / 'ROC.png')
+        if not regression:
+            _plot_and_save(plot_rocs, all_experiemnts, varying_params,
+                           experiments_dir / 'ROC.png')
     else:
         _plot_and_save(plot_brier_scores, all_experiemnts, varying_params,
                        experiments_dir / 'brier_scores.png')
@@ -126,8 +133,8 @@ def plot_experiment_results(experiments_dir: Path,
                        varying_params,
                        experiments_dir / 'cdf_mse_by_length.png')
 
-    # SHAP comparisons need compare_importance to have run first; the plot
-    # functions return None (and log) when no shap_samples.h5 is present.
+    # SHAP comparisons need run_shap to have run first; the plot functions
+    # return None (and log) when no shap.h5 is present.
     _plot_and_save(plot_shap_average_across_models, all_experiemnts,
                    varying_params, experiments_dir / 'shap_average.png')
     _plot_and_save(plot_shap_fold_average_across_models, all_experiemnts,

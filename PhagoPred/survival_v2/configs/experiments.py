@@ -8,7 +8,6 @@ from .losses import LOSSES, LossCfg
 from .datasets import DATASETS, FEATURE_COMBOS, get_kfold_dataset, DatasetCfg
 from .training import TRAINING, TrainingCfg
 from .calibration import CALIBRATION, CalibrationCfg
-from .interpret import INTERPRETS, InterpretCfg
 
 
 @dataclass
@@ -28,7 +27,6 @@ class ExperimentCfg:
     dataset: list[DatasetCfg] | DatasetCfg
     training: list[TrainingCfg] | TrainingCfg
     feature_combo: list[list[str]] | list[str]
-    interpret: list[InterpretCfg | None] | InterpretCfg = None
     calibration: list[CalibrationCfg | None] | CalibrationCfg | None = None
 
 
@@ -245,6 +243,47 @@ EXPERIMENT_SUITES = {
                       training=TRAINING['Dense'],
                       feature_combo=['A', 'B', 'C', 'D'],
                       calibration=CALIBRATION['Platt Scaling'])),
+    # All five graph scenarios (generate_datasets ALL_CFGS) in one suite, for
+    # the GT vs model SHAP comparison.
+    'Graph All Binary':
+    generate_experiment_grid(
+        ExperimentCfg(model=[
+            MODELS['CNN Medium'],
+            MODELS['LSTM Medium'],
+        ],
+                      attention=ATTENTION['Last'],
+                      loss=LOSSES['BCE'],
+                      dataset=[
+                          DATASETS['Binary Graph Linear'],
+                          DATASETS['Binary Graph Linear Chain'],
+                          DATASETS['Binary Graph Nonlinear Chain'],
+                          DATASETS['Binary Graph Multiplicative Hazard'],
+                          DATASETS['Binary Graph Threshold Hazard'],
+                      ],
+                      training=TRAINING['Dense'],
+                      feature_combo=['A', 'B', 'C', 'D'],
+                      calibration=CALIBRATION['Platt Scaling'])),
+    # The same five scenarios, regressing the mean Hazard node value over the
+    # horizon (the latent node behind the event label). No calibration: the
+    # output isn't a probability.
+    'Graph All Hazard':
+    generate_experiment_grid(
+        ExperimentCfg(model=[
+            MODELS['CNN Medium'],
+            MODELS['LSTM Medium'],
+        ],
+                      attention=ATTENTION['Last'],
+                      loss=LOSSES['MSE'],
+                      dataset=[
+                          DATASETS['Hazard Graph Linear'],
+                          DATASETS['Hazard Graph Linear Chain'],
+                          DATASETS['Hazard Graph Nonlinear Chain'],
+                          DATASETS['Hazard Graph Multiplicative Hazard'],
+                          DATASETS['Hazard Graph Threshold Hazard'],
+                      ],
+                      training=TRAINING['Dense'],
+                      feature_combo=['A', 'B', 'C', 'D'],
+                      calibration=None)),
     # Fully predictable variants of all five graph scenarios (hazard starts at
     # frame 0, lags 30/40/50, no observation noise): unobserved variance is 0.
     'Graph FP Binary':

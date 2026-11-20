@@ -121,7 +121,7 @@ def build_datasets(
             'feature_names': feature_combo,
             'min_length': dataset_config.min_length,
             'model_type': model_type,
-            'prediction_horizon': dataset_config.prediction_horizon,
+            **dataset_config.dataset_kwargs(),
             'num_cells': dataset_config.num_cells,
         }
         train_dataset = BinaryCellDataset(
@@ -400,7 +400,7 @@ def _build_cal_dataset(cfg: ExperimentCfg) -> CellDataset:
             feature_names=cfg.feature_combo,
             min_length=cfg.dataset.min_length,
             model_type=model_type,
-            prediction_horizon=cfg.dataset.prediction_horizon,
+            **cfg.dataset.dataset_kwargs(),
             means=means,
             stds=stds,
         )
@@ -574,7 +574,7 @@ def _build_val_dataset(cfg: ExperimentCfg) -> CellDataset:
             feature_names=cfg.feature_combo,
             min_length=cfg.dataset.min_length,
             model_type=model_type,
-            prediction_horizon=cfg.dataset.prediction_horizon,
+            **cfg.dataset.dataset_kwargs(),
             means=means,
             stds=stds,
         )

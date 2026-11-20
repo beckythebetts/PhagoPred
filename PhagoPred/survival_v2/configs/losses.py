@@ -28,7 +28,8 @@ class SurvivalLossCfg(LossCfg):
 @dataclass
 class BinaryLossCfg(LossCfg):
     """Loss functions for binary models/datasets"""
-    loss_type: Literal['bce', 'weighted_bce', 'focal']
+    # 'mse': regression targets (BinaryDatasetCfg target='hazard').
+    loss_type: Literal['bce', 'weighted_bce', 'focal', 'mse']
     focal_alpha: float = 0.0
     focal_gamma: float = 0.0
     pos_weight: float = field(default=0.0, compare=False)
@@ -89,6 +90,8 @@ LOSSES = {
     BinaryLossCfg('bce', name='BCE'),
     'Weighted BCE':
     BinaryLossCfg('weighted_bce', name='Weighted BCE'),
+    'MSE':
+    BinaryLossCfg('mse', name='MSE'),
     'Focal Loss':
     BinaryLossCfg('focal',
                   focal_alpha=0.25,

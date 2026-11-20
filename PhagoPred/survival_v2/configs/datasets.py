@@ -13,7 +13,9 @@ log = get_logger()
 
 @dataclass
 class PredictionTarget:
-    dataset_type: Literal['survival', 'binary']
+    # 'hazard': regression of the mean (calibrated-scale) Hazard node value
+    # over the horizon (see BinaryCellDataset).
+    dataset_type: Literal['survival', 'binary', 'hazard']
     min_length: int
     horizon: int | None = None
     bins: tuple[int, ...] | None = None
@@ -28,15 +30,15 @@ class DatasetCfg:
     """
     dataset_type: str = field(default='', init=False)
     num_bins: int
-    train_paths: list[Union[Path, str]] = field(default=list, compare=False)
-    val_paths: list[Union[Path, str]] = field(default=list, compare=False)
+    train_paths: list[Union[Path, str]] = field(default_factory=list, compare=False)
+    val_paths: list[Union[Path, str]] = field(default_factory=list, compare=False)
     min_length: int = 50
 
     name: str = ''
-    calibrate_paths: list[Union[Path, str]] = field(default=list,
+    calibrate_paths: list[Union[Path, str]] = field(default_factory=list,
                                                     compare=False)
 
-    shap_paths: list[Union[Path, str]] = field(default=list, compare=False)
+    shap_paths: list[Union[Path, str]] = field(default_factory=list, compare=False)
 
     num_cells: int | None = None
 
@@ -76,12 +78,21 @@ class BinaryDatasetCfg(DatasetCfg):
     name: str = ''
     class_names: list[str] = field(
         default_factory=lambda: ['No Event', 'Event'])
+    # 'event': death in the horizon (classification); 'hazard': mean Hazard
+    # node value over the horizon (regression, synthetic data only).
+    target: str = 'event'
 
     @property
     def prediction_target(self):
-        return PredictionTarget('binary',
+        return PredictionTarget('hazard' if self.target == 'hazard' else
+                                'binary',
                                 self.min_length,
                                 horizon=self.prediction_horizon)
+
+    def dataset_kwargs(self) -> dict:
+        """The BinaryCellDataset arguments this config sets."""
+        return dict(prediction_horizon=self.prediction_horizon,
+                    target=self.target)
 
 
 @dataclass
@@ -192,17 +203,26 @@ def get_kfold_dataset() -> list:
 
 def _graph_binary(scenario: str,
                   name: str,
-                  min_length: int = 50) -> BinaryDatasetCfg:
-    """Binary config for a graph-synthetic scenario, whose train/val/cal
-    files are named after the scenario's ``filename``."""
-    root = 'PhagoPred/Datasets/graph_synthetic'
+                  # Largest graph max_lag (lag 80 + hazard memory 100): from
+                  # here the hazard window only reads observed frames.
+                  min_length: int = 180,
+                  num_files: int = 10,
+                  target: str = 'event') -> BinaryDatasetCfg:
+    """Binary config for a graph-synthetic scenario. ``generate_datasets``
+    writes ``<scenario>/<scenario>_00.h5 ...``; the last shard is held out
+    for SHAP (never trained, validated or calibrated on), the two before it
+    are cal and val, the rest train."""
+    root = Path('PhagoPred/Datasets/graph_synthetic') / scenario
+    files = [str(root / f'{scenario}_{i:02d}.h5') for i in range(num_files)]
     return BinaryDatasetCfg(
-        train_paths=[f'{root}/{scenario}_train.h5'],
-        val_paths=[f'{root}/{scenario}_val.h5'],
-        calibrate_paths=[f'{root}/{scenario}_cal.h5'],
+        train_paths=files[:-3],
+        val_paths=[files[-3]],
+        calibrate_paths=[files[-2]],
+        shap_paths=[files[-1]],
         min_length=min_length,
         prediction_horizon=25,
         name=name,
+        target=target,
     )
 
 
@@ -346,6 +366,19 @@ DATASETS = {
     _graph_binary('multiplicative_hazard', 'Graph Multiplicative Hazard'),
     'Binary Graph Threshold Hazard':
     _graph_binary('threshold_hazard', 'Graph Threshold Hazard'),
+    # The same scenarios, regressing the mean Hazard node value over the
+    # horizon (the latent node behind the event label) instead of the event.
+    **{
+        f'Hazard Graph {label}':
+        _graph_binary(scenario, f'Graph {label} [hazard]', target='hazard')
+        for scenario, label in (
+            ('linear', 'Linear'),
+            ('linear_chain', 'Linear Chain'),
+            ('nonlinear_chain', 'Nonlinear Chain'),
+            ('multiplicative_hazard', 'Multiplicative Hazard'),
+            ('threshold_hazard', 'Threshold Hazard'),
+        )
+    },
     # Fully predictable variants (scenarios.FP_CFGS): min_length skips the
     # hazard's ~150-frame start-up ramp.
     'Binary Graph Linear FP':

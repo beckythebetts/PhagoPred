@@ -54,8 +54,7 @@ def plot_cdf_mse_by_length(
     fig, axes = plt.subplots(1,
                              len(panel_vals),
                              figsize=(4.8 * len(panel_vals) + 1, 4.5),
-                             sharey=True,
-                             squeeze=False)
+                             squeeze=False)  # own y per panel: scales differ
     for ax, pval in zip(axes[0], panel_vals):
         exps = [
             e for e in valid if panel_param is None
@@ -101,7 +100,12 @@ def plot_cdf_mse_by_length(
                          loc='left',
                          fontsize=12)
         ax.set_xlabel('Sequence length at landmark (frames)', fontsize=11)
-        ax.set_ylim(bottom=0)
+        # Bottom at 0; top fits every curve and the total-variance line.
+        tops = [
+            float(np.max(l.get_ydata())) for l in ax.get_lines()
+            if len(l.get_ydata())
+        ]
+        ax.set_ylim(0, 1.08 * max(tops) if tops else None)
         ax.grid(True, axis='y', alpha=0.3)
         for side in ('top', 'right'):
             ax.spines[side].set_visible(False)

@@ -9,6 +9,7 @@ import torch
 import h5py
 from tqdm import tqdm
 
+from .graph_synthetic.dataset_file import read_scenario_dict
 from .dataset import (
     CellSample,
     CellDataset,
@@ -48,15 +49,60 @@ BinaryCellBatch = BinaryCell[
 
 
 class BinaryCellDataset(CellDataset):
-    """Pytorch dataset for binary classification, returning BinaryCellSample objects."""
+    """Pytorch dataset for prediction over a horizon after each landmark,
+    returning BinaryCellSample objects.
 
-    def __init__(self, *args, prediction_horizon: int, **kwargs):
+    ``target`` sets the label:
+
+    * 'event': death in the horizon (0/1), a binary classification target.
+    * 'hazard': the mean value of the Hazard node over the horizon frames,
+      times the scenario's calibrated ``scale`` (synthetic data only), a
+      regression target. It is the latent node behind the event label, read
+      off without the death process: noiseless, and on the same scale in
+      every scenario (calibration sets scale * Hazard's SD). The death-rate
+      offset ``delta`` is left out: it only sets how many cells die.
+    """
+
+    def __init__(self,
+                 *args,
+                 prediction_horizon: int,
+                 target: Literal['event', 'hazard'] = 'event',
+                 **kwargs):
+        if target not in ('event', 'hazard'):
+            raise ValueError(f'unknown target {target!r}')
         self.prediction_horizon = prediction_horizon
+        self.target = target
+        self._hazard_cache: dict[int, np.ndarray] = {}
         super().__init__(*args, **kwargs)
 
     @property
     def horizon(self):
         return self.prediction_horizon
+
+    @property
+    def is_regression(self) -> bool:
+        return self.target == 'hazard'
+
+    def _hazard_values(self, file_idx: int) -> np.ndarray:
+        """scale * Hazard for every frame and cell of one file,
+        [num_frames, num_cells]."""
+        if file_idx not in self._hazard_cache:
+            path = self.hdf5_paths[file_idx]
+            scenario = read_scenario_dict(path)
+            if scenario is None or scenario.get('hazard_func') is None:
+                raise ValueError(f"{path}: target='hazard' needs a synthetic "
+                                 'dataset with a calibrated hazard function')
+            func = scenario['hazard_func']
+            if func['kind'] != 'offset_sigmoid':
+                raise ValueError(f'{path}: unsupported hazard function '
+                                 f"{func['kind']!r}")
+            with h5py.File(path, 'r') as f:
+                z = f['Cells']['Hazard'][:]
+            if self.num_cells is not None:
+                z = z[:, :self.num_cells]
+            self._hazard_cache[file_idx] = (
+                func['params'].get('scale', 1.0) * z)
+        return self._hazard_cache[file_idx]
 
     @staticmethod
     def landmarks_rule(
@@ -66,10 +112,13 @@ class BinaryCellDataset(CellDataset):
         min_len: int,
         horizon: int,
     ) -> np.ndarray:
-        if np.isnan(death_frame):
-            last_landmark = last_frame - horizon
-        else:
-            last_landmark = death_frame
+        # Every landmark needs its whole horizon observed, dying cell or not.
+        # Letting dying cells keep landmarks up to death made the last
+        # `horizon` frames all-event (only cells about to die have landmarks
+        # there): label rate 1.0 vs true probability ~0.26.
+        last_landmark = last_frame - horizon
+        if not np.isnan(death_frame):
+            last_landmark = min(last_landmark, death_frame)
         return np.arange(int(start_frame + min_len), int(last_landmark))
 
     def landmark_labels(self, idx: int,
@@ -81,6 +130,17 @@ class BinaryCellDataset(CellDataset):
           from the stored PMF; None without one (real data)
         """
         landmarks = np.asarray(landmarks, dtype=int)
+        if self.is_regression:
+            # Mean (scaled) Hazard over frames L + 1 .. L + H, the frames
+            # whose rates make up the event label. Deterministic given the window,
+            # so it is also its own true value.
+            meta = self.cell_metadata
+            z = self._hazard_values(meta.file_idxs[idx])[:,
+                                                         meta.local_cell_idxs[idx]]
+            frames = landmarks[:, None] + np.arange(1,
+                                                    self.prediction_horizon + 1)
+            value = z[frames].mean(axis=1).astype(np.float32)
+            return {'event': value, 'event_probability': value}
         time_to_event = float(self.cell_metadata.death_frames[idx]) - landmarks
         # NaN (censored) compares False, so censored cells get 0.
         event = ((time_to_event >= 1) &
@@ -119,7 +179,8 @@ class BinaryCellDataset(CellDataset):
             start_frame=start_frame,
             landmark_frame=landmark,
             last_frame=meta.end_frames[idx],
-            event=int(labels['event'][0]),
+            event=(float(labels['event'][0])
+                   if self.is_regression else int(labels['event'][0])),
             event_probability=None if prob is None else float(prob[0]),
         )
 
@@ -127,6 +188,8 @@ class BinaryCellDataset(CellDataset):
         """Num -ve / num +ve over every valid (cell, landmark) pair, for the
         weighted BCE loss. Exact, and the same for sampled and dense
         training, which both cover every pair equally."""
+        if self.is_regression:
+            return 1.0  # no classes to balance
         events = np.concatenate([
             self.landmark_labels(idx, self.valid_landmarks(idx))['event']
             for idx in range(len(self))
@@ -138,6 +201,9 @@ class BinaryCellDataset(CellDataset):
 
     @cached_property
     def unobserved_variance(self) -> float | None:
+        if self.is_regression:
+            # The hazard window is fully determined by the observed window.
+            return 0.0
         v = self._get_unobserved_variances()
         if v is None:
             return None
@@ -146,7 +212,8 @@ class BinaryCellDataset(CellDataset):
 
     @cached_property
     def total_variance(self) -> float | None:
-        if any(pmfs is None for pmfs in self._pmfs_cache):
+        if not self.is_regression and any(pmfs is None
+                                          for pmfs in self._pmfs_cache):
             return None
         probs = [
             self.landmark_labels(

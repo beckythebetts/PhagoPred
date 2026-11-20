@@ -1,4 +1,5 @@
 from __future__ import annotations
+from pathlib import Path
 from enum import Enum
 from dataclasses import dataclass, field, fields, Field
 
@@ -6,9 +7,10 @@ import numpy as np
 import h5py
 import json
 
-from ...configs import InterpretCfg, PredictionTarget
-from ...configs.io import to_json_safe, load_interpret_cfg, load_prediction_target
+from ...configs import PredictionTarget
+from ...configs.io import to_json_safe, load_prediction_target
 from ..data_models import SampleWithSHAP, SampleValues, SHAPResult
+from ..config import InterpretCfg, load_interpret_cfg
 
 
 def _next_sample_idx(f: h5py.Group) -> int:
@@ -109,7 +111,7 @@ def _read_fields(h5_group: h5py.Group, cls):
                 _read_fields(g, SHAPResult)
                 for g in h5_group.get('shap', {}).values()
             ]
-            kwargs[name] = {(r.scorer, r.background): r for r in results}
+            kwargs[name] = {(r.predictor, r.background): r for r in results}
         elif kind == 'attr' and name in h5_group.attrs:
             value = _from_attr(h5_group.attrs[name])
             kwargs[name] = value if enum is None else (enum(value))
@@ -157,3 +159,8 @@ def read_metadata(f: h5py.Group) -> SHAPFileMetadata:
 
 def sample_indices(f: h5py.Group) -> list[int]:
     return sorted(int(k) for k in f.keys() if k.isdigit())
+
+
+def load_samples(path: Path) -> tuple[SHAPFileMetadata, SampleWithSHAP]:
+    with h5py.File(path, 'r') as f:
+        return read_metadata(f), [read_sample(f, i) for i in sample_indices(f)]

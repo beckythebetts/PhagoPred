@@ -28,10 +28,16 @@ def simulate_cells(scenario: ScenarioCfg) -> SyntheticCells:
     frames = np.arange(num_frames)[:, None]  # (T, 1)
     outside = (frames < start) | (frames > end)  # (T, N)
 
+    # Clean pre-frame-0 history for the ground truth. 2 * max_lag leaves room
+    # for ObservationalGT to resample free context frames beyond max_lag.
+    num_context = min(2 * graph.max_lag, graph.burn_in)
     clean = graph.simulate(num_cells,
                            num_frames,
+                           keep_context=num_context,
                            hazard_func=hazard_func,
                            post_noise=False)
+    context = {k: v[:num_context] for k, v in clean.items()}
+    clean = {k: v[num_context:] for k, v in clean.items()}
     observed = graph.observe(clean)
 
     # Hazard is never observed with noise, so it comes from the clean run.
@@ -61,6 +67,7 @@ def simulate_cells(scenario: ScenarioCfg) -> SyntheticCells:
         deaths=deaths.astype(np.float32),
         start_frames=start,
         end_frames=end,
+        context=context,
     )
 
 

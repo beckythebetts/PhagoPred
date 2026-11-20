@@ -26,6 +26,7 @@ from .binary_losses import (
     binary_cross_entropy_loss,
     weighted_binary_cross_entropy_loss,
     binary_focal_loss,
+    mean_squared_error_loss,
 )
 
 log = get_logger()
@@ -55,6 +56,9 @@ def compute_binary_loss(
                                                   true_event, pos_weight,
                                                   mask)
         return {'total': loss, 'Weighted BCE': loss}
+    if loss_config.loss_type == 'mse':
+        loss = mean_squared_error_loss(predicted_event_prob, true_event, mask)
+        return {'total': loss, 'MSE': loss}
     if loss_config.loss_type == 'binary_focal':
         alpha = loss_config.focal_alpha
         gamma = loss_config.focal_gamma

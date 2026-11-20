@@ -48,3 +48,12 @@ def binary_focal_loss(predictions: torch.Tensor,
     pt = torch.exp(-bce_loss)
     focal_loss = alpha * (1 - pt)**gamma * bce_loss
     return _reduce(focal_loss, mask)
+
+
+def mean_squared_error_loss(predictions: torch.Tensor,
+                            targets: torch.Tensor,
+                            mask: torch.Tensor = None) -> torch.Tensor:
+    """Squared error on the raw output, for regression targets."""
+    assert predictions.shape == targets.shape, f'{predictions.shape}, {targets.shape}'
+    loss = (predictions - targets.float())**2
+    return _reduce(loss, mask)

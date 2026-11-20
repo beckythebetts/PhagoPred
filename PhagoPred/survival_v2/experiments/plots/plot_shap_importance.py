@@ -8,25 +8,39 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from PhagoPred.utils.logger import get_logger
-from PhagoPred.survival_v2.interpret.data_models import SampleWithSHAP
 from PhagoPred.survival_v2.interpret.plots import (
-    PANEL_ORDER,
-    SHAP_PANELS,
+    SERIES,
+    DatasetAverage,
     heatmap_panel,
     temporal_panel,
     feature_panel,
+    missing_panel,
     dataset_average,
     sample_indices,
-    per_frame,
+    read_samples,
+    sample_data,
+    present_series,
     observed_length,
+    event_str,
+    label as series_label,
 )
 from .experiment_record_dataclass import ExperimentRecord
 
 log = get_logger()
 
-_SHAP_FILE = 'shap_samples.h5'
-_KEYS = [k for k in PANEL_ORDER if k in SHAP_PANELS]
-_N_COLS = len(_KEYS) + 2  # one heatmap per SHAP key, then temporal, then feature
+_SHAP_FILE = 'shap.h5'  # written by interpret.run_shap
+
+
+def _n_cols(keys: list[str]) -> int:
+    return len(keys) + 2  # one heatmap per series, then temporal, then feature
+
+
+def _average_keys(averages: list[DatasetAverage]) -> list[str]:
+    """Series present in at least one average, in display order."""
+    return [
+        k for k in SERIES if any(a.temporal.get(k) is not None
+                                 for a in averages)
+    ]
 
 
 def _model_label(record: ExperimentRecord, varying_params: dict) -> str:
@@ -111,8 +125,19 @@ def _shap_path(record: ExperimentRecord) -> Path | None:
     return None
 
 
+def _common_indices(paths: list[Path]) -> list[int]:
+    """Sample indices present in every file, so experiments on one dataset
+    are compared on the same samples (files can hold different numbers, e.g.
+    after the sample count was lowered)."""
+    common = set(sample_indices(paths[0]))
+    for path in paths[1:]:
+        common &= set(sample_indices(path))
+    return sorted(common)
+
+
 def _row(
     axes,
+    keys: list[str],
     label: str,
     heatmaps: dict[str, np.ndarray | None],
     feature_names: list[str],
@@ -127,22 +152,15 @@ def _row(
     temporal_err: dict | None = None,
     feature_err: dict | None = None,
 ) -> None:
-    """One row of ``_N_COLS`` axes: one heatmap per SHAP key, then temporal,
-    then feature — the same column layout ``interpret.plots.plot_dataset_average``
-    uses for a single experiment, repeated as a row per varying-param
-    combination so experiments can be compared directly."""
-    for i, key in enumerate(_KEYS):
+    """One row of axes: one heatmap per series in ``keys``, then temporal,
+    then feature — the layout ``interpret.plots.plot_dataset_average`` uses
+    for a single experiment, repeated as a row per varying-param combination
+    so experiments can be compared directly."""
+    for i, key in enumerate(keys):
         ax = axes[i]
         matrix = heatmaps.get(key)
         if matrix is None:
-            ax.text(0.5,
-                    0.5,
-                    f'no {key}',
-                    ha='center',
-                    va='center',
-                    fontsize=8,
-                    transform=ax.transAxes)
-            ax.set_axis_off()
+            missing_panel(ax, series_label(key))
             continue
         heatmap_panel(ax,
                       matrix,
@@ -158,49 +176,6 @@ def _row(
                    err=temporal_err)
     feature_panel(axes[-1], feature_series, feature_title, err=feature_err)
     axes[0].set_ylabel(label, fontsize=9, fontweight='bold')
-
-
-def _get_shap_result(sample: SampleWithSHAP, key: str):
-    explainer = [e for e in sample.explainers() if e in key]
-    background = [b for b in sample.backgrounds() if b in key]
-    if len(explainer) == 0 or len(background) == 0:
-        return None
-    return sample.shap_vals[(explainer[0], background[0])]
-
-
-def _sample_data(
-    sample: SampleWithSHAP, normalise: bool
-) -> tuple[dict[str, np.ndarray | None], dict[str, np.ndarray | None],
-          dict[str, np.ndarray | None]]:
-    """Signed, per-key heatmap/temporal/feature arrays for one sample (no
-    averaging) — the row-comparison counterpart of
-    ``interpret.plots.plot_sample_on_axes``."""
-    def _norm(values):
-        values = np.asarray(values, dtype=float)
-        total = np.nansum(np.abs(values))
-        return values / total if (normalise and total > 0) else values
-
-    heatmaps: dict[str, np.ndarray | None] = {}
-    temporal: dict[str, np.ndarray | None] = {}
-    feature: dict[str, np.ndarray | None] = {}
-    for key in _KEYS:
-        result = _get_shap_result(sample, key)
-        if result is None:
-            heatmaps[key] = temporal[key] = feature[key] = None
-            continue
-
-        heatmaps[key] = per_frame(result.temporal_feature,
-                                  result.segment_boundaries)
-        if result.temporal is not None:
-            temporal[key] = _norm(
-                per_frame(result.temporal, result.segment_boundaries))
-        else:
-            temporal[key] = None
-
-        feature[key] = None if result.feature is None else _norm(
-            result.feature)
-
-    return heatmaps, temporal, feature
 
 
 def _group_by_dataset(
@@ -225,26 +200,30 @@ def plot_shap_average_across_models(
                         'skipping SHAP average plot')
             continue
 
+        common = _common_indices([p for _, p in usable])
+        averages = [
+            dataset_average(p, normalise=normalise, indices=common)
+            for _, p in usable
+        ]
+        keys = _average_keys(averages)
         unit = 'relative' if normalise else 'mean |SHAP|'
         fig, axes = plt.subplots(len(usable),
-                                 _N_COLS,
-                                 figsize=(6 * _N_COLS, 3.6 * len(usable)),
+                                 _n_cols(keys),
+                                 figsize=(6 * _n_cols(keys), 3.6 * len(usable)),
                                  squeeze=False)
-        for row, (record, path) in enumerate(usable):
-            avg = dataset_average(path, normalise=normalise)
-            temporal_series = dict(avg.temporal)
-            feature_series = {
-                k: (avg.feature_names, v)
-                for k, v in avg.feature.items() if v is not None
-            }
+        for row, ((record, _), avg) in enumerate(zip(usable, averages)):
             _row(axes[row],
+                 keys,
                  _model_label(record, varying_params),
                  avg.heatmaps,
                  avg.feature_names,
                  avg.n_frames,
-                 lambda key, unit=unit: f"{key.replace('_', ' ').capitalize()}  {unit}",
-                 temporal_series,
-                 feature_series,
+                 lambda key, unit=unit: f'{series_label(key)}  {unit}',
+                 {k: avg.temporal.get(k) for k in keys},
+                 {
+                     k: (avg.feature_names, avg.feature[k])
+                     for k in keys if avg.feature.get(k) is not None
+                 },
                  diverging=False,
                  support=avg.support,
                  temporal_title=f'Temporal importance  {unit}',
@@ -267,10 +246,12 @@ def plot_shap_fold_average_across_models(
 
     Companion to ``plot_shap_average_across_models``, which draws each
     repeat's dataset-average as its own row. Here, records sharing the same
-    varying-param combination (i.e. repeats of the same model, or kfold
-    splits of it) are collapsed into a single row: temporal and feature
-    curves show mean +/- std across folds, and each heatmap shows the fold
-    mean only (a spread doesn't render on a heatmap).
+    varying-param combination (repeats or kfold splits of the same model)
+    are collapsed into one row: temporal and feature curves show mean +/- std
+    across folds, heatmaps the fold mean only.
+
+    Ground-truth series are identical across folds when the folds share a
+    SHAP shard (their std is then 0), so this mainly shows model spread.
     """
     figs = []
     for scenario, records in _group_by_dataset(experiments).items():
@@ -278,24 +259,31 @@ def plot_shap_fold_average_across_models(
         for record in records:
             groups[_model_key(record, varying_params)].append(record)
 
+        paths = [p for r in records if (p := _shap_path(r)) is not None]
+        common = _common_indices(paths) if paths else []
+        group_averages = {
+            key: [
+                dataset_average(p, normalise=normalise, indices=common)
+                for r in recs if (p := _shap_path(r)) is not None
+            ] for key, recs in groups.items()
+        }
+        keys = _average_keys(
+            [a for avgs in group_averages.values() for a in avgs])
+        if not keys:
+            log.warning(f'{scenario}: no SHAP files; skipping fold average')
+            continue
+
         unit = 'relative' if normalise else 'mean |SHAP|'
         fig, axes = plt.subplots(len(groups),
-                                 _N_COLS,
-                                 figsize=(6 * _N_COLS, 3.6 * len(groups)),
+                                 _n_cols(keys),
+                                 figsize=(6 * _n_cols(keys), 3.6 * len(groups)),
                                  squeeze=False)
-        for row, (key, group_records) in enumerate(groups.items()):
+        for row, (key, averages) in enumerate(group_averages.items()):
             label = _group_label(key, varying_params)
-            paths = [p for r in group_records if (p := _shap_path(r)) is not None]
-            averages = [dataset_average(p, normalise=normalise) for p in paths]
             if not averages:
-                axes[row, 0].text(0.5,
-                                  0.5,
-                                  'no SHAP',
-                                  ha='center',
-                                  va='center',
-                                  transform=axes[row, 0].transAxes)
+                missing_panel(axes[row, 0], 'SHAP')
                 axes[row, 0].set_ylabel(label, fontsize=9, fontweight='bold')
-                for ax in axes[row]:
+                for ax in axes[row, 1:]:
                     ax.set_axis_off()
                 continue
 
@@ -307,12 +295,13 @@ def plot_shap_fold_average_across_models(
             temporal_std: dict[str, np.ndarray] = {}
             feature_series: dict[str, tuple] = {}
             feature_err: dict[str, tuple] = {}
-            for k in _KEYS:
+            for k in keys:
                 heat_arrs = [
                     _pad(a.heatmaps[k], n_frames) for a in averages
                     if a.heatmaps.get(k) is not None
                 ]
-                heat_mean[k] = _nanmean(np.stack(heat_arrs)) if heat_arrs else None
+                heat_mean[k] = _nanmean(
+                    np.stack(heat_arrs)) if heat_arrs else None
 
                 temp_arrs = [
                     _pad(a.temporal[k], n_frames) for a in averages
@@ -326,7 +315,8 @@ def plot_shap_fold_average_across_models(
                     temporal_mean[k] = None
 
                 feat_arrs = [
-                    a.feature[k] for a in averages if a.feature.get(k) is not None
+                    a.feature[k] for a in averages
+                    if a.feature.get(k) is not None
                 ]
                 if feat_arrs:
                     feat_stack = np.stack(feat_arrs)
@@ -337,23 +327,22 @@ def plot_shap_fold_average_across_models(
                 [_pad(a.support, n_frames) for a in averages]),
                                 axis=0)
 
-            _row(
-                axes[row],
-                label,
-                heat_mean,
-                feature_names,
-                n_frames,
-                lambda key, unit=unit, n=len(averages): (
-                    f"{key.replace('_', ' ').capitalize()}  fold mean "
-                    f"({n} folds)  {unit}"),
-                temporal_mean,
-                feature_series,
-                diverging=False,
-                support=support,
-                temporal_title='Temporal importance (mean ± std across folds)',
-                feature_title='Feature importance (mean ± std across folds)',
-                temporal_err=temporal_std,
-                feature_err=feature_err)
+            _row(axes[row],
+                 keys,
+                 label,
+                 heat_mean,
+                 feature_names,
+                 n_frames,
+                 lambda key, unit=unit, n=len(averages):
+                 (f'{series_label(key)}  fold mean ({n} folds)  {unit}'),
+                 temporal_mean,
+                 feature_series,
+                 diverging=False,
+                 support=support,
+                 temporal_title='Temporal importance (mean ± std across folds)',
+                 feature_title='Feature importance (mean ± std across folds)',
+                 temporal_err=temporal_std,
+                 feature_err=feature_err)
 
         fig.suptitle(f'Fold-averaged |SHAP| — {scenario}',
                      fontweight='bold',
@@ -369,8 +358,9 @@ def plot_shap_samples_across_models(
         num_plot_samples: int = 5,
         normalise: bool = True) -> tuple[plt.Figure, ...] | None:
     """One figure per (dataset, sample), rows = experiments sharing that
-    dataset. Signed SHAP, diverging colour scale, only samples present in
-    every experiment's file are plotted."""
+    dataset. Signed SHAP (diverging colour scale), +/- one standard error on
+    the temporal and feature panels. Only samples that are the same sample
+    (same seed) in every experiment's file are plotted."""
     figs = []
     for scenario, records in _group_by_dataset(experiments).items():
         usable = [(r, p) for r in records if (p := _shap_path(r)) is not None]
@@ -379,45 +369,52 @@ def plot_shap_samples_across_models(
                         'skipping SHAP sample plots')
             continue
 
-        common = set(sample_indices(usable[0][1]))
-        for _, path in usable[1:]:
-            common &= set(sample_indices(path))
-        indices = sorted(common)[:num_plot_samples]
-        if not indices:
+        candidates = _common_indices([p for _, p in usable])[:num_plot_samples]
+        if not candidates:
             log.warning(f'{scenario}: no sample indices common to all '
                         'experiments')
             continue
+        per_file = [read_samples(p, candidates) for _, p in usable]
 
-        for sample_idx in indices:
+        for j, sample_idx in enumerate(candidates):
+            row_samples = [samples[j] for samples in per_file]
+            if len({s.seed for s in row_samples}) > 1:
+                log.warning(f'{scenario}: sample {sample_idx} differs across '
+                            'experiments; skipping')
+                continue
+            keys = present_series(row_samples)
             fig, axes = plt.subplots(len(usable),
-                                     _N_COLS,
-                                     figsize=(6 * _N_COLS, 3.6 * len(usable)),
+                                     _n_cols(keys),
+                                     figsize=(6 * _n_cols(keys),
+                                              3.6 * len(usable)),
                                      squeeze=False)
-            lf = death_str = None
-            for row, (record, path) in enumerate(usable):
-                sample = SampleWithSHAP.read_h5(path, sample_idx)
-                lf = sample.landmark_frame
-                death_str = ('censored' if sample.death_frame is None else
-                             f'{sample.death_frame:.0f}')
-                heatmaps, temporal_series, feature_vals = _sample_data(
-                    sample, normalise)
-                feature_series = {
-                    k: (sample.feature_names, v)
-                    for k, v in feature_vals.items() if v is not None
-                }
+            for row, ((record, _), sample) in enumerate(zip(usable,
+                                                            row_samples)):
+                d = sample_data(sample, keys, normalise)
+                names = sample.feature_names
                 _row(axes[row],
+                     keys,
                      _model_label(record, varying_params),
-                     heatmaps,
-                     sample.feature_names,
+                     d.heatmaps,
+                     names,
                      observed_length(sample),
-                     lambda key: f"{key.replace('_', ' ').capitalize()} SHAP",
-                     temporal_series,
-                     feature_series,
-                     diverging=True)
+                     lambda key: f'{series_label(key)} SHAP',
+                     d.temporal,
+                     {
+                         k: (names, v)
+                         for k, v in d.feature.items() if v is not None
+                     },
+                     diverging=True,
+                     temporal_err=d.temporal_err,
+                     feature_err={
+                         k: (names, v)
+                         for k, v in d.feature_err.items()
+                     })
 
+            sample = row_samples[0]
             fig.suptitle(
                 f'SHAP vs config — {scenario}, sample {sample_idx} '
-                f'(lf={lf}, death={death_str})',
+                f'(L={sample.landmark_frame}, event={event_str(sample)})',
                 fontweight='bold',
                 fontsize=12)
             fig.tight_layout(rect=[0, 0, 1, 0.97])

@@ -9,6 +9,7 @@ import numpy as np
 _MAIN = 'Cells'
 _FEATURES = f'{_MAIN}/Phase'
 _CLEAN_FEATURES = f'{_MAIN}/Clean'
+_CONTEXT = f'{_MAIN}/Context'
 
 # Cells/Phase matches real data exactly: per-frame features
 # (num_frames, num_cells) plus these per-cell values, (1, num_cells).
@@ -31,6 +32,14 @@ class SyntheticCells:
     deaths: np.ndarray
     start_frames: np.ndarray
     end_frames: np.ndarray
+    context: dict[str, np.ndarray]
+
+    @property
+    def num_context_frames(self) -> int:
+        """Clean frames stored before frame 0 (Cells/Context)."""
+        if not self.context:
+            return 0
+        return len(next(iter(self.context.values())))
 
     @property
     def num_cells(self) -> int:
@@ -57,13 +66,16 @@ class SyntheticCells:
             clean = f.create_group(_CLEAN_FEATURES)
             for name, arr in self.clean_features.items():
                 clean.create_dataset(name, data=arr, dtype=np.float32)
-
+            context = f.create_group(_CONTEXT)
+            for name, arr in self.context.items():
+                context.create_dataset(name, data=arr, dtype=np.float32)
             main = f[_MAIN]
             for name, arr in zip(
                     _TRUTH,
                 (self.hazard, self.hazard_rates, self.pmfs, self.cifs)):
                 main.create_dataset(name, data=arr, dtype=np.float32)
             main.attrs['num_cells'] = self.num_cells
+            main.attrs['context_frames'] = self.num_context_frames
             main.attrs['scenario'] = json.dumps(scenario)
 
     @classmethod
@@ -84,6 +96,8 @@ class SyntheticCells:
                 deaths=phase['CellDeath'][0],
                 start_frames=phase['First Frame'][0].astype(int),
                 end_frames=phase['Last Frame'][0].astype(int),
+                context={n: f[_CONTEXT][n][:]
+                         for n in f[_CONTEXT]} if _CONTEXT in f else {},
             )
 
 

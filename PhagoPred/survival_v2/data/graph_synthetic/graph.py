@@ -55,10 +55,12 @@ class CausalGraph:
                 death process; cells dying there are rejected, so frame 0 only
                 holds cells that were alive when observation started.
             hazard_from_frame_0: rules targeting Hazard only act from frame 0,
-                and their inputs from before frame 0 count as zero. Hazard is
-                then a function of observed frames only (features still get
-                the full burn-in), so nothing about it is hidden in the
-                pre-observation past. Incompatible with ``death_burn_in``.
+                and their inputs from before frame 0 count as zero, so Hazard
+                is a function of observed frames only (features still get the
+                full burn-in). Pair with a finite-memory Hazard rule
+                (``rule_sets``) and landmarks >= max_lag for a stationary,
+                fully observed hazard.
+                Incompatible with ``death_burn_in``.
         """
         self.features = features
         self.rules = rules

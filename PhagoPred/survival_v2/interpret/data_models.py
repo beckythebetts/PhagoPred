@@ -48,9 +48,7 @@ class SHAPResult:
 class SampleValues:
     features: np.ndarray
     clean_features: np.ndarray | None = None
-    base_noise: np.ndarray | None = None
     context_features: np.ndarray | None = None
-    horizon_hazard: np.ndarray | None = None
 
 
 @dataclass
@@ -62,6 +60,10 @@ class SampleWithSHAP:
     shap_vals: dict[tuple[PredictorEnum, BackgroundEnum],
                     SHAPResult] = field(default_factory=dict)
     seed: int | None = field(default=None, metadata=_h5('attr'))
+    # Columns of feature_vals.context_features: the features plus Hazard
+    # (synthetic only), which the graph needs to roll forward.
+    context_feature_names: list[str] | None = field(default=None,
+                                                    metadata=_h5('attr'))
 
     def __post_init__(self):
         if self.seed is None:
@@ -106,5 +108,9 @@ class SampleWithSHAP:
         if ctx is None or ctx.shape[1] < num_frames:
             raise ValueError(
                 f'sample has fewer than {num_frames} context frames')
-        return ctx[self._feat_idxs(feat_names),
-                   ctx.shape[1] - num_frames:].T  # [C, F]
+        names = self.context_feature_names
+        missing = [n for n in feat_names if n not in names]
+        if missing:
+            raise KeyError(f'features {missing} not in context {names}')
+        idxs = [names.index(n) for n in feat_names]
+        return ctx[idxs, ctx.shape[1] - num_frames:].T  # [C, F]

@@ -12,7 +12,8 @@ from PhagoPred.survival_v2.experiments.run_experiments import run_experiment_sui
 from PhagoPred.survival_v2.experiments.plots.plot_experiments import plot_experiment_results
 # from PhagoPred.survival_v2.interpret import interpret
 # from PhagoPred.survival_v2.interpret.ground_truth_importance import compare_importance, backfill_horizon_hazard
-from PhagoPred.survival_v2.interpret import run_shap, plot_shap
+from PhagoPred.survival_v2.interpret import run_shap
+from PhagoPred.survival_v2.interpret.plots import plot_samples, plot_dataset_average
 
 
 def train():
@@ -45,8 +46,9 @@ def interpret_suite(suite_dir: Path):
     for experient_dir in suite_dir.iterdir():
         # print(experient_dir)
         if experient_dir.is_dir():
-            run_shap(experient_dir, num_samples=100, num_time_segments=10)
-            # plot_shap(experient_dir)
+            run_shap(experient_dir)  # settings: interpret.config.INTERPRETS
+            plot_samples(experient_dir / 'shap.h5',
+                         experient_dir / 'shap_plots')
 
 
 def plot():
