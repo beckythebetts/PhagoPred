@@ -38,6 +38,16 @@ class CNNCfg(ModelCfg):
 
 
 @dataclass
+class LinearCfg(ModelCfg):
+    """Config for the linear baseline (models.linear): a regression on the
+    last ``window`` frames of every feature."""
+    window: int
+    model_type: Literal['CNN', 'LSTM', 'RSF', 'Linear'] = field(
+        default='Linear', init=False)
+    name: str = ''
+
+
+@dataclass
 class RSFCfg(ModelCfg):
     """Config for random forest/random surival forest model"""
     n_estimators: int
@@ -66,6 +76,10 @@ MODELS = {
            fc_layers=[64, 32],
            causal=True,
            name='CNN Medium'),
+    # 200 frames: past the graph scenarios' longest reach (the hazard over
+    # the horizon reads up to 179 frames before the landmark).
+    'Linear':
+    LinearCfg(window=200, name='Linear'),
     'Random Forest':
     RSFCfg(
         n_estimators=100,

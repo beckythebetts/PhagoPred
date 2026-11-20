@@ -8,6 +8,8 @@ from .losses import LOSSES, LossCfg
 from .datasets import DATASETS, FEATURE_COMBOS, get_kfold_dataset, DatasetCfg
 from .training import TRAINING, TrainingCfg
 from .calibration import CALIBRATION, CalibrationCfg
+from PhagoPred.survival_v2.data.graph_synthetic.scenarios import (
+    LINEAR_AR_LEVELS, LINEAR_NOISE_LEVELS)
 
 
 @dataclass
@@ -250,6 +252,7 @@ EXPERIMENT_SUITES = {
         ExperimentCfg(model=[
             MODELS['CNN Medium'],
             MODELS['LSTM Medium'],
+            MODELS['Linear'],
         ],
                       attention=ATTENTION['Last'],
                       loss=LOSSES['BCE'],
@@ -271,6 +274,7 @@ EXPERIMENT_SUITES = {
         ExperimentCfg(model=[
             MODELS['CNN Medium'],
             MODELS['LSTM Medium'],
+            MODELS['Linear'],
         ],
                       attention=ATTENTION['Last'],
                       loss=LOSSES['MSE'],
@@ -280,6 +284,42 @@ EXPERIMENT_SUITES = {
                           DATASETS['Hazard Graph Nonlinear Chain'],
                           DATASETS['Hazard Graph Multiplicative Hazard'],
                           DATASETS['Hazard Graph Threshold Hazard'],
+                      ],
+                      training=TRAINING['Dense'],
+                      feature_combo=['A', 'B', 'C', 'D'],
+                      calibration=None)),
+    # The linear scenario (hazard target) as the feature autocorrelation
+    # varies (scenarios.LINEAR_AR_LEVELS; AR 0: white noise).
+    'Graph Linear AR':
+    generate_experiment_grid(
+        ExperimentCfg(model=[
+            MODELS['CNN Medium'],
+            MODELS['LSTM Medium'],
+            MODELS['Linear'],
+        ],
+                      attention=ATTENTION['Last'],
+                      loss=LOSSES['MSE'],
+                      dataset=[
+                          DATASETS[f'Hazard Graph Linear AR {ar}']
+                          for ar in LINEAR_AR_LEVELS
+                      ],
+                      training=TRAINING['Dense'],
+                      feature_combo=['A', 'B', 'C', 'D'],
+                      calibration=None)),
+    # The linear scenario (hazard target) as the observation noise SD
+    # varies (scenarios.LINEAR_NOISE_LEVELS; feature SD ~3.5).
+    'Graph Linear Noise':
+    generate_experiment_grid(
+        ExperimentCfg(model=[
+            MODELS['CNN Medium'],
+            MODELS['LSTM Medium'],
+            MODELS['Linear'],
+        ],
+                      attention=ATTENTION['Last'],
+                      loss=LOSSES['MSE'],
+                      dataset=[
+                          DATASETS[f'Hazard Graph Linear Noise {sd}']
+                          for sd in LINEAR_NOISE_LEVELS
                       ],
                       training=TRAINING['Dense'],
                       feature_combo=['A', 'B', 'C', 'D'],

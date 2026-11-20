@@ -70,6 +70,7 @@ def fit_var(bg_set: BackgroundSet,
             feature_names: list[str],
             max_lag: int = 100,
             criterion: Literal['aic', 'bic'] = 'aic',
+            prune: bool = True,
             ridge: float = 1e-6) -> VARFit:
     """One global VAR(p), lags 1..p, by pooled OLS over every NaN-free
     (p + 1)-frame window of every background row.
@@ -81,6 +82,11 @@ def fit_var(bg_set: BackgroundSet,
     AIC rather than BIC: with a sharp long lag (B reading A 50 frames back),
     BIC's log(n) penalty on the empty lags in between outweighs it.
 
+    ``prune``: coefficients the data don't support are then set to zero
+    (``_ols``), so a VAR(50) whose only cross-lag is at 50 keeps a sparse
+    precision, and a fill as fast as one with just those lags. ``lags`` is
+    then only the lags with a coefficient left.
+
     The mean is the empirical one, not (I - sum A)^-1 c: near a unit root
     (AR ~0.99, as the presets use) that inverse is close to singular and
     blows up."""
@@ -90,29 +96,52 @@ def fit_var(bg_set: BackgroundSet,
 
     scores = select_order(rows, mean, max_lag, criterion)
     p = int(np.argmin(scores)) + 1
-    fit = _ols(rows, p, ridge)
+    fit = _ols(rows, p, ridge, prune)
     if fit is None:
         raise ValueError(f'not enough NaN-free windows to fit VAR({p})')
     A, intercept, sigma_eps, _ = fit
-    return VARFit(list(feature_names), tuple(range(1, p + 1)), A, intercept,
-                  sigma_eps, mean, scores)
+    keep = [i for i in range(p) if np.any(A[i] != 0)]
+    return VARFit(list(feature_names), tuple(i + 1 for i in keep), A[keep],
+                  intercept, sigma_eps, mean, scores)
 
 
-def _ols(rows: list[np.ndarray], p: int, ridge: float):
-    """OLS (oridnary least squares) of x_t on x_{t-1..t-p} and a constant, over every NaN-free window
-    of p + 1 frames. Returns (A (p, K, K), intercept (K,), sigma_eps (K, K),
-    n windows), or None with too few windows."""
+def _ols(rows: list[np.ndarray], p: int, ridge: float, prune: bool = False):
+    """OLS (ordinary least squares) of x_t on x_{t-1..t-p} and a constant,
+    over every NaN-free window of p + 1 frames. Returns (A (p, K, K),
+    intercept (K,), sigma_eps (K, K), n windows), or None with too few
+    windows.
+
+    ``prune``: drop every lag coefficient with t^2 < log(n), then refit each
+    target's equation on the coefficients it keeps. t^2 < log(n) is BIC's
+    rule for one coefficient (keeping it lowers n log(RSS) by about t^2, and
+    costs log(n)), so this keeps what BIC would, without BIC's all-or-nothing
+    choice between whole lag blocks. The constant is always kept."""
     K = rows[0].shape[1]
     X, Y = _lagged_design(rows, tuple(range(1, p + 1)))
-    if len(X) < K * p + K + 1:
+    n = len(X)
+    if n < K * p + K + 1:
         return None
-    design = np.concatenate([X, np.ones((len(X), 1))], axis=1)
+    design = np.concatenate([X, np.ones((n, 1))], axis=1)
     coef, *_ = np.linalg.lstsq(design, Y, rcond=None)  # (K p + 1, K)
     resid = Y - design @ coef
+    if prune:
+        # Standard errors: var(coef[j, k]) = sigma_k^2 [(X'X)^-1]_jj.
+        dof = n - design.shape[1]
+        sigma2 = (resid**2).sum(0) / dof  # (K,)
+        xtx_inv_diag = np.diag(np.linalg.pinv(design.T @ design))
+        t2 = coef**2 / (xtx_inv_diag[:, None] * sigma2[None])
+        keep = t2 >= np.log(n)
+        keep[-1] = True  # constant
+        coef = np.zeros_like(coef)
+        for k in range(K):  # refit each target on its kept columns
+            cols = np.flatnonzero(keep[:, k])
+            coef[cols, k] = np.linalg.lstsq(design[:, cols], Y[:, k],
+                                            rcond=None)[0]
+        resid = Y - design @ coef
     sigma_eps = np.cov(resid, rowvar=False) + ridge * np.eye(K)
     # coef block for lag l is [source, target]; store [target, source].
     A = np.stack([coef[l * K:(l + 1) * K].T for l in range(p)])
-    return A, coef[-1], sigma_eps, len(X)
+    return A, coef[-1], sigma_eps, n
 
 
 def select_order(rows: list[np.ndarray], mean: np.ndarray, max_lag: int,

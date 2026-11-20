@@ -4,6 +4,7 @@ Includes both deep learning and classical ML models.
 """
 from .lstm_survival import LSTMSurvival
 from .cnn_survival import CNNSurvival
+from .linear import LinearSurvival
 from .base import SurvivalModel
 
 # Classical ML models (scikit-survival based)
@@ -14,6 +15,7 @@ __all__ = [
     # Deep learning models
     'LSTMSurvival',
     'CNNSurvival',
+    'LinearSurvival',
     'SurvivalModel',
     # Classical ML models (scikit-survival)
     'ClassicalSurvivalModel',

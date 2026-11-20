@@ -6,6 +6,9 @@ import numpy as np
 
 from PhagoPred.survival_v2.data.graph_synthetic.scenarios import ScenarioCfg
 from PhagoPred.survival_v2.data.graph_synthetic.dynamics import linearised_precision
+from PhagoPred.survival_v2.data.graph_synthetic.rules import (Add, Const, Div,
+                                                              Expr, Mul, Sub,
+                                                              Var, _vars)
 from ...utils.precision import ObservedPrecision, node_noise, sample_free
 from ..var import VARFit, build_precision, default_burn_in
 from ..data_models import SampleWithSHAP
@@ -62,8 +65,7 @@ class Interventional(BGFill):
                 f'only {len(eligible)} background rows cover '
                 f'{sample.landmark_frame} frames; need {self.num_draws}')
         idxs = self.rng.choice(eligible, self.num_draws, replace=False)
-        self.current_bg_samples = self.bg_set.rows(idxs,
-                                                   sample.landmark_frame,
+        self.current_bg_samples = self.bg_set.rows(idxs, sample.landmark_frame,
                                                    self.rng)
 
     def __call__(self, pinned):
@@ -107,6 +109,7 @@ class Observational(BGFill, ABC):
         CT = len(self.full_base)
         out = np.empty((N, B, CT, self.full_base.shape[1]))  # [N, B, C+T, F]
         out[:] = self.full_base
+        log_w = None
         for n in range(N):
             mask = self._flatten(self._full_mask(pinned[n]))
             free = np.flatnonzero(~mask)
@@ -116,9 +119,19 @@ class Observational(BGFill, ABC):
                                     self._noise)[0]  # (n_free, B)
                 # node f * CT + t -> (frame t, feature f)
                 out[n][:, free % CT, free // CT] = draws.T
+            lw = self._log_weights(out[n])
+            if lw is not None:
+                if log_w is None:
+                    log_w = np.zeros((N, B))
+                log_w[n] = lw
         values = out[:, :, self.c:]
         context = out[:, :, :self.c] if self.c else None
-        return FillResult(values, context)
+        return FillResult(values, context, log_w)
+
+    def _log_weights(self, draws: np.ndarray) -> np.ndarray | None:
+        """Importance log-weights of one coalition's draws [B, C+T, F]
+        (context included), or None when the draws are exact."""
+        return None
 
     def _full_base_vals(self) -> np.ndarray:
 
@@ -194,8 +207,21 @@ class ObservationalGT(Observational):
     trajectory (exact for linear scenarios). The oldest ``max_lag`` context
     frames are pinned to the true past; the rest of the context is free.
 
-    Nonlinear scenarios: the linearisation is only a proposal, and importance
-    weights (FillResult.log_weights) are not implemented yet."""
+    Nonlinear dependence between features (a non-affine rule targeting a
+    feature, e.g. nonlinear_chain's ReLU): the linearised Gaussian is only a
+    proposal q, and each draw x gets the importance weight p(x) / q(x) under
+    the true graph p (``_log_weights``), normalised by ValueFunction.
+
+    Both are joint densities of structural equations x_t = f(parents) + eps_t
+    with eps_t from the feature's noise, so each is a product over equations
+    of the noise density at the residual:
+
+        log w = sum_eqs log p_eps(x_t - f_true(parents))
+                      - log p_eps(x_t - f_lin(parents))
+
+    Constants, and the terms of equations whose nodes are all pinned, are the
+    same for every draw of a coalition and cancel when the weights are
+    normalised. Hazard isn't a filled node: its rules are not included."""
 
     def __init__(self, feature_names, num_draws, n_context,
                  scenario: ScenarioCfg):
@@ -207,12 +233,52 @@ class ObservationalGT(Observational):
                              f'({self.max_lag}): nothing left to pin')
         self.base_context = None
 
+        self._rules = {
+            name: [r for r in self.graph.rules if r.target == name]
+            for name in feature_names
+        }
+        features = {f.name: f for f in self.graph.features}
+        self._noise_dists = {
+            name: features[name].pre_noise
+            for name in feature_names
+        }
+        self.weighted = needs_weights(self.graph, feature_names)
+
+    def _log_weights(self, draws):
+        if not self.weighted:
+            return None
+        B, CT, F = draws.shape
+        x = {name: draws[:, :, i].T for i, name in enumerate(self.feature_names)}
+        # Linearised residuals: the incidence rows are the linearised
+        # equations, ordered feature-major (eq i * CT + t), in deviations
+        # from the linearised mean (which carries the intercepts).
+        flat = draws.transpose(2, 1, 0).reshape(F * CT, B)
+        flat = flat - self.prec.mean_vec[:, None]
+        r_lin = np.asarray(self.prec.incidence @ flat).reshape(F, CT, B)
+        log_w = np.zeros(B)
+        for i, name in enumerate(self.feature_names):
+            # True residuals, with linearised_precision's convention: each
+            # rule only acts from frame rule.max_lag on.
+            pred = np.zeros((CT, B))
+            for rule in self._rules[name]:
+                m = rule.max_lag
+                context = {(nm, lg): x[nm][m - lg:CT - lg]
+                           for nm, lgs in rule.inputs.items() for lg in lgs}
+                pred[m:] += rule.expr(context)
+            r_true = x[name] - pred
+            noise = self._noise_dists[name]
+            log_w += (noise.log_prob(r_true) - noise.log_prob(r_lin[i])).sum(0)
+        return log_w
+
     def set_sample(self, sample):
         self.base_context = sample.ctx_vals(self.feature_names, self.c)
         super().set_sample(sample)
 
     def _precision(self, full_base):
-        signals = {n: full_base[:, i] for i, n in enumerate(self.feature_names)}
+        signals = {
+            n: full_base[:, i]
+            for i, n in enumerate(self.feature_names)
+        }
         return linearised_precision(self.graph, self.feature_names, signals)
 
     def _context_vals(self):
@@ -222,3 +288,31 @@ class ObservationalGT(Observational):
         mask = np.zeros_like(self.base_context, bool)
         mask[:self.max_lag] = True
         return mask
+
+
+def needs_weights(graph, feature_names: list[str]) -> bool:
+    """Whether ObservationalGT's linearised fill is only a proposal (some
+    rule targeting a filled feature is not affine) and needs importance
+    weights. Exact (False) when every feature rule is affine."""
+    return not all(
+        _is_affine(r.expr) for r in graph.rules if r.target in feature_names)
+
+
+def _is_affine(expr: Expr) -> bool:
+    """Whether ``expr`` is affine in its Vars (so its linearisation is exact):
+    built from Vars and constants by +, -, scaling and division by a
+    constant. Anything else containing a Var (ReLU, products of Vars, ...)
+    is not."""
+    if isinstance(expr, (Var, Const)):
+        return True
+    if isinstance(expr, (Add, Sub)):
+        return _is_affine(expr.left) and _is_affine(expr.right)
+    if isinstance(expr, Mul):
+        if not _vars(expr.left):
+            return _is_affine(expr.right)
+        if not _vars(expr.right):
+            return _is_affine(expr.left)
+        return False
+    if isinstance(expr, Div):
+        return not _vars(expr.right) and _is_affine(expr.left)
+    return not _vars(expr)

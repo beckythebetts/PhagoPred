@@ -24,6 +24,9 @@ class BackgroundCfg:
     # scenarios' 50-frame lags).
     var_max_lag: int = 100
     var_criterion: str = 'aic'
+    # Zero the VAR coefficients with t^2 < log(n) and refit (var._ols): keeps
+    # the precision sparse, so a VAR(50) fill isn't ~10x slower.
+    var_prune: bool = True
     var_burn_in: int | None = None
 
 
@@ -31,7 +34,12 @@ class BackgroundCfg:
 class ShapCfg:
     num_temporal_segments: int = 10
     num_draws: int = 512
-    num_groups: int = 16  # num_draws split into groups for standard errors
+    # Draws for importance-weighted fills (OBSERVATIONAL_GT with nonlinear
+    # dependence between features), whose effective sample size is a fraction
+    # of the draws (nonlinear_chain: ~3-70% of 512, lowest for coalitions
+    # with most of the window free).
+    weighted_draws: int = 2048
+    num_groups: int = 16  # draws split into groups for standard errors
     # Coalition budget per game axis ('temporal', 'feature',
     # 'temporal_feature'); None or missing: 2M + 2048 (exact when 2^M - 2 fits).
     # Chosen so coalition-sampling error stays at or below the background

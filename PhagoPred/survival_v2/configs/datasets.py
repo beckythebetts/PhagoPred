@@ -7,6 +7,8 @@ import numpy as np
 import h5py
 
 from PhagoPred.utils.logger import get_logger
+from PhagoPred.survival_v2.data.graph_synthetic.scenarios import (
+    LINEAR_AR_LEVELS, LINEAR_NOISE_LEVELS, linear_level_name)
 
 log = get_logger()
 
@@ -378,6 +380,24 @@ DATASETS = {
             ('multiplicative_hazard', 'Multiplicative Hazard'),
             ('threshold_hazard', 'Threshold Hazard'),
         )
+    },
+    # The linear scenario at each feature AR coefficient and observation noise
+    # level (scenarios.LINEAR_AR_LEVELS / LINEAR_NOISE_LEVELS; directory
+    # names from scenarios.linear_level_name, so the base levels, AR 0.99 and
+    # noise 0, are the 'linear' files). Hazard target only.
+    **{
+        f'Hazard Graph Linear AR {ar}':
+        _graph_binary(linear_level_name(ar=ar),
+                      f'Graph Linear AR {ar} [hazard]',
+                      target='hazard')
+        for ar in LINEAR_AR_LEVELS
+    },
+    **{
+        f'Hazard Graph Linear Noise {sd}':
+        _graph_binary(linear_level_name(obs_noise=sd),
+                      f'Graph Linear Noise {sd} [hazard]',
+                      target='hazard')
+        for sd in LINEAR_NOISE_LEVELS
     },
     # Fully predictable variants (scenarios.FP_CFGS): min_length skips the
     # hazard's ~150-frame start-up ramp.

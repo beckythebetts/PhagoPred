@@ -7,7 +7,7 @@ from pathlib import Path, PurePath
 import numpy as np
 
 from PhagoPred.utils.logger import get_logger
-from .models import LSTMCfg, CNNCfg, RSFCfg, ModelCfg
+from .models import LSTMCfg, CNNCfg, RSFCfg, LinearCfg, ModelCfg
 from .attention import AttentionCfg
 from .losses import SurvivalLossCfg, BinaryLossCfg
 from .datasets import (DATASET_TYPES, DatasetCfg, BinaryDatasetCfg,
@@ -19,7 +19,12 @@ from .experiments import ExperimentCfg
 
 log = get_logger()
 
-MODEL_TYPES = {'LSTM': LSTMCfg, 'CNN': CNNCfg, 'RSF': RSFCfg}
+MODEL_TYPES = {
+    'LSTM': LSTMCfg,
+    'CNN': CNNCfg,
+    'RSF': RSFCfg,
+    'Linear': LinearCfg
+}
 LOSS_TYPES = {'Survival': SurvivalLossCfg, 'Binary': BinaryLossCfg}
 
 

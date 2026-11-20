@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from PhagoPred.survival_v2.configs.models import LSTMCfg, CNNCfg, RSFCfg
+from PhagoPred.survival_v2.configs.models import (LSTMCfg, CNNCfg, RSFCfg,
+                                                  LinearCfg)
 from PhagoPred.survival_v2.configs.experiments import ModelCfg, AttentionCfg
 from .lstm_survival import LSTMSurvival
 from .cnn_survival import CNNSurvival
+from .linear import LinearSurvival
 from .random_forest import RandomSurvivalForestModel
 from .base import SurvivalModel
 from .classical_base import ClassicalSurvivalModel
@@ -42,6 +44,13 @@ def build_model(
             attention_config=attention_config,
             causal=model_config.causal,
         )
+        return model.to(device)
+
+    if isinstance(model_config, LinearCfg):
+        # No attention: reads the last frame (attention_config is unused).
+        model = LinearSurvival(num_features=num_features,
+                               num_bins=num_bins,
+                               window=model_config.window)
         return model.to(device)
 
     if isinstance(model_config, RSFCfg):

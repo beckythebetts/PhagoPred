@@ -179,17 +179,62 @@ def load_scenario(h5_path: Path | str) -> ScenarioCfg | None:
 
 # === PRESETS ===
 
-BASE_CFGS: list[ScenarioCfg] = [
-    ScenarioCfg(
+BASE_OBS_NOISE = 0.0  # observation (post) noise SD of the base scenarios
+
+
+def _cfg(name: str,
+         rules: list[Rule],
+         obs_noise: float = BASE_OBS_NOISE) -> ScenarioCfg:
+    return ScenarioCfg(
         name,
-        rules=rules_func(),
+        rules=rules,
         pre_noise=Noise.gaussian(0.5),
-        post_noise=Noise.gaussian(0.1),
+        post_noise=(Noise.gaussian(obs_noise)
+                    if obs_noise > 0 else Noise.none()),
         missingness=Missingness.none(),
         burn_in=1000,  # features only: Hazard starts at frame 0
         hazard_from_frame_0=True,  # no death burn-in, so no selection
         # before frame 0
-    ) for name, rules_func in RULE_SETS.items()
+    )
+
+
+BASE_CFGS: list[ScenarioCfg] = [
+    _cfg(name, rules_func()) for name, rules_func in RULE_SETS.items()
 ]
 
-ALL_CFGS: list[ScenarioCfg] = BASE_CFGS
+# The linear scenario with each feature's AR(1) coefficient varied. AR 0:
+# white-noise features, no autocorrelation. Feature SD is 0.5 / sqrt(1 - ar^2)
+# (0.5 at AR 0, 3.5 at 0.99); the hazard is calibrated to the same spread at
+# every level. The base scenarios' level (0.99) is ``linear`` itself, so it
+# isn't generated again (see linear_level_name).
+BASE_AR = 0.99  # rule_sets.DEFAULT_AR_COEFF
+LINEAR_AR_LEVELS = (0.0, 0.5, 0.9, 0.99)
+
+# The linear scenario with the observation noise SD varied. Models see the
+# noisy features, the ground truth the clean ones. For scale: feature SD
+# ~3.5. The base level (0) is ``linear`` itself.
+LINEAR_NOISE_LEVELS = (0.0, 0.5, 1.0, 2.0, 4.0, 8.0)
+
+
+def linear_level_name(ar: float = BASE_AR,
+                      obs_noise: float = BASE_OBS_NOISE) -> str:
+    """Scenario (and dataset directory) name of the linear scenario at this
+    AR coefficient and observation noise SD (one varied at a time): the base
+    levels give ``linear``. configs/datasets.py uses the same names."""
+    if ar != BASE_AR:
+        return f'linear_ar{round(ar * 100):02d}'
+    if obs_noise != BASE_OBS_NOISE:
+        return f'linear_noise{round(obs_noise * 10):02d}'
+    return 'linear'
+
+
+AR_CFGS: list[ScenarioCfg] = [
+    _cfg(linear_level_name(ar=ar), RULE_SETS['linear'](ar_coeff=ar))
+    for ar in LINEAR_AR_LEVELS if ar != BASE_AR
+]
+NOISE_CFGS: list[ScenarioCfg] = [
+    _cfg(linear_level_name(obs_noise=sd), RULE_SETS['linear'](),
+         obs_noise=sd) for sd in LINEAR_NOISE_LEVELS if sd != BASE_OBS_NOISE
+]
+
+ALL_CFGS: list[ScenarioCfg] = BASE_CFGS + AR_CFGS + NOISE_CFGS

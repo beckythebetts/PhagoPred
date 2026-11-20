@@ -17,6 +17,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import h5py
+import numpy as np
 
 from PhagoPred.utils.logger import get_logger
 from ..configs import ExperimentCfg, PredictionTarget
@@ -33,7 +34,7 @@ from .utils.io import (SHAPFileMetadata, read_metadata, read_sample,
                        sample_indices, write_metadata, write_sample)
 from .value_func import ValueFunction
 from .value_func.bg_fill import (Interventional, ObservationalGT,
-                                 ObservationalVAR)
+                                 ObservationalVAR, needs_weights)
 from .value_func.predictor import GraphPredictor, ModelPredictor
 from .var import default_burn_in, fit_var
 
@@ -115,9 +116,13 @@ class _Backgrounds:
             self._vars[clean] = fit_var(self.set(clean),
                                         self.players,
                                         bg.var_max_lag,
-                                        criterion=bg.var_criterion)
-            LOG.info(f'VAR (clean={clean}): p={self._vars[clean].p} '
-                     f'({bg.var_criterion}, max {bg.var_max_lag})')
+                                        criterion=bg.var_criterion,
+                                        prune=bg.var_prune)
+            v = self._vars[clean]
+            LOG.info(f'VAR (clean={clean}): p={v.p} ({bg.var_criterion}, '
+                     f'max {bg.var_max_lag}); lags with coefficients '
+                     f'{list(v.lags)}, {int((v.A != 0).sum())} coefficients'
+                     f'{" after pruning" if bg.var_prune else ""}')
         return self._vars[clean]
 
 
@@ -142,19 +147,26 @@ def _fill(bg: BackgroundEnum, players: list[str], shap: ShapCfg,
     if bg == BackgroundEnum.OBSERVATIONAL_GT:
         # All the clean context stored before frame 0 (see generate_datasets).
         n_context = min(2 * scenario.graph.max_lag, scenario.graph.burn_in)
+        if needs_weights(scenario.graph, players):
+            B = shap.weighted_draws
         return ObservationalGT(players, B, n_context, scenario)
     raise ValueError(bg)
 
 
 def _gt_value_functions(scenario, target, players, shap: ShapCfg,
                         backgrounds) -> dict[BackgroundEnum, ValueFunction]:
-    predictor = GraphPredictor(scenario, target, players, shap.num_draws)
-    return {
-        bg: ValueFunction(
-            _fill(bg, players, shap, backgrounds, clean=True,
-                  scenario=scenario), predictor, shap.num_groups)
-        for bg in shap.backgrounds
-    }
+    """One GraphPredictor per number of draws (it draws future noise per
+    background draw), shared by the backgrounds that use it."""
+    predictors = {}
+    vfs = {}
+    for bg in shap.backgrounds:
+        fill = _fill(bg, players, shap, backgrounds, clean=True,
+                     scenario=scenario)
+        B = fill.num_draws
+        if B not in predictors:
+            predictors[B] = GraphPredictor(scenario, target, players, B)
+        vfs[bg] = ValueFunction(fill, predictors[B], shap.num_groups)
+    return vfs
 
 
 def _model_value_functions(model, exp_cfg: ExperimentCfg, players,
@@ -197,8 +209,15 @@ def _explain_all(path: Path, samples: list[SampleWithSHAP],
                          f'x {bg.value}')
                 sample.shap_vals[(predictor, bg)] = explain_sample(
                     sample, vfs[bg], players, predictor, bg, explain_cfg)
-                if vfs[bg].min_ess < 0.1 * vfs[bg].bg_fill.num_draws:
-                    LOG.warning(f'low ESS {vfs[bg].min_ess:.0f}')
+                ess = vfs[bg].min_ess  # inf: unweighted fill
+                if np.isfinite(ess):
+                    B = vfs[bg].bg_fill.num_draws
+                    msg = (f'importance weights: min ESS {ess:.0f}/{B} over '
+                           'coalitions')
+                    if ess < 0.1 * B:
+                        LOG.warning(f'low ESS: {msg}')
+                    else:
+                        LOG.info(msg)
             write_sample(f, sample, i)
 
 

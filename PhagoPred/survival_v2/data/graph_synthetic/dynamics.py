@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from scipy import sparse
+from scipy.sparse.linalg import spsolve
 
 from PhagoPred.survival_v2.utils.precision import ObservedPrecision
 from .graph import CausalGraph
@@ -81,8 +82,13 @@ def linearised_precision(
     base_signals: dict[str, np.ndarray],
     ridge: float = 1e-8,
 ) -> ObservedPrecision:
-    """Gaussian precision over (feature, frame) nodes of ``feature_names`` frames, from the graph's own rules.
-    """
+    """Gaussian over (feature, frame) nodes of ``feature_names`` frames, from
+    the graph's own rules linearised at ``base_signals``.
+
+    Each rule f is replaced by its first-order expansion at the base values
+    x0: f(x) ~ f(x0) + f'(x0) (x - x0) = f'(x0) x + [f(x0) - f'(x0) x0]. The
+    slopes go in the precision; the bracketed intercepts set the mean (zero
+    for linear rules and for ReLU, which pass through the origin)."""
 
     lengths = {len(base_signals[name]) for name in feature_names}
     if len(lengths) != 1:
@@ -94,6 +100,7 @@ def linearised_precision(
     n_obs = len(feature_names) * n_frames
 
     rows, cols, vals, inv_sigma = [], [], [], []
+    offsets = np.zeros(n_obs)  # intercept of each linearised equation
     eq = 0
     for name in feature_names:
         pre_noise = features[name].pre_noise
@@ -121,13 +128,16 @@ def linearised_precision(
                     for nm, lgs in rule.inputs.items()
                     for lg in lgs
                 })
+                offset = float(rule.expr(context))
                 for nm, lgs in rule.inputs.items():
                     for lg in lgs:
                         coef = rule.expr.partial(nm, lg, context)
+                        offset -= coef * context[(nm, lg)]
                         if abs(coef) > 1e-12:
                             rows.append(eq)
                             cols.append(col[nm] + t - lg)
                             vals.append(-float(coef))
+                offsets[eq] += offset
             inv_sigma.append(1.0 / sigma)
             eq += 1
 
@@ -135,4 +145,8 @@ def linearised_precision(
     D_sqrt = sparse.diags(np.asarray(inv_sigma))
     Q = (incidence.T @ D_sqrt @ D_sqrt @ incidence +
          ridge * sparse.eye(n_obs)).tocsc()
-    return ObservedPrecision(n_obs, incidence, D_sqrt, Q, np.zeros(n_obs))
+    # Mean: the noise-free solution of the linearised equations,
+    # incidence @ mean = offsets (one equation per node).
+    mean = (spsolve(incidence, offsets)
+            if np.any(np.abs(offsets) > 1e-12) else np.zeros(n_obs))
+    return ObservedPrecision(n_obs, incidence, D_sqrt, Q, mean)
