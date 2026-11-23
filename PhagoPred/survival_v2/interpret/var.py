@@ -50,6 +50,8 @@ class VARFit:
         First row is coefficients, other rows (identity) just allow the matrix to be applied repatably to get decay rate.
         """
         K, p = len(self.feature_names), self.p
+        if p == 0:  # white noise: no memory
+            return 0.0
         companion = np.zeros((K * p, K * p))
         companion[:K] = np.concatenate([self.coef(l) for l in range(1, p + 1)],
                                        axis=1)
@@ -63,7 +65,9 @@ class VARFit:
 
     @property
     def p(self) -> int:
-        return max(self.lags)
+        """The order; 0 when no lag has a coefficient (pruned to white
+        noise, e.g. features without autocorrelation)."""
+        return max(self.lags, default=0)
 
 
 def fit_var(bg_set: BackgroundSet,
@@ -235,6 +239,8 @@ def default_burn_in(var_fit: VARFit,
     rho = var_fit.companion_radius()
     if rho >= 1.0:
         return max_burn_in
+    if rho == 0.0:  # no memory: the first frame is already stationary
+        return var_fit.p
     decay = int(np.ceil(np.log(tol) / (2 * np.log(rho))))
     return min(max_burn_in, decay + var_fit.p)
 

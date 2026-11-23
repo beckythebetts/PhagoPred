@@ -271,6 +271,10 @@ def _shap_key(shap: ShapCfg) -> ShapCfg:
 def _shared_path(shap_path: Path, target: PredictionTarget) -> Path:
     if target.dataset_type in ('binary', 'hazard'):
         tag = f'{target.dataset_type}_h{target.horizon}'
+        if target.dataset_type == 'hazard':
+            # Hazard samples ignore death (BinaryCellDataset.ignores_death);
+            # older files hold samples selected on survival.
+            tag += '_nodeath'
     else:
         tag = 'survival_' + '-'.join(str(b) for b in (target.bins or ()))
     tag += f'_min{target.min_length}'

@@ -83,6 +83,14 @@ class BinaryCellDataset(CellDataset):
     def is_regression(self) -> bool:
         return self.target == 'hazard'
 
+    @property
+    def ignores_death(self) -> bool:
+        # The Hazard node is defined whether or not the cell died (features
+        # are stored past death), so dropping death avoids selecting on
+        # survival: the training, SHAP and background windows are then draws
+        # from the unconditional feature distribution.
+        return self.is_regression
+
     def _hazard_values(self, file_idx: int) -> np.ndarray:
         """scale * Hazard for every frame and cell of one file,
         [num_frames, num_cells]."""

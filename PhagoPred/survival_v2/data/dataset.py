@@ -221,6 +221,8 @@ class CellDataset(torch.utils.data.Dataset, ABC):
                                'has no Cells/Phase/CellDeath')
             else:  # real data without death labels: all censored
                 cell_deaths = np.full(num_cells, np.nan)
+            if self.ignores_death:
+                cell_deaths = np.full(num_cells, np.nan)
 
             if 'First Frame' in phase and 'Last Frame' in phase:
                 start, last = self._get_features_np(
@@ -290,6 +292,13 @@ class CellDataset(torch.utils.data.Dataset, ABC):
     @abstractmethod
     def horizon(self) -> int | None:
         ...
+
+    @property
+    def ignores_death(self) -> bool:
+        """True if the task's label doesn't involve death, so cells are
+        treated as never dying: every cell is followed to its last frame,
+        with no selection on survival."""
+        return False
 
     @staticmethod
     @abstractmethod
