@@ -15,8 +15,8 @@ log = get_logger()
 
 @dataclass
 class PredictionTarget:
-    # 'hazard': regression of the mean (calibrated-scale) Hazard node value
-    # over the horizon (see BinaryCellDataset).
+    # 'hazard': regression of the (calibrated-scale) Hazard node value at the
+    # landmark (horizon 0; see BinaryCellDataset).
     dataset_type: Literal['survival', 'binary', 'hazard']
     min_length: int
     horizon: int | None = None
@@ -80,8 +80,8 @@ class BinaryDatasetCfg(DatasetCfg):
     name: str = ''
     class_names: list[str] = field(
         default_factory=lambda: ['No Event', 'Event'])
-    # 'event': death in the horizon (classification); 'hazard': mean Hazard
-    # node value over the horizon (regression, synthetic data only).
+    # 'event': death in the horizon (classification); 'hazard': Hazard node
+    # value at the landmark, with horizon 0 (regression, synthetic data only).
     target: str = 'event'
 
     @property
@@ -213,7 +213,9 @@ def _graph_binary(scenario: str,
     """Binary config for a graph-synthetic scenario. ``generate_datasets``
     writes ``<scenario>/<scenario>_00.h5 ...``; the last shard is held out
     for SHAP (never trained, validated or calibrated on), the two before it
-    are cal and val, the rest train."""
+    are cal and val, the rest train. The event target is death in the next
+    25 frames; the hazard target is the Hazard value at the landmark frame
+    (horizon 0)."""
     root = Path('PhagoPred/Datasets/graph_synthetic') / scenario
     files = [str(root / f'{scenario}_{i:02d}.h5') for i in range(num_files)]
     return BinaryDatasetCfg(
@@ -222,7 +224,7 @@ def _graph_binary(scenario: str,
         calibrate_paths=[files[-2]],
         shap_paths=[files[-1]],
         min_length=min_length,
-        prediction_horizon=25,
+        prediction_horizon=0 if target == 'hazard' else 25,
         name=name,
         target=target,
     )
@@ -368,8 +370,8 @@ DATASETS = {
     _graph_binary('multiplicative_hazard', 'Graph Multiplicative Hazard'),
     'Binary Graph Threshold Hazard':
     _graph_binary('threshold_hazard', 'Graph Threshold Hazard'),
-    # The same scenarios, regressing the mean Hazard node value over the
-    # horizon (the latent node behind the event label) instead of the event.
+    # The same scenarios, regressing the Hazard node value at the landmark
+    # (the latent node behind the event label) instead of the event.
     **{
         f'Hazard Graph {label}':
         _graph_binary(scenario, f'Graph {label} [hazard]', target='hazard')

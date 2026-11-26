@@ -99,10 +99,12 @@ class GraphPredictor(Predictor):
                                 return_full=False)
 
         if self.target.dataset_type == 'hazard':
-            # Mean scale * Hazard over frames L + 1 .. L + H (future index i
-            # is frame L + i), as BinaryCellDataset's 'hazard' label.
+            # As BinaryCellDataset's 'hazard' label (future index i is frame
+            # L + i): scale * Hazard at L (horizon 0), or its mean over
+            # L + 1 .. L + H.
             scale = self.scenario.hazard_func.params.get('scale', 1.0)
-            z = future['Hazard'][1:self.horizon + 1]
+            z = (future['Hazard'][:1] if self.horizon == 0 else
+                 future['Hazard'][1:self.horizon + 1])
             return (scale * z).mean(axis=0).reshape(N, B)
         h = self.scenario.hazard_func(future['Hazard'])
         h[max(self.scenario.num_frames - self.sample.landmark_frame, 0):] = 0.0

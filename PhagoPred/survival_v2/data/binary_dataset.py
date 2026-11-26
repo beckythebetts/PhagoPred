@@ -55,7 +55,8 @@ class BinaryCellDataset(CellDataset):
     ``target`` sets the label:
 
     * 'event': death in the horizon (0/1), a binary classification target.
-    * 'hazard': the mean value of the Hazard node over the horizon frames,
+    * 'hazard': the value of the Hazard node at the landmark frame L (with
+      ``prediction_horizon=0``; with H > 0, its mean over L + 1 .. L + H),
       times the scenario's calibrated ``scale`` (synthetic data only), a
       regression target. It is the latent node behind the event label, read
       off without the death process: noiseless, and on the same scale in
@@ -139,15 +140,19 @@ class BinaryCellDataset(CellDataset):
         """
         landmarks = np.asarray(landmarks, dtype=int)
         if self.is_regression:
-            # Mean (scaled) Hazard over frames L + 1 .. L + H, the frames
-            # whose rates make up the event label. Deterministic given the window,
-            # so it is also its own true value.
+            # (Scaled) Hazard at frame L (horizon 0, the graph configs), or
+            # its mean over L + 1 .. L + H (horizon H > 0, suites trained
+            # before 26/11/2026). Deterministic given the window (every lag
+            # >= 1, or > H), so it is also its own true value.
             meta = self.cell_metadata
             z = self._hazard_values(meta.file_idxs[idx])[:,
                                                          meta.local_cell_idxs[idx]]
-            frames = landmarks[:, None] + np.arange(1,
-                                                    self.prediction_horizon + 1)
-            value = z[frames].mean(axis=1).astype(np.float32)
+            if self.prediction_horizon == 0:
+                value = z[landmarks].astype(np.float32)
+            else:
+                frames = landmarks[:, None] + np.arange(
+                    1, self.prediction_horizon + 1)
+                value = z[frames].mean(axis=1).astype(np.float32)
             return {'event': value, 'event_probability': value}
         time_to_event = float(self.cell_metadata.death_frames[idx]) - landmarks
         # NaN (censored) compares False, so censored cells get 0.

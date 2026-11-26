@@ -76,8 +76,8 @@ MODELS = {
            fc_layers=[64, 32],
            causal=True,
            name='CNN Medium'),
-    # 200 frames: past the graph scenarios' longest reach (the hazard over
-    # the horizon reads up to 179 frames before the landmark).
+    # 200 frames: past the graph scenarios' longest reach (the hazard at the
+    # landmark reads up to 179 frames before it).
     'Linear':
     LinearCfg(window=200, name='Linear'),
     'Random Forest':
